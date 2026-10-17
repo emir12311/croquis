@@ -1,0 +1,352 @@
+import { isBreadboard, partByKind, type PartKind } from './parts'
+
+/**
+ * A tiny electrical model for the circuit.
+ *
+ * We don't simulate analogue electronics — just connectivity. Pins joined by a
+ * wire (or through a resistor, or through a *pressed* button) form a "net". A
+ * net is HIGH if something drives it high (an AVR pin that's high, or 5V) and
+ * LOW if something pulls it down (GND, or an AVR pin that's low). That's enough
+ * to light an LED and to read a button — which is all v0.1 needs.
+ */
+
+import { BREADBOARD_PITCH } from './breadboard'
+
+export type PinRef = { instanceId: string; pin: string }
+
+/**
+ * How close a leg has to be to a hole to count as inserted. Slightly under half
+ * a hole's pitch, so a leg can only join the hole it's actually standing in.
+ */
+const HOLE_REACH = BREADBOARD_PITCH * 0.45
+
+/** Uno pin name → AVR port/pin. */
+const UNO_DIGITAL: Record<string, [string, number]> = {
+  '0': ['D', 0],
+  '1': ['D', 1],
+  '2': ['D', 2],
+  '3': ['D', 3],
+  '4': ['D', 4],
+  '5': ['D', 5],
+  '6': ['D', 6],
+  '7': ['D', 7],
+  '8': ['B', 0],
+  '9': ['B', 1],
+  '10': ['B', 2],
+  '11': ['B', 3],
+  '12': ['B', 4],
+  '13': ['B', 5],
+  A0: ['C', 0],
+  A1: ['C', 1],
+  A2: ['C', 2],
+  A3: ['C', 3],
+  A4: ['C', 4],
+  A5: ['C', 5],
+}
+
+export type UnoPin =
+  | { kind: 'mcu'; port: string; pin: number }
+  | { kind: 'rail'; rail: 'GND' | 'VCC' }
+  | null
+
+export function unoPin(pin: string): UnoPin {
+  const digital = UNO_DIGITAL[pin]
+  if (digital) return { kind: 'mcu', port: digital[0], pin: digital[1] }
+  if (pin.startsWith('GND')) return { kind: 'rail', rail: 'GND' }
+  if (pin === '5V' || pin === '3.3V' || pin === 'VIN') return { kind: 'rail', rail: 'VCC' }
+  return null
+}
+
+/**
+ * Pins that are electrically one and the same point on a part. The part's own
+ * catalogue entry says how — so a new component brings its own electrical shape
+ * and this file doesn't grow a branch for it.
+ */
+function nodeName(kind: PartKind, pin: string): string {
+  return partByKind(kind).pinNode?.(pin) ?? pin
+}
+
+export interface EvalPart {
+  id: string
+  kind: PartKind
+  /**
+   * The part's pins in canvas space, when the caller knows them. Needed so a leg
+   * resting in a breadboard hole can be seen to be in it.
+   */
+  pins?: { name: string; x: number; y: number }[]
+  /** The part's own attributes (a resistor's value, an LED's colour). */
+  attrs?: Record<string, string>
+}
+
+/** How hard an LED is being driven. `burnt` means over-driven *right now*. */
+export type LedState = 'off' | 'dim' | 'lit' | 'burnt'
+
+export interface EvalWire {
+  a: PinRef
+  b: PinRef
+}
+
+export interface CircuitEval {
+  /** LED instance id → how hard it's driven. */
+  leds: Record<string, LedState>
+  /** Buttons pulled this pin to a level (because a button connects it to a rail). */
+  drives: { port: string; pin: number; high: boolean }[]
+  /** What's wrong with a part — for the properties strip and the canvas badge. */
+  warnings: Record<string, string>
+}
+
+// A small, honest model rather than a real circuit solver: enough that a
+// resistor *does* something (it's in series with the LED, so it sets the
+// current) and that a missing one shows up the way it does on a bench.
+/** The Uno runs at 5V, and an AVR output pin has a few tens of ohms of its own. */
+const SUPPLY_V = 5
+const PIN_OHMS = 25
+/** Typical forward voltages, so an LED's colour means something electrically. */
+const LED_FORWARD_V: Record<string, number> = {
+  red: 1.8,
+  orange: 2,
+  yellow: 2.1,
+  green: 2.2,
+  blue: 3,
+  white: 3,
+  purple: 3,
+}
+/** Over-driven (a 5mm LED is rated around 20–25mA), comfortably lit, barely on. */
+const LED_BURN_MA = 25
+const LED_LIT_MA = 3
+const LED_DIM_MA = 0.2
+
+/** Union-find over pin keys. */
+function makeUnionFind() {
+  const parent = new Map<string, string>()
+  const find = (k: string): string => {
+    let root = k
+    while (parent.has(root) && parent.get(root) !== root) root = parent.get(root) as string
+    // path-compress
+    let cur = k
+    while (cur !== root) {
+      const next = parent.get(cur) as string
+      parent.set(cur, root)
+      cur = next
+    }
+    return root
+  }
+  return {
+    find,
+    union(a: string, b: string) {
+      if (!parent.has(a)) parent.set(a, a)
+      if (!parent.has(b)) parent.set(b, b)
+      const ra = find(a)
+      const rb = find(b)
+      if (ra !== rb) parent.set(ra, rb)
+    },
+  }
+}
+
+export function evaluateCircuit(
+  parts: EvalPart[],
+  wires: EvalWire[],
+  pressed: Record<string, boolean>,
+  avr: Record<string, boolean>,
+): CircuitEval {
+  const kindById = new Map(parts.map((p) => [p.id, p.kind]))
+  const key = (ref: PinRef) => {
+    const kind = kindById.get(ref.instanceId) ?? 'led'
+    return `${ref.instanceId}:${nodeName(kind, ref.pin)}`
+  }
+
+  const uf = makeUnionFind()
+
+  // Current can flow along a wire, or through a closed button. A resistor is NOT
+  // a wire: its two legs stay separate nets and it becomes a resistive edge
+  // below. That single change is what gives it a job.
+  for (const w of wires) uf.union(key(w.a), key(w.b))
+  for (const part of parts) {
+    if (part.kind === 'pushbutton' && pressed[part.id]) {
+      uf.union(`${part.id}:1`, `${part.id}:2`)
+    }
+  }
+
+  // A leg standing in a breadboard hole is connected — that's the whole point of
+  // a breadboard, and it needs no wire. Any pin within a hair of a hole joins
+  // that hole's net (which already carries the rest of its strip).
+  const boards = parts.filter((p) => isBreadboard(p.kind) && p.pins?.length)
+  if (boards.length) {
+    const reach = HOLE_REACH
+    const reachSq = reach * reach
+    for (const part of parts) {
+      if (isBreadboard(part.kind) || !part.pins?.length) continue
+      for (const pin of part.pins) {
+        let hit: { key: string; d: number } | null = null
+        for (const board of boards) {
+          for (const hole of board.pins ?? []) {
+            // Reject on one axis first, then compare squared distances. This runs
+            // per pin per hole on every frame of a drag (830 holes × every pin),
+            // and Math.hypot here measured at ~2ms a frame.
+            const dx = hole.x - pin.x
+            if (dx < -reach || dx > reach) continue
+            const dy = hole.y - pin.y
+            if (dy < -reach || dy > reach) continue
+            const d = dx * dx + dy * dy
+            if (d <= reachSq && (!hit || d < hit.d)) {
+              hit = { key: `${board.id}:${nodeName('breadboard', hole.name)}`, d }
+            }
+          }
+        }
+        if (hit) uf.union(`${part.id}:${nodeName(part.kind, pin.name)}`, hit.key)
+      }
+    }
+  }
+
+  // A resistor is an edge between two nets with a resistance, not a wire. Walking
+  // these edges is how we find how much sits in series with an LED.
+  const resistorEdges = new Map<string, { to: string; ohms: number }[]>()
+  const addEdge = (from: string, to: string, ohms: number) => {
+    const list = resistorEdges.get(from) ?? []
+    list.push({ to, ohms })
+    resistorEdges.set(from, list)
+  }
+  for (const part of parts) {
+    if (part.kind !== 'resistor') continue
+    const ohms = Number(part.attrs?.value ?? 220)
+    if (!Number.isFinite(ohms) || ohms <= 0) continue
+    const a = uf.find(`${part.id}:1`)
+    const b = uf.find(`${part.id}:2`)
+    addEdge(a, b, ohms)
+    addEdge(b, a, ohms)
+  }
+
+  /**
+   * The resistance in series between one net and any of `targets`, following
+   * resistor edges only — an LED is a load, not a conductor. Fewest hops wins,
+   * which is exact for the series chains people actually build. Null: no path.
+   */
+  function resistanceTo(from: string, targets: Set<string>): number | null {
+    const seen = new Map<string, { prev: string; ohms: number } | null>([[from, null]])
+    const queue: string[] = [from]
+    for (let i = 0; i < queue.length; i++) {
+      const net = queue[i]!
+      if (targets.has(net)) {
+        let ohms = 0
+        let step = seen.get(net)
+        while (step) {
+          ohms += step.ohms
+          step = seen.get(step.prev)
+        }
+        return ohms
+      }
+      for (const edge of resistorEdges.get(net) ?? []) {
+        if (seen.has(edge.to)) continue
+        seen.set(edge.to, { prev: net, ohms: edge.ohms })
+        queue.push(edge.to)
+      }
+    }
+    return null
+  }
+
+  // What does each net carry?
+  const vcc = new Set<string>()
+  const gnd = new Set<string>()
+  const mcuHigh = new Set<string>()
+  const mcuLow = new Set<string>()
+  const mcuPinOf = new Map<string, { port: string; pin: number }>()
+
+  for (const part of parts) {
+    if (part.kind !== 'uno') continue
+    for (const pin of Object.keys(UNO_DIGITAL)) {
+      const info = unoPin(pin)
+      if (!info || info.kind !== 'mcu') continue
+      const root = uf.find(`${part.id}:${nodeName('uno', pin)}`)
+      const high = avr[`${info.port}${info.pin}`] === true
+      ;(high ? mcuHigh : mcuLow).add(root)
+      mcuPinOf.set(root + `/${info.port}${info.pin}`, { port: info.port, pin: info.pin })
+      if (pin.startsWith('A') || pin === '5V') continue
+    }
+  }
+  // Power rails: any Uno pin named GND / 5V that's actually wired into a net.
+  // (We join them as they appear in wires.)
+  for (const w of wires) {
+    for (const ref of [w.a, w.b]) {
+      if (kindById.get(ref.instanceId) !== 'uno') continue
+      const info = unoPin(ref.pin)
+      if (!info || info.kind !== 'rail') continue
+      const root = uf.find(key(ref))
+      if (info.rail === 'VCC') vcc.add(root)
+      else gnd.add(root)
+    }
+  }
+
+  const netHigh = (root: string) => vcc.has(root) || mcuHigh.has(root)
+  const netLow = (root: string) => gnd.has(root) || mcuLow.has(root)
+
+  const highNets = new Set([...vcc, ...mcuHigh])
+  const lowNets = new Set([...gnd, ...mcuLow])
+
+  // LEDs: how much current actually flows. A resistor in series sets it, so this
+  // is where a resistor stops being decoration — and where a missing one shows.
+  const leds: Record<string, LedState> = {}
+  const warnings: Record<string, string> = {}
+  for (const part of parts) {
+    if (part.kind !== 'led') continue
+    const a = uf.find(`${part.id}:A`)
+    const c = uf.find(`${part.id}:C`)
+    const supply = resistanceTo(a, highNets)
+    const back = resistanceTo(c, lowNets)
+    if (supply === null || back === null) {
+      leds[part.id] = 'off'
+      // No path either way — but the *reverse* works, so it's in backwards.
+      if (
+        supply === null &&
+        back === null &&
+        resistanceTo(a, lowNets) !== null &&
+        resistanceTo(c, highNets) !== null
+      ) {
+        warnings[part.id] = 'Wired the wrong way round — swap its legs.'
+      }
+      continue
+    }
+    const ohms = PIN_OHMS + supply + back
+    const forwardV = LED_FORWARD_V[part.attrs?.color ?? ''] ?? 2
+    const mA = ((SUPPLY_V - forwardV) / ohms) * 1000
+    if (mA >= LED_BURN_MA) {
+      leds[part.id] = 'burnt'
+      warnings[part.id] = `Over-driven — ${Math.round(mA)} mA with nothing to limit it. Put a resistor in series.`
+    } else {
+      leds[part.id] = mA >= LED_LIT_MA ? 'lit' : mA >= LED_DIM_MA ? 'dim' : 'off'
+    }
+  }
+
+  // Buttons: whichever side reaches an MCU pin drives it. Pressed, the switch is a
+  // short to whichever rail it reaches — GND pulls the pin low, +5V pulls it high.
+  // Released, it's an open circuit, so the pin's level is whatever else holds it:
+  // a pull-down resistor means low, otherwise the sketch's pull-up means high.
+  // (simavr has no "release", so we drive the level it would settle at.)
+  const drives: CircuitEval['drives'] = []
+  for (const part of parts) {
+    if (part.kind !== 'pushbutton') continue
+    const roots: Record<string, string> = { '1': uf.find(`${part.id}:1`), '2': uf.find(`${part.id}:2`) }
+    // When pressed, both sides are one net — don't drive the same pin twice.
+    const sides = roots['1'] === roots['2'] ? (['1'] as const) : (['1', '2'] as const)
+    for (const side of sides) {
+      const other = side === '1' ? '2' : '1'
+      for (const [label, pins] of mcuPinOf) {
+        if (!label.startsWith(roots[side] + '/')) continue
+        // Pressed, the switch is a short to whichever rail the other side reaches:
+        // GND pulls the pin low, +5V pulls it high, and a side reaching no rail at all
+        // leaves the pin to its pull-up, exactly as when released.
+        //
+        // Deliberately a question about the *rail*, not netHigh(roots[other]). Pressing
+        // makes the button's two sides one net, so that net contains the MCU pin as
+        // well as the rail — and netHigh() would let the pin's own driven level answer
+        // for itself. It latched high: a pressed button computed "drive high" forever
+        // and never pulled anything low.
+        const high = pressed[part.id]
+          ? !gnd.has(roots[other])
+          : resistanceTo(roots[side], gnd) === null
+        drives.push({ port: pins.port, pin: pins.pin, high })
+      }
+    }
+  }
+
+  return { leds, drives, warnings }
+}

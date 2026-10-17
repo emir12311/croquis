@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#1A1A1C"/>
+  <!-- An orthogonal trace with two nodes — the whole project in one mark. -->
+  <path d="M248 384 H616 V640 H776" fill="none" stroke="#D9A441" stroke-width="60"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="248" cy="384" r="86" fill="#1A1A1C" stroke="#D9A441" stroke-width="60"/>
+  <circle cx="776" cy="640" r="70" fill="#D9A441"/>
+</svg>

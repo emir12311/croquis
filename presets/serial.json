@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Button + serial",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "b1",
+      "type": "wokwi-pushbutton",
+      "left": 450,
+      "top": 220,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    [
+      "uno:2",
+      "b1:1.l"
+    ],
+    [
+      "b1:2.l",
+      "uno:GND.3"
+    ]
+  ],
+  "sketch": "// Serial \u2014 a pushbutton on pin 2, reporting every change to the serial monitor.\n//\n// The delay is a debounce. A real switch does not change level cleanly: it\n// chatters for about a millisecond, and without this the same press would report\n// several times. Turn on \"Switch bounce\" in the Run menu, then delete the\n// millis() condition below and Run again to see exactly what that means.\n\nconst int BUTTON = 2;\n\nint last = HIGH;\nunsigned long lastChange = 0;\n\nvoid setup() {\n  pinMode(BUTTON, INPUT_PULLUP);\n  Serial.begin(9600);\n  Serial.println(\"ready\");\n}\n\nvoid loop() {\n  int now = digitalRead(BUTTON);\n  if (now != last && millis() - lastChange >= 5) {\n    last = now;\n    lastChange = millis();\n    Serial.println(now == LOW ? \"pressed\" : \"released\");\n  }\n}\n"
+}

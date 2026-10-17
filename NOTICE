@@ -1,0 +1,58 @@
+Croquis
+Copyright (C) 2026 The Croquis contributors
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU Affero General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later version.
+See LICENSE for the full text.
+
+Croquis is under the AGPL rather than the GPL for one specific reason: the GPL lets
+someone host a modified Croquis as a service and never publish their changes. The AGPL's
+section 13 closes that hole, and running it on your own machine costs you nothing.
+
+It is AGPL-3.0 rather than something more permissive because it links simavr, which is
+AGPL-3.0, and the two licences interlock by design. AGPL-3.0 section 13 grants permission
+to link a GPL work with an AGPL one into a single combined work, with the AGPL's network
+condition applying to the combination. So simavr remains GPL-3.0, and this work as a
+whole is AGPL-3.0.
+
+
+Bundled or linked third-party material
+--------------------------------------
+
+simavr — GPL-3.0
+    The AVR instruction-level simulator the sketch actually runs on. Linked into
+    the binary, and the reason the licence above is what it is.
+    https://github.com/buserror/simavr
+
+@wokwi/elements — MIT
+    Draws the components: the Uno, the LED, the resistor, the pushbutton.
+    https://github.com/wokwi/wokwi-elements
+
+CodeMirror 6 — MIT
+    The sketch editor.
+    https://github.com/codemirror/dev
+
+IBM Plex Mono and IBM Plex Sans — SIL Open Font License 1.1
+    Bundled with the app rather than fetched from a font CDN, so that nothing here
+    reaches the network.
+    https://github.com/IBM/plex
+
+Tauri — MIT or Apache-2.0
+    The desktop shell.
+    https://github.com/tauri-apps/tauri
+
+Arduino AVR core 1.8.6 — LGPL-2.1
+    Not shipped in this repository; obtained into .toolchain/ at build time and used
+    by avr-gcc to compile your sketch. Your firmware therefore includes Arduino's
+    core, under its own terms.
+    https://github.com/arduino/ArduinoCore-avr
+
+
+Not borrowed
+------------
+
+The breadboard is generated from a spec in src/lib/breadboard.ts rather than taken
+from anywhere. The detailed third-party breadboard artwork that exists (Fritzing) is
+CC-BY-SA, which cannot be baked into an AGPL-3.0 binary, so the drawing and the pin map
+are built from one grid spec instead — which also means the two cannot drift apart.

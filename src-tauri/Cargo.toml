@@ -1,0 +1,23 @@
+[package]
+name = "croquis"
+version = "0.1.0"
+description = "Local-first Arduino circuit simulator"
+authors = ["Mehmet Emir Gündağ"]
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[lib]
+# Tauri v2 puts the app entry point in a lib so mobile targets can reuse it.
+name = "croquis_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+bindgen = "0.70"
+cc = "1"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
