@@ -1,0 +1,41 @@
+# Maintainer: the Croquis contributors
+pkgname=croquis
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Local-first Arduino circuit simulator: build a circuit, write a sketch, run a real AVR core'
+arch=('x86_64')
+url='https://github.com/emir12311/croquis'
+license=('AGPL-3.0-or-later')
+depends=('webkit2gtk-4.1' 'gtk3' 'libelf' 'zlib')
+makedepends=('rust' 'cargo' 'nodejs' 'npm' 'git' 'binutils' 'libelf')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+# The tarball GitHub generates for a tag is not byte-stable, so there is nothing honest to
+# pin here. If this ever matters, publish the source archive as a release asset instead and
+# sum that.
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+
+  # The toolchain ships inside the package, so it has to exist at build time. About 36 MB of
+  # download and a minute of compiling simavr.
+  ./scripts/setup-toolchain.sh
+  ./scripts/build-toolchain-dist.sh
+
+  npm ci --no-audit --no-fund
+  # Only the deb bundle: its payload is the filesystem layout we package below, and it already
+  # carries the trimmed toolchain, the desktop entry and the icons.
+  npm run tauri build -- --bundles deb
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  local deb
+  deb=$(ls src-tauri/target/release/bundle/deb/*.deb)
+  ar p "$deb" data.tar.gz | tar -xzf - -C "$pkgdir"
+
+  # Arch convention: the licence belongs in the package, not only in the project.
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+}

@@ -1,0 +1,126 @@
+name: release
+
+# Builds the Linux packages on a clean machine and attaches them to a draft release.
+#
+# Two reasons this exists rather than building locally: an AppImage needs a machine where
+# linuxdeploy behaves, and the maintainer's upload speed makes a 50 MB release painful.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: # run it by hand from the Actions tab
+
+# Attaching files to a release is a write to the repository, and the default token is
+# read-only. Without this the build succeeds and then fails on the last step with
+# "Resource not accessible by integration".
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04 # the first LTS with webkit2gtk-4.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf \
+            build-essential curl wget file libssl-dev libelf-dev zlib1g-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # simavr, avr-gcc and the Arduino core: about 36 MB of download and a minute of
+      # compiling, and the reason a packaged build can compile a sketch offline.
+      - name: toolchain
+        run: ./scripts/setup-toolchain.sh
+
+      # Only what the app uses at runtime, which is what gets shipped inside the package.
+      - name: trim the toolchain for shipping
+        run: ./scripts/build-toolchain-dist.sh
+
+      - run: npm ci
+
+      # deb and rpm only. Tauri's AppImage bundler dies inside linuxdeploy with no output,
+      # on this machine and on a clean runner alike, so it is not allowed to block a release
+      # that otherwise works. scripts/make-appimage.sh builds one from the deb afterwards.
+      - name: build packages
+        run: npm run tauri build -- --bundles deb,rpm
+
+      # Prove the package can do its job before it is offered to anyone: compile the
+      # shipped preset sketches using only the toolchain inside the .deb.
+      # Compile *and link* a sketch that actually uses the core — delay() pulls in the timer
+      # ISR from wiring.c and WInterrupts.c. The earlier guard compiled a toy sketch to an
+      # object and stopped, so it passed while a real package could not build anything.
+      - name: the package builds a sketch
+        run: |
+          mkdir -p /tmp/installed
+          ar p src-tauri/target/release/bundle/deb/*.deb data.tar.gz | tar -xzf - -C /tmp/installed
+          TC=/tmp/installed/usr/lib/Croquis/toolchain
+          test -x "$TC/avr/bin/avr-g++"
+          printf '#include <Arduino.h>\nvoid setup(){pinMode(13,OUTPUT);}\nvoid loop(){digitalWrite(13,HIGH);delay(500);digitalWrite(13,LOW);delay(500);}\n' > /tmp/sk.cpp
+          "$TC/avr/bin/avr-g++" -mmcu=atmega328p -DF_CPU=16000000L -DARDUINO=10806 -Os \
+            -I"$TC/ArduinoCore-avr-1.8.6/cores/arduino" \
+            -I"$TC/ArduinoCore-avr-1.8.6/variants/standard" \
+            -c /tmp/sk.cpp -o /tmp/sk.o
+          # The shipped cache has to be complete: a packaged toolchain is read-only, so anything
+          # missing here can only be compiled at run time, where it cannot be written.
+          missing=0
+          for src in "$TC"/ArduinoCore-avr-1.8.6/cores/arduino/*.c \
+                     "$TC"/ArduinoCore-avr-1.8.6/cores/arduino/*.cpp \
+                     "$TC"/ArduinoCore-avr-1.8.6/cores/arduino/*.S; do
+            [ -e "$src" ] || continue
+            # hooks.c cannot be compiled by this toolchain; yield.c.o stands in for it.
+            case "$(basename "$src")" in hooks.c) continue ;; esac
+            [ -f "$TC/core-cache/$(basename "$src").o" ] || { echo "not cached: $(basename "$src")"; missing=1; }
+          done
+          [ -f "$TC/core-cache/yield.c.o" ] || { echo "yield.c.o missing — delay() will not link"; missing=1; }
+          [ "$missing" -eq 0 ] || { echo "the shipped core-cache is incomplete"; exit 1; }
+          "$TC/avr/bin/avr-gcc" -mmcu=atmega328p /tmp/sk.o "$TC"/core-cache/*.o -o /tmp/sk.elf -lm
+          "$TC/avr/bin/avr-objcopy" -O ihex -R .eeprom /tmp/sk.elf /tmp/sk.hex
+          test -s /tmp/sk.hex
+          echo "the packaged toolchain builds firmware: $(wc -c < /tmp/sk.hex) bytes of hex"
+
+      # Tauri's bundler cannot make one, so build it from the .deb we just proved works.
+      - name: AppImage from the .deb
+        run: ./scripts/make-appimage.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: croquis-linux
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: warn # the AppImage may fail; the others still matter
+
+      - name: attach to a draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          body: |
+            Offline circuit simulator: build an Arduino circuit on a canvas, write a sketch, and run
+            it on a real AVR core. No server, no account, no network.
+
+            - **AppImage** — recommended. One file, no root, works on any distribution. Adds itself
+              to your application menu on first launch.
+            - **.deb** — `sudo apt install ./Croquis_*.deb`
+            - **.rpm** — `sudo dnf install ./Croquis-*.rpm`
+            - **Arch, Artix, Endeavour** — `packaging/arch/PKGBUILD` in the source, `makepkg -si`
+
+            Every package carries its own AVR toolchain, so compiling a sketch needs nothing else
+            installed. AGPL-3.0.
+          files: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Blink",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "r1",
+      "type": "wokwi-resistor",
+      "left": 430,
+      "top": 200,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "id": "led1",
+      "type": "wokwi-led",
+      "left": 580,
+      "top": 170,
+      "attrs": {
+        "color": "red"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "uno:13",
+      "r1:1"
+    ],
+    [
+      "r1:2",
+      "led1:A"
+    ],
+    [
+      "led1:C",
+      "uno:GND.2"
+    ]
+  ],
+  "sketch": "// Blink \u2014 the first sketch everyone writes.\n//\n// An LED and a 220 ohm resistor on pin 13, which is also the Uno's built-in LED,\n// so both blink together. Press Run to compile it and watch.\n\nvoid setup() {\n  pinMode(13, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(13, HIGH);\n  delay(500);\n  digitalWrite(13, LOW);\n  delay(500);\n}\n"
+}

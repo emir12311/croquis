@@ -1,0 +1,129 @@
+/*
+ * Design tokens — the whole system lives in custom properties so a config
+ * file (or matugen) can override the palette wholesale. Theme is selected by
+ * `data-theme` on <html>. Values come from docs/plan.md §2.
+ */
+
+:root {
+  /* Spacing — 4px base */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* Shape — near-square on purpose: "no rounded corners on everything" */
+  --radius-control: 2px;
+  --radius-panel: 4px;
+  --radius-tile: 0;
+
+  /* Motion — decisive, no bounce. "Pleasant, not playful." */
+  --dur-micro: 120ms;
+  --dur-standard: 180ms;
+  --dur-panel: 240ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Type */
+  --font-ui: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --fs-ui: 14px;
+  --fs-ui-dense: 13px;
+  --fs-code: 13px;
+  --lh-ui: 1.5;
+  --lh-code: 1.6;
+
+  /* Semantic colours (shared across themes) */
+  --success: #57b87a;
+  --warning: #d9a441;
+  --error: #e5484d;
+  --info: #5b9bd5;
+}
+
+/* Dark — primary theme. Warm neutrals, deliberately NOT slate. */
+:root,
+[data-theme='dark'] {
+  --bg: #1a1a1c;
+  --surface: #212124;
+  --surface-raised: #2a2a2e;
+  --border: #35353a;
+  --text: #e6e4e0;
+  --text-muted: #a6a4a0;
+  --accent: #d9a441;
+  --accent-contrast: #1a1a1c;
+  --wire: #6ccb7b;
+  --focus: var(--accent);
+}
+
+[data-theme='light'] {
+  /* A "low-glare" light theme: warm greige, well below paper-white, no pure
+     #fff anywhere. Meant to be sat in for hours, not to look bright. */
+  --bg: #d4d1c9;
+  --surface: #e0ddd5;
+  --surface-raised: #ebe8e0;
+  --border: #beb9b0;
+  --text: #26262b;
+  --text-muted: #6a675f;
+  --accent: #96650f;
+  --accent-contrast: #ffffff;
+  --wire: #3f8f52;
+  --focus: var(--accent);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  -webkit-font-smoothing: antialiased;
+
+  /* This is an app, not a document: no accidental text selection, and no
+     ghost drag-image when you drag across the UI. Selection is re-enabled
+     below only where it's genuinely useful. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.selectable,
+input,
+textarea,
+[contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+img {
+  -webkit-user-drag: none;
+}
+
+/* The code editor genuinely needs text selection. */
+.cm-editor .cm-content {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* CodeMirror blinks the caret with a CSS animation (`cm-blink`). WebKitGTK drops
+   to low-resolution tiles whenever an animation is running, which blurs the whole
+   window — the circuit canvas included. A steady caret avoids that. */
+.cm-editor.cm-focused > .cm-scroller > .cm-cursorLayer {
+  animation: none !important;
+}
+
+/* One consistent, visible focus ring everywhere. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

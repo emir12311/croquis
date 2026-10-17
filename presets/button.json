@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Button",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "b1",
+      "type": "wokwi-pushbutton",
+      "left": 450,
+      "top": 220,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    [
+      "uno:2",
+      "b1:1.l"
+    ],
+    [
+      "b1:2.l",
+      "uno:GND.3"
+    ]
+  ],
+  "sketch": "// Button \u2014 a pushbutton on pin 2 lights the built-in LED while it is held.\n//\n// Pin 2 uses the chip's own pull-up, so the button only needs wiring to ground:\n// held, it reads LOW; released, the pull-up takes it back HIGH. That is why the\n// test inverts it. Press and hold the button on the canvas to try it.\n\nvoid setup() {\n  pinMode(2, INPUT_PULLUP);\n  pinMode(LED_BUILTIN, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(LED_BUILTIN, digitalRead(2) == LOW);\n}\n"
+}

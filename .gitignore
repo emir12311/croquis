@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+target/
+src-tauri/target/
+
+# Local env
+*.local
+.env
+.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Tauri generated (regenerated on build)
+src-tauri/gen/schemas/
+
+# A saved circuit is user data, not source. The first Save defaults to a name beside the
+# binary, which for a dev build is src-tauri/ — and a relative name resolves against the
+# working directory, so a stray circuit used to land in the source tree. The default is
+# absolute now; both places are ignored anyway, because one was committed by accident.
+/diagram.json
+src-tauri/diagram.json
+
+# Local build toolchain (downloaded, not committed)
+.toolchain/
+
+# The trimmed toolchain that ships inside the package (scripts/build-toolchain-dist.sh)
+.toolchain-dist/
+
+# Design and release notes, kept locally (not part of the project)
+personal-notes/
