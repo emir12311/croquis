@@ -14,8 +14,8 @@ Three constraints shape most design decisions, and none of them is negotiable:
 
 - **Fully offline at runtime.** No server, no accounts, no telemetry, no network calls. The fonts
   are bundled rather than fetched for exactly this reason, and the app is granted only
-  `core:default` and `dialog:default`. Anything that would add a network dependency is wrong here
-  even if it would be convenient.
+  `core:default` and `dialog:default`, under a CSP that allows no network origin. Anything that
+  would add a network dependency is wrong here even if it would be convenient.
 - **Lightweight.** It should start instantly and stay small.
 - **Desktop-first** (Tauri), Linux only so far.
 
@@ -29,6 +29,7 @@ Three constraints shape most design decisions, and none of them is negotiable:
 | `npm run tauri dev` | the real app, with HMR |
 | `npm run tauri build` | a release build |
 | `npm test` | frontend tests, vitest |
+| `npm run check:versions` | every manifest agrees with `package.json` — or pass a tag: `-- v0.1.1` |
 | `npm run check` | svelte-check and TypeScript — must be clean |
 | `cargo test --manifest-path src-tauri/Cargo.toml` | engine tests — compiles and runs real sketches |
 
@@ -40,7 +41,15 @@ simavr steps; the rest are in [the README](README.md#build-from-source).
 
 | | |
 | --- | --- |
-| `src/App.svelte` | the whole app — one component, deliberately |
+| `src/App.svelte` | the composition root: markup, panel layout, menus, properties strip |
+| `src/lib/project.svelte.ts` | the circuit document: parts, wires, undo, clipboard, dirty |
+| `src/lib/document.ts` | document types and pure helpers (snapshots, attributes, copies) |
+| `src/lib/file-session.svelte.ts` | save/save-as/open, the home path and its errors |
+| `src/lib/canvas.svelte.ts` | pin geometry from the mounted elements, sprites, palette art, drawing |
+| `src/lib/input.svelte.ts` | selection and the gestures: wiring, dragging, marquee, pan |
+| `src/lib/sim.svelte.ts` | run/stop, chip pins, serial, netlist solving |
+| `src/lib/view.svelte.ts` | zoom/pan/fit and screen ↔ canvas coordinates |
+| `src/lib/sketch.svelte.ts` | the sketch text and its saved/dirty pair |
 | `src/lib/netlist.ts` | the circuit model: nets from wires, LED current, button drive |
 | `src/lib/diagram.ts` | the `diagram.json` format, read and written |
 | `src/lib/route.ts` | orthogonal wire routing. **Nothing here may produce a diagonal** |
@@ -58,7 +67,8 @@ simavr steps; the rest are in [the README](README.md#build-from-source).
 **Adding a component is a catalogue entry plus an element, not a branch everywhere.** `PartDef` in
 `parts.ts` carries the tag, the pin grouping (`pinNode`) and the editable fields, and the renderer,
 palette and properties strip all work from that. Behaviour that is genuinely per-kind — what the
-simulation drives, which state changes a drawing — stays explicit in `App.svelte`, on purpose.
+simulation drives, which state changes a drawing — stays explicit rather than forced into the
+catalogue.
 
 ## Conventions
 
@@ -81,8 +91,11 @@ simulation drives, which state changes a drawing — stays explicit in `App.svel
 - **WebKitGTK on the NVIDIA proprietary driver needs help** — `src-tauri/src/lib.rs` applies the fix
   automatically. A running CSS *animation* makes WebKitGTK drop to low-resolution tiles globally and
   blur everything, which is why the caret blink is disabled and overlays do not animate.
-- **`.toolchain/core-cache`** holds precompiled core objects and is what keeps compiles fast. How it
-  is produced is currently undocumented, which is a real gap.
+- **`.toolchain/core-cache`** holds precompiled core objects and is what keeps compiles fast.
+  `scripts/setup-toolchain.sh` builds it (step 4), including `yield.c.o` — which stands in for
+  `hooks.c`, a source this toolchain refuses — and `wiring_pulse.S`, which `delay()` needs.
+  `scripts/build-toolchain-dist.sh` ships it read-only, so an object missing here is one the app
+  cannot compile at run time.
 
 ## Before you say it works
 
