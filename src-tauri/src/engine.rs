@@ -49,8 +49,9 @@ const F_CPU: u32 = 16_000_000;
 // ---- paths ----------------------------------------------------------------
 
 fn workspace_root() -> PathBuf {
-    // Baked at build time (the repo root, i.e. `src-tauri/..`). Fine for dev; a
-    // packaged build would resolve the toolchain from an app-data directory.
+    // Baked at build time (the repo root, i.e. `src-tauri/..`). Development builds
+    // resolve `.toolchain/` from here; an installed build is found by `toolchain()`
+    // beside the binary or in `../lib/<product>/toolchain`.
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("src-tauri has a parent")
@@ -217,7 +218,17 @@ fn core_cache(toolroot: &Path) -> Result<PathBuf, String> {
         for entry in entries.flatten() {
             let target = fallback.join(entry.file_name());
             if !target.exists() {
-                let _ = std::fs::copy(entry.path(), &target);
+                // Copy beside the target and rename, for the same reason the core is
+                // compiled that way: another process must not see a partial object.
+                let tmp = fallback.join(format!(
+                    ".{}.tmp-{}",
+                    entry.file_name().to_string_lossy(),
+                    std::process::id()
+                ));
+                if std::fs::copy(entry.path(), &tmp).is_ok() {
+                    let _ = std::fs::rename(&tmp, &target);
+                }
+                let _ = std::fs::remove_file(&tmp);
             }
         }
     }
@@ -256,11 +267,18 @@ fn compile_core(
             } else {
                 "avr-g++"
             };
+            // Compile to a private name and rename, so a second instance sharing the
+            // cache can never link against a half-written object.
+            let tmp = cache.join(format!(".{name}.o.tmp-{}", std::process::id()));
             run_flags(
                 &bin.join(cc),
                 base,
-                &["-c", src.to_str().unwrap(), "-o", obj.to_str().unwrap()],
+                &["-c", src.to_str().unwrap(), "-o", tmp.to_str().unwrap()],
             )?;
+            if let Err(e) = std::fs::rename(&tmp, &obj) {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e.to_string());
+            }
         }
         objs.push(obj);
     }
