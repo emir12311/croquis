@@ -122,23 +122,19 @@ jobs:
             src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: warn # the AppImage may fail; the others still matter
 
+      # Notes live in the repository, one file per tag. An inline `body` used to
+      # overwrite whatever had been written on the release — including a manual
+      # fix list — every time a tag was pushed again.
+      - name: release notes exist
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test -f "docs/releases/${GITHUB_REF_NAME}.md"
+
       - name: attach to a draft release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          body: |
-            Offline circuit simulator: build an Arduino circuit on a canvas, write a sketch, and run
-            it on a real AVR core. No server, no account, no network.
-
-            - **AppImage** — recommended. One file, no root, works on any distribution. Adds itself
-              to your application menu on first launch.
-            - **.deb** — `sudo apt install ./Croquis_*.deb`
-            - **.rpm** — `sudo dnf install ./Croquis-*.rpm`
-            - **Arch, Artix, Endeavour** — `packaging/arch/PKGBUILD` in the source, `makepkg -si`
-
-            Every package carries its own AVR toolchain, so compiling a sketch needs nothing else
-            installed. AGPL-3.0.
+          body_path: docs/releases/${{ github.ref_name }}.md
           files: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/rpm/*.rpm
