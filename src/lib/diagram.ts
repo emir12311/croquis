@@ -137,8 +137,7 @@ export interface ParsedDiagram {
  *
  * Anything the catalogue does not recognise — a part from a newer version, a connection
  * naming a part that is not there — is skipped rather than guessed at. That is what lets
- * an unfamiliar file load, and it is also why a mistyped pin in a preset fails silently:
- * see the audit note in `v0.1-audit.md`.
+ * an unfamiliar file load, and it is also why a mistyped pin in a preset fails silently.
  */
 export function parseDiagram(text: string): ParsedDiagram {
   const doc = JSON.parse(text) as {

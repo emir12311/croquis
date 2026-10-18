@@ -34,8 +34,7 @@ export interface SnapOptions {
  *
  * `offsets` are the part's pins relative to its own origin (rotation included),
  * `holes` the board's holes, both in canvas space.
- */
-export function snapToHoles(
+ */export function snapToHoles(
   raw: Point,
   offsets: Point[],
   holes: Point[],
@@ -45,8 +44,10 @@ export function snapToHoles(
   const { reach, seat } = options
   const reachSq = reach * reach
   const seatSq = seat * seat
-  // A part can't sit off the top-left of the canvas, so work from a clamped base.
-  const raw0 = { x: Math.max(0, raw.x), y: Math.max(0, raw.y) }
+  // No clamping to positive coordinates: the view starts centred on the world
+  // origin and pans both ways, so parts legitimately sit at negative coordinates.
+  // Clamping here made the origin behave like a wall — parts dropped to its left
+  // or above it snapped back onto whatever board was nearby.
 
   // Bucket the holes so "is there one under this leg?" is a few compares. It gets
   // asked once per leg per candidate placement, and a board has hundreds of holes.
@@ -76,23 +77,20 @@ export function snapToHoles(
     offsets.every((o) => isSeated({ x: pos.x + o.x, y: pos.y + o.y }))
 
   let bestSeated: { x: number; y: number; d: number } | null = null
-  let bestPartial: { x: number; y: number; d: number } | null = null
   for (const hole of holes) {
     for (const offset of offsets) {
-      const dx = hole.x - (raw0.x + offset.x)
-      const dy = hole.y - (raw0.y + offset.y)
+      const dx = hole.x - (raw.x + offset.x)
+      const dy = hole.y - (raw.y + offset.y)
       const d = dx * dx + dy * dy
       if (d > reachSq) continue
-      const pos = { x: raw0.x + dx, y: raw0.y + dy }
-      if (pos.x < 0 || pos.y < 0) continue
-      if (!bestPartial || d < bestPartial.d) bestPartial = { ...pos, d }
+      const pos = { x: raw.x + dx, y: raw.y + dy }
       if (!allSeated(pos)) continue
       // Already exactly where it belongs: nothing beats that, and no point looking.
       if (d < 0.0001) return pos
       if (!bestSeated || d < bestSeated.d) bestSeated = { ...pos, d }
     }
   }
-  // Fully seated wherever possible; a single leg in a hole beats the free grid.
-  const best = bestSeated ?? bestPartial
-  return best ? { x: best.x, y: best.y } : null
+  // Every leg, or nothing. Seating a single leg moves the part somewhere the
+  // user did not ask for — it was the "LED jumps to a random hole" behaviour.
+  return bestSeated ? { x: bestSeated.x, y: bestSeated.y } : null
 }

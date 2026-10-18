@@ -108,8 +108,48 @@ describe('snapping a part into the board', () => {
     }
   })
 
+  it('snaps at negative canvas coordinates', () => {
+    // The view is centred on the world origin, so a board dropped there sits at
+    // negative coordinates. Clamping the raw position to zero made the origin
+    // behave like a wall and pulled parts onto the board from its left.
+    const shift = -1000
+    const shifted = holes.map((h) => ({ x: h.x + shift, y: h.y + shift }))
+    const target = shifted[Math.floor(shifted.length / 2)]
+    const raw = { x: target.x - 25, y: target.y - 42 }
+    const snapped = snapToHoles(raw, parts[0].offsets, shifted, snapOptions)
+    expect(snapped).not.toBeNull()
+    const missed = Math.max(
+      ...parts[0].offsets.map((o) =>
+        Math.min(
+          ...shifted.map((h) =>
+            Math.hypot(h.x - (snapped!.x + o.x), h.y - (snapped!.y + o.y)),
+          ),
+        ),
+      ),
+    )
+    expect(missed).toBeLessThanOrEqual(BREADBOARD_HOLE_R)
+  })
+
   it('leaves a part alone when no hole is in reach', () => {
     expect(snapToHoles({ x: 5000, y: 5000 }, parts[0].offsets, holes, snapOptions)).toBeNull()
+  })
+
+  it('does not move a part just to seat one leg', () => {
+    // A part whose legs cannot all reach holes must stay where it was dropped (the
+    // caller falls back to the grid). Seating the nearest single leg was the
+    // "LED jumps to a random hole" behaviour.
+    const wide = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+    ]
+    const target = holes[0]
+    for (const dx of [-4, 0, 4]) {
+      for (const dy of [-3, 0, 3]) {
+        expect(
+          snapToHoles({ x: target.x + dx, y: target.y + dy }, wide, holes, snapOptions),
+        ).toBeNull()
+      }
+    }
   })
 
   it('does nothing without pins or holes to snap to', () => {
