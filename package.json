@@ -11,6 +11,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "tauri": "tauri",
     "test": "vitest run",
+    "check:versions": "node scripts/check-versions.mjs",
     "drive": "node scripts/drive.mjs"
   },
   "devDependencies": {
