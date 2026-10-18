@@ -44,7 +44,9 @@ fn write_text_file(path: String, contents: String) -> Result<(), String> {
 /// Compile an Arduino sketch and return the firmware location + size.
 #[tauri::command]
 fn compile_sketch(sketch: String) -> Result<engine::Firmware, String> {
-    let dir = std::env::temp_dir().join("croquis-build");
+    // Unique per process: two windows, or two users on one machine, must not compile into
+    // the same obj/ and overwrite each other's sketch.elf mid-run.
+    let dir = std::env::temp_dir().join(format!("croquis-build-{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     engine::compile(&sketch, &dir)
 }

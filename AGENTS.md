@@ -24,6 +24,8 @@ Three constraints shape most design decisions, and none of them is negotiable:
 | | |
 | --- | --- |
 | `npm install` | once |
+| `./scripts/setup-toolchain.sh` | once — simavr, avr-gcc, the Arduino core |
+| `./scripts/build-toolchain-dist.sh` | **required before `tauri build`** — `tauri.conf.json` bundles `../.toolchain-dist`, which only this creates |
 | `npm run tauri dev` | the real app, with HMR |
 | `npm run tauri build` | a release build |
 | `npm test` | frontend tests, vitest |
