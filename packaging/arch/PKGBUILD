@@ -1,6 +1,6 @@
 # Maintainer: the Croquis contributors
 pkgname=croquis
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc='Local-first Arduino circuit simulator: build a circuit, write a sketch, run a real AVR core'
 arch=('x86_64')

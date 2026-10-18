@@ -29,7 +29,7 @@ Three constraints shape most design decisions, and none of them is negotiable:
 | `npm run tauri dev` | the real app, with HMR |
 | `npm run tauri build` | a release build |
 | `npm test` | frontend tests, vitest |
-| `npm run check:versions` | every manifest agrees with `package.json` — or pass a tag: `-- v0.1.1` |
+| `npm run check:versions` | every manifest agrees with `package.json` — or pass a tag: `-- v0.1.2` |
 | `npm run check` | svelte-check and TypeScript — must be clean |
 | `cargo test --manifest-path src-tauri/Cargo.toml` | engine tests — compiles and runs real sketches |
 
