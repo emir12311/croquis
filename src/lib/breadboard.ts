@@ -8,8 +8,8 @@
  * and the two can't drift apart. (If they did, a wire would sit half a hole off
  * the copper it's supposed to touch.)
  *
- * The pitch is 9.6px — 2.54mm at 96dpi, and the same grid the `wokwi-elements`
- * parts are drawn on — so a component's legs land on our holes.
+ * The pitch is 67/7 ≈ 9.5714px — 2.54mm at 96dpi, and the same grid the
+ * `wokwi-elements` parts are drawn on — so a component's legs land on our holes.
  *
  * Two sizes: a half board (30 columns, 400 tie points) and the full board
  * (63 columns, 830 tie points, with the power rails split in the middle the way

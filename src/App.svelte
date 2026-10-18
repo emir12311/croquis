@@ -1291,6 +1291,9 @@ void loop() {
     }
     wires = created
     pendingWires = null
+    // The file is now fully on the canvas, so frame it. Deferred a frame because the
+    // instances have only just been inserted and their sizes aren't measured yet.
+    requestAnimationFrame(() => fitView())
   })
 
   // ---- Undo / redo -------------------------------------------------------
@@ -2292,7 +2295,11 @@ void loop() {
       if (e.payload.port === 66 && e.payload.pin === 5) pin13 = e.payload.high
     }).then((u) => alive && unlisten.push(u))
     listen<number>('sim:serial', (e) => {
-      serial = (serial + String.fromCharCode(e.payload)).slice(-20000)
+      // Append, then trim only when over the cap. Slicing on every byte is O(n²) — at
+      // 115200 baud that rebuilds a 20 000-character string a thousand times a second,
+      // which is enough to stutter the UI.
+      serial += String.fromCharCode(e.payload)
+      if (serial.length > 20000) serial = serial.slice(-20000)
     }).then((u) => alive && unlisten.push(u))
     return () => {
       alive = false

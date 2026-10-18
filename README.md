@@ -109,6 +109,7 @@ git clone https://github.com/emir12311/croquis
 cd croquis
 ./scripts/setup-toolchain.sh   # simavr, avr-gcc and the Arduino core, ~36 MB
 npm install
+./scripts/build-toolchain-dist.sh   # trims it to what ships: 276 MB → 153 MB
 npm run tauri build
 ```
 
