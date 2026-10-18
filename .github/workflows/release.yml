@@ -44,11 +44,27 @@ jobs:
       - name: toolchain
         run: ./scripts/setup-toolchain.sh
 
+      - run: npm ci
+
+      # A release used to package whatever built, without running the suites that say it
+      # works — so a regression could ship as a green release. These run against the full
+      # `.toolchain`, before it is trimmed, which is what the engine tests need.
+      - name: versions agree with the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: npm run check:versions -- "${GITHUB_REF_NAME}"
+
+      - name: type-check
+        run: npm run check
+
+      - name: frontend tests
+        run: npm test
+
+      - name: engine tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       # Only what the app uses at runtime, which is what gets shipped inside the package.
       - name: trim the toolchain for shipping
         run: ./scripts/build-toolchain-dist.sh
-
-      - run: npm ci
 
       # deb and rpm only. Tauri's AppImage bundler dies inside linuxdeploy with no output,
       # on this machine and on a clean runner alike, so it is not allowed to block a release
