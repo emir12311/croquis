@@ -2,33 +2,34 @@
   import {
     PARTS,
     partByKind,
-    isBreadboard,
-    type PartDef,
     type PartKind,
     formatResistance,
     parseResistance,
     type PartField,
   } from './lib/parts'
-  import { evaluateCircuit, type LedState } from './lib/netlist'
-  import { snapToHoles } from './lib/snap'
-  import { BREADBOARD_HOLE_R, BREADBOARD_PITCH } from './lib/breadboard'
-  import { shadowSvgMarkup, svgMarkupToImage } from './lib/part-art'
+  import { type LedState } from './lib/netlist'
+  import {
+    attrsOf,
+    WIRE_GRID,
+    type Instance,
+    type PinRef,
+    type Point,
+    type Wire,
+  } from './lib/document'
+  import { Project } from './lib/project.svelte'
+  import { FileSession, type FileBackend } from './lib/file-session.svelte'
+  import { CanvasSurface, type PinGeom } from './lib/canvas.svelte'
   import { PRESETS, type Preset } from './lib/presets'
   import { buildDiagram as buildDiagramFile, parseDiagram } from './lib/diagram'
-  import { decodeRoute, encodeRoute, expandPath, legBend, livePoints, routePath } from './lib/route'
+  import { decodeRoute, routePath } from './lib/route'
   import CodeEditor from './lib/CodeEditor.svelte'
-  import {
-    clear,
-    drawDisc,
-    drawGrid,
-    drawPolyline,
-    drawSquare,
-    makeTransform,
-    readPalette,
-    type Palette,
-    type PartSprite,
-  } from './lib/circuit-render'
+  import { readPalette } from './lib/circuit-render'
+  import { WIRE_COLORS, wireHex } from './lib/wire-colours'
   import { untrack } from 'svelte'
+  import { View } from './lib/view.svelte'
+  import { Sketch } from './lib/sketch.svelte'
+  import { Sim, type SimBackend } from './lib/sim.svelte'
+  import { Input } from './lib/input.svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { documentDir } from '@tauri-apps/api/path'
   import { listen } from '@tauri-apps/api/event'
@@ -45,22 +46,7 @@
     document.documentElement.dataset.theme = theme
   })
 
-  const DEFAULT_SKETCH = `void setup() {
-  // the built-in LED is on pin 13
-  pinMode(LED_BUILTIN, OUTPUT);
-  Serial.begin(9600);
-  Serial.println("croquis ready");
-}
-
-void loop() {
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(500);
-  digitalWrite(LED_BUILTIN, LOW);
-  delay(500);
-  Serial.println("blink");
-}
-`
-  let sketch = $state(DEFAULT_SKETCH)
+  const editor = new Sketch()
 
   // ---- Layout: resizable columns, panels that collapse to a rail ----
   const MIN_PANEL_W = 200
@@ -86,9 +72,11 @@ void loop() {
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   const ICON_SKETCH = '<path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/>'
@@ -98,163 +86,88 @@ void loop() {
   const CHEVRON_RIGHT = '<path d="M10.5 5.5l6.5 6.5-6.5 6.5"/>'
 
   // ---- Circuit canvas ----
-  type Point = { x: number; y: number }
-  type PinGeom = { name: string; x: number; y: number; description?: string }
-  interface PinRef {
-    instanceId: string
-    pin: string
-  }
-  interface Wire {
-    id: string
-    a: PinRef
-    b: PinRef
-    waypoints: Point[]
-    /** Named colour (Wokwi's red/blue/green/…); unset uses the themed wire colour. */
-    colour?: string
-  }
 
-  // Wokwi's named wire colours; the default (no colour) uses the themed token.
-  const WIRE_COLORS: { name: string; hex: string }[] = [
-    { name: 'green', hex: '#3fa34d' },
-    { name: 'red', hex: '#d64545' },
-    { name: 'blue', hex: '#3b7dd8' },
-    { name: 'yellow', hex: '#d9b23a' },
-    { name: 'orange', hex: '#dd8a3c' },
-    { name: 'purple', hex: '#9b6dd6' },
-    { name: 'teal', hex: '#2f9e8f' },
-    { name: 'pink', hex: '#d96a9c' },
-  ]
-  const WIRE_HEX = new Map(WIRE_COLORS.map((c) => [c.name, c.hex]))
-  function wireHex(name?: string): string {
-    return name ? (WIRE_HEX.get(name) ?? name) : 'var(--wire)'
-  }
-  interface Instance {
-    id: string
-    kind: PartKind
-    x: number
-    y: number
-    /** Rotation in degrees (0/90/180/270), applied about the part's centre. */
-    rotate?: number
-    /** This part's own attributes, overriding the catalogue's defaults. */
-    attrs?: Record<string, string>
-  }
+  // The document owns parts, wires, history and the dirty flag (lib/project.svelte.ts).
+  // These aliases are reactive and read-only here: every write goes through a Project
+  // method, which is what keeps a single place responsible for an undo step.
+  const project: Project = new Project({
+    canEdit: () => !running,
+    place: (kind: PartKind, x: number, y: number): Point =>
+      surface.place(kind, surface.pinOffsetsFor(kind), x, y, instances),
+    pinOffsets: (inst: Instance): Point[] => surface.pinOffsets(inst),
+    boardHolePoints: (): Point[] => surface.boardHolePoints(instances),
+  })
 
-  let instances = $state<Instance[]>([])
-  let wires = $state<Wire[]>([])
-  let pinsById = $state<Record<string, PinGeom[]>>({})
-  let sizesById = $state<Record<string, { w: number; h: number }>>({})
-
-  let selectedIds = $state<string[]>([])
-  /**
-   * The selection as something the rest of the app can read.
-   *
-   * Most of it means "the part I am working on" — the properties strip, Edit code, the
-   * context menu — and that only has an answer when exactly one thing is selected. So
-   * this stays, derived, and everything that already asked for a single part keeps
-   * working. Operations that should act on all of them read `selectedIds` directly.
-   */
-  const selectedId = $derived(selectedIds.length === 1 ? selectedIds[0] : null)
-  let selectedWireId = $state<string | null>(null)
-  let hoveredPin = $state<PinRef | null>(null)
-  // Where to put the pin tooltip (viewport coordinates, captured on hover).
-  let hoverPos = $state<{ x: number; y: number } | null>(null)
-
-  // While a part is being dragged its DOM node stays put (see startMove).
-  let dragAnchor = $state<{ id: string; x: number; y: number } | null>(null)
-
-  /**
-   * Breadboards are the surface parts sit on, so they always draw behind them —
-   * otherwise whichever you placed last wins, and a board placed late swallows
-   * the parts placed before it. Within each group it's placement order, as usual.
-   */
-  const renderOrder = $derived(
-    [...instances].sort(
-      (a, b) => (isBreadboard(a.kind) ? 0 : 1) - (isBreadboard(b.kind) ? 0 : 1),
-    ),
-  )
-
-  /** The part the properties strip describes. */
-  const selectedPart = $derived(instances.find((i) => i.id === selectedId) ?? null)
-
-  /** Where the (invisible) DOM node sits — frozen while it's being dragged. */
-  function domX(inst: Instance): number {
-    return dragAnchor?.id === inst.id ? dragAnchor.x : inst.x
-  }
-  function domY(inst: Instance): number {
-    return dragAnchor?.id === inst.id ? dragAnchor.y : inst.y
-  }
-
-  let seq = 0
-  let wireSeq = 0
+  let instances = $derived(project.instances)
+  let wires = $derived(project.wires)
+  let clipboard = $derived(project.clipboard)
+  let history = $derived(project.history)
+  let future = $derived(project.future)
+  let dirty = $derived(project.dirty || editor.dirty)
 
   // Save/load + simulation. Only meaningful inside the Tauri app; a plain
   // browser hides these.
   const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
-  let running = $state(false)
-  let serial = $state('')
-  let buildError = $state('')
+
+  // The desktop side of the file lifecycle: the commands and the native pickers.
+  const fileBackend: FileBackend = {
+    readText: (path) => invoke<string>('read_text_file', { path }),
+    writeText: async (path, contents) => {
+      await invoke('write_text_file', { path, contents })
+    },
+    pickOpen: async () => {
+      const picked = await openDialog({
+        multiple: false,
+        filters: [{ name: 'Wokwi diagram', extensions: ['json'] }],
+      })
+      return typeof picked === 'string' ? picked : null
+    },
+    pickSave: async (defaultPath) => {
+      const picked = await saveDialog({
+        defaultPath,
+        filters: [{ name: 'Wokwi diagram', extensions: ['json'] }],
+      })
+      return typeof picked === 'string' ? picked : null
+    },
+    defaultPath: async () => {
+      if (!inTauri) return 'diagram.json'
+      try {
+        const dir = await documentDir()
+        return `${dir.replace(/\/+$/, '')}/diagram.json`
+      } catch {
+        return 'diagram.json'
+      }
+    },
+  }
+  const files = new FileSession(fileBackend)
+
+  // The simulation session (lib/sim.svelte.ts). Its commands are Tauri calls; a plain
+  // browser still solves the netlist, it just cannot run a sketch.
+  const simBackend: SimBackend = {
+    isDesktop: () => inTauri,
+    compile: (sketch) => invoke<{ elf: string }>('compile_sketch', { sketch }),
+    start: async (elf, bounce) => {
+      await invoke('start_sim', { elf, bounce })
+    },
+    stop: async () => {
+      await invoke('stop_sim')
+    },
+    setInput: async (port, pin, high) => {
+      await invoke('set_input', { port, pin, high })
+    },
+    onPin: (cb) =>
+      listen<{ port: number; pin: number; high: boolean }>('sim:pin', (e) =>
+        cb(e.payload.port, e.payload.pin, e.payload.high),
+      ),
+    onSerial: (cb) => listen<number>('sim:serial', (e) => cb(e.payload)),
+  }
+  const sim = new Sim(simBackend)
+
+  let running = $derived(sim.running)
+  let serial = $derived(sim.serial)
+  let buildError = $derived(sim.buildError)
   let showSerial = $state(false)
-  let pin13 = $state(false)
-  /**
-   * A right-drag selection box, in canvas-panel pixels. Left-drag already means move
-   * (or pan), so the selection gesture needs its own; right-drag is otherwise just the
-   * context menu, which is what the suppression in `openContextMenu` is for.
-   */
-  let marquee = $state<{ left: number; top: number; width: number; height: number } | null>(null)
-
-  /** Parts whose box overlaps a canvas-space rectangle. Touching counts. */
-  function partsIn(left: number, top: number, right: number, bottom: number): string[] {
-    const found: string[] = []
-    for (const inst of instances) {
-      const size = partSizeOf(inst)
-      // A quarter-turned part occupies its box the other way round.
-      const turned = inst.rotate === 90 || inst.rotate === 270
-      const w = turned ? size.h : size.w
-      const h = turned ? size.w : size.h
-      if (inst.x <= right && inst.x + w >= left && inst.y <= bottom && inst.y + h >= top) {
-        found.push(inst.id)
-      }
-    }
-    return found
-  }
-
-  function startMarquee(e: PointerEvent) {
-    e.preventDefault()
-    openMenu = null
-    const host = canvasEl?.getBoundingClientRect()
-    if (!host) return
-    const originX = e.clientX
-    const originY = e.clientY
-    let moved = false
-    const box = (x: number, y: number) => ({
-      left: Math.min(originX, x) - host.left,
-      top: Math.min(originY, y) - host.top,
-      width: Math.abs(x - originX),
-      height: Math.abs(y - originY),
-    })
-    marquee = box(originX, originY)
-
-    const onMove = (ev: PointerEvent) => {
-      if (Math.abs(ev.clientX - originX) + Math.abs(ev.clientY - originY) > 3) moved = true
-      marquee = box(ev.clientX, ev.clientY)
-    }
-    const onUp = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
-      marquee = null
-      if (!moved) {
-        // A plain right-click is not a selection gesture; leave the selection alone.
-        return
-      }
-      const a = toCanvas(originX, originY)
-      const b = toCanvas(ev.clientX, ev.clientY)
-      selectedIds = partsIn(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y))
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
-  }
+  let pin13 = $derived(sim.pin13)
 
   /**
    * Whether a pressed switch chatters the way a real contact does. Off by default:
@@ -262,50 +175,17 @@ void loop() {
    * the Run menu to watch a sketch that never debounced misread a single press.
    */
   let switchBounce = $state(false)
-  /**
-   * Where this circuit was last written, so Save does not interrogate you twice.
-   * Session-only on purpose: it is about the file you are holding, not a preference.
-   * Opening a file adopts its path too — save-from-there is what "the file I have
-   * open" should mean. File → New clears it, or the next save would quietly
-   * overwrite whatever you had open before.
-   */
-  let savePath = $state<string | null>(null)
-  /**
-   * A short-lived note that the circuit reached the disk. Save is silent by design now
-   * that it no longer prompts, and silence with no acknowledgement reads as a keystroke
-   * that did nothing at all.
-   */
-  /**
-   * Whether anything here differs from what is on disk. `commit()` is the app's one
-   * "something changed" hook for the circuit; the editor is watched separately, because
-   * typing a sketch does not go through it.
-   */
-  let dirty = $state(false)
-  /** The sketch as it was when this project was loaded or last saved. */
-  let syncedSketch = $state(DEFAULT_SKETCH)
 
-  $effect(() => {
-    if (sketch !== syncedSketch) dirty = true
-  })
-
-  let savedNote = $state(false)
-  let savedNoteTimer: ReturnType<typeof setTimeout> | null = null
-
-  function noteSaved() {
-    savedNote = true
-    if (savedNoteTimer) clearTimeout(savedNoteTimer)
-    savedNoteTimer = setTimeout(() => {
-      savedNote = false
-      savedNoteTimer = null
-    }, 1400)
-  }
+  // The file lifecycle owns the save note and the error shown when a save or open
+  // does not happen (lib/file-session.svelte.ts).
+  let savedNote = $derived(files.savedNote)
+  let fileError = $derived(files.error)
   // Electrical state derived from the simulation (see lib/netlist.ts).
-  let avrPins = $state<Record<string, boolean>>({})
-  let ledStates = $state<Record<string, LedState>>({})
+  let avrPins = $derived(sim.avrPins)
+  let ledStates = $derived(sim.ledStates)
   /** What's wrong with a part — the strip says it in words, the canvas badges it. */
-  let warnings = $state<Record<string, string>>({})
-  let pressedButtons = $state<Record<string, boolean>>({})
-  let renderError = $state('')
+  let warnings = $derived(sim.warnings)
+  let pressedButtons = $derived(sim.pressedButtons)
   interface PendingWire {
     a: PinRef
     b: PinRef
@@ -315,691 +195,101 @@ void loop() {
   // Wires from a loaded file, decoded once their pins have rendered.
   let pendingWires = $state<PendingWire[] | null>(null)
 
-  let canvasEl = $state<HTMLDivElement | null>(null)
-  let renderCanvas = $state<HTMLCanvasElement | null>(null)
+  // The canvas surface (lib/canvas.svelte.ts): pin geometry, sprites and drawing.
+  const surface = new CanvasSurface(() => ({
+    pin13,
+    ledStates,
+    pressedButtons,
+    warnings,
+  }))
+  let canvasEl = $derived(surface.canvasEl)
+  let pinsById = $derived(surface.pinsById)
+  let sizesById = $derived(surface.sizesById)
+  let renderError = $derived(surface.renderError)
+  let partArt = $derived(surface.partArt)
 
-  // View transform: parts are stored in canvas coordinates, then the whole
-  // content is scaled (zoom) and shifted (pan) for display.
-  const ZOOM_MIN = 0.25
-  const ZOOM_MAX = 4
-  let zoom = $state(1)
-  let panX = $state(0)
-  let panY = $state(0)
+  // The viewport (lib/view.svelte.ts): the canvas rectangle is passed in, so the
+  // transform maths does not need to live in this component.
+  const view = new View()
+  let zoom = $derived(view.zoom)
+  let panX = $derived(view.panX)
+  let panY = $derived(view.panY)
 
-  // A part being dragged out of the palette (viewport-relative).
-  let dragging = $state<{ def: PartDef; x: number; y: number } | null>(null)
-  // A wire being drawn: starts at a pin, ends wherever you next click.
-  let wiring = $state<{ from: PinRef; waypoints: Point[] } | null>(null)
-  let cursor = $state<Point>({ x: 0, y: 0 })
-  // An existing wire endpoint being dragged onto another pin.
-  let rerouting = $state<{ wireId: string; end: 'a' | 'b'; x: number; y: number } | null>(null)
-
-  // Wires snap to a fine grid, so segments run along grid lines (like Wokwi)
-  // instead of landing mid-square and making a straight run hard to line up.
-  const WIRE_GRID = 12
-  function snapToGrid(v: number) {
-    return Math.round(v / WIRE_GRID) * WIRE_GRID
-  }
-
-  // Coalesce high-frequency pointer updates to at most one per animation frame.
-  // A high-poll mouse fires far more moves than the screen can show, and each
-  // one would otherwise trigger its own render.
-  function frameThrottle<T>(fn: (arg: T) => void): (arg: T) => void {
-    let last!: T
-    let has = false
-    let queued = false
-    return (arg: T) => {
-      last = arg
-      has = true
-      if (queued) return
-      queued = true
-      requestAnimationFrame(() => {
-        queued = false
-        if (has) {
-          has = false
-          fn(last)
-        }
-      })
-    }
-  }
-
-  function toCanvas(clientX: number, clientY: number) {
-    const r = canvasEl!.getBoundingClientRect()
-    return { x: (clientX - r.left - panX) / zoom, y: (clientY - r.top - panY) / zoom }
-  }
-
-  function overCanvas(clientX: number, clientY: number) {
-    const r = canvasEl!.getBoundingClientRect()
-    return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom
-  }
-
-  function addInstance(
-    kind: PartKind,
-    x: number,
-    y: number,
-    /** An instance being copied: its look and rotation come along. */
-    copy?: { attrs?: Record<string, string>; rotate?: number },
-    /**
-     * Whether to look for a hole or grid line under it. On for dropping one part; off
-     * for a paste, where each part is positioned relative to the rest of the copy and
-     * snapping them one at a time would pull the group out of shape.
-     */
-    snap = true,
-  ): Instance | undefined {
-    if (running) return
-    commit()
-    let id: string
-    do {
-      id = `i${++seq}`
-    } while (instances.some((i) => i.id === id))
-    const rotate = copy?.rotate ?? 0
-    const inst: Instance = {
-      id,
-      kind,
-      x,
-      y,
-      ...(copy?.attrs ? { attrs: { ...copy.attrs } } : {}),
-      ...(rotate ? { rotate } : {}),
-    }
-    instances.push(inst)
-    // Land in a hole if there is one under it, otherwise on the free grid — except
-    // for a rotated copy, whose hole offsets would need rotating about the
-    // element's box, which we only know once it has mounted. It keeps the position
-    // it was pasted at and re-seats on the first nudge.
-    if (snap && !rotate) {
-      const offsets = (kindPins.get(kind) ?? []).map((p) => ({ x: p.x, y: p.y }))
-      const placed = placePart(kind, offsets, inst.x, inst.y)
-      inst.x = placed.x
-      inst.y = placed.y
-    }
-    selectedIds = [inst.id]
-    return inst
-  }
+  // Input owns selection and the gestures that change it (lib/input.svelte.ts).
+  const input = new Input({
+    project,
+    view,
+    surface,
+    sim,
+    canvasEl: () => surface.canvasEl,
+    closeMenus: () => (openMenu = null),
+  })
+  let selectedIds = $derived(input.selectedIds)
+  let selectedWireId = $derived(input.selectedWireId)
+  const selectedId = $derived(input.selectedId)
+  const selectedPart = $derived(input.selectedPart)
+  let hoveredPin = $derived(input.hoveredPin)
+  let hoverPos = $derived(input.hoverPos)
+  let marquee = $derived(input.marquee)
+  let dragging = $derived(input.dragging)
+  let wiring = $derived(input.wiring)
+  let rerouting = $derived(input.rerouting)
+  const renderOrder = $derived(project.renderOrder)
 
   // ---- Zoom / pan -------------------------------------------------------
   function zoomAt(clientX: number, clientY: number, factor: number) {
     if (!canvasEl) return
-    const r = canvasEl.getBoundingClientRect()
-    const mx = clientX - r.left
-    const my = clientY - r.top
-    const cx = (mx - panX) / zoom
-    const cy = (my - panY) / zoom
-    const nz = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor))
-    panX = mx - cx * nz
-    panY = my - cy * nz
-    zoom = nz
+    view.zoomAt(clientX, clientY, factor, canvasEl.getBoundingClientRect())
   }
 
   function zoomIn() {
     if (!canvasEl) return
-    const r = canvasEl.getBoundingClientRect()
-    zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.2)
+    view.zoomIn(canvasEl.getBoundingClientRect())
   }
 
   function zoomOut() {
     if (!canvasEl) return
-    const r = canvasEl.getBoundingClientRect()
-    zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.2)
+    view.zoomOut(canvasEl.getBoundingClientRect())
   }
 
   /** Put the world origin in the middle of the canvas rather than in its corner. */
   function centreView() {
     if (!canvasEl) return
-    panX = Math.round(canvasEl.clientWidth / 2)
-    panY = Math.round(canvasEl.clientHeight / 2)
+    view.centre(canvasEl.getBoundingClientRect())
   }
 
   /**
    * Centre it once, when the canvas first exists. Guarded because an effect that
    * re-centres on every change would fight the user's own panning.
    */
-  let viewCentred = false
   $effect(() => {
-    if (viewCentred || !canvasEl) return
-    viewCentred = true
+    if (view.centred || !canvasEl) return
+    view.centred = true
     centreView()
   })
 
   function resetZoom() {
-    zoom = 1
-    centreView()
+    if (!canvasEl) return
+    view.reset(canvasEl.getBoundingClientRect())
   }
 
   // ---- Pins -------------------------------------------------------------
-  // The wokwi elements expose `pinInfo` (name + position in their own rendered
-  // pixel space). Read it straight off the mounted elements after each change.
-  let pinsVersion = $state(0)
-  let pinsRetries = 0
-  $effect(() => {
-    void pinsVersion
-    const list = instances
-    const next: Record<string, PinGeom[]> = {}
-    const sizes: Record<string, { w: number; h: number }> = {}
-    let needRetry = false
-    for (const inst of list) {
-      const el = canvasEl?.querySelector(`.instance[data-id="${inst.id}"]`) as HTMLElement | null
-      const comp = el?.firstElementChild as (HTMLElement & { pinInfo?: PinGeom[] }) | null
-      if (comp?.pinInfo) {
-        next[inst.id] = comp.pinInfo.map((p) => ({
-          name: p.name,
-          x: p.x,
-          y: p.y,
-          description: p.description,
-        }))
-        const w = el?.offsetWidth ?? 0
-        const h = el?.offsetHeight ?? 0
-        sizes[inst.id] = { w, h }
-        if (!w || !h) needRetry = true
-      }
-    }
-    pinsById = next
-    sizesById = sizes
-    // Lit renders asynchronously — re-measure once the elements have laid out.
-    if (needRetry && pinsRetries++ < 120) requestAnimationFrame(() => pinsVersion++)
-  })
+  // The mounted elements are the only thing that knows where their pins are, so
+  // the surface measures them. These wrappers keep the call sites terse.
+  $effect(() => surface.measure(instances))
 
-  // A pin's position in canvas space, accounting for the part's rotation
-  // (which is applied about the part's centre).
   function pinCanvasPoint(inst: Instance, pin: PinGeom): Point {
-    const rot = inst.rotate ?? 0
-    if (!rot) return { x: inst.x + pin.x, y: inst.y + pin.y }
-    // Size only — never a state-dependent lookup. See baseKey.
-    const { w, h } = partSizeOf(inst)
-    const rad = (rot * Math.PI) / 180
-    const c = Math.cos(rad)
-    const s = Math.sin(rad)
-    const dx = pin.x - w / 2
-    const dy = pin.y - h / 2
-    return { x: inst.x + w / 2 + dx * c - dy * s, y: inst.y + h / 2 + dx * s + dy * c }
+    return surface.pinCanvasPoint(inst, pin)
   }
 
   function pinPoint(ref: PinRef): Point | null {
-    const inst = instances.find((i) => i.id === ref.instanceId)
-    const pin = pinsById[ref.instanceId]?.find((p) => p.name === ref.pin)
-    if (!inst || !pin) return null
-    return pinCanvasPoint(inst, pin)
-  }
-
-  // The pin nearest a canvas-space point, within a forgiving radius.
-  /**
-   * The pin nearest a point, optionally restricted to one part. The restriction
-   * matters: with a component sitting on a breadboard, the nearest pin to your
-   * press is nearly always a hole *underneath*, so an unscoped search grabs the
-   * board and you can't pick up the part you're pointing at.
-   */
-  function nearestPin(cx: number, cy: number, radius: number, only?: string): PinRef | null {
-    let best: PinRef | null = null
-    let bestDist = radius * radius
-    for (const inst of instances) {
-      if (only && inst.id !== only) continue
-      for (const p of pinsById[inst.id] ?? []) {
-        const pt = pinCanvasPoint(inst, p)
-        const dx = cx - pt.x
-        const dy = cy - pt.y
-        const d = dx * dx + dy * dy
-        if (d <= bestDist) {
-          bestDist = d
-          best = { instanceId: inst.id, pin: p.name }
-        }
-      }
-    }
-    return best
-  }
-
-  // Screen-space helper (radius given in screen px, so it feels the same at any zoom).
-  function pinAtClient(clientX: number, clientY: number, radius = 26): PinRef | null {
-    const p = toCanvas(clientX, clientY)
-    return nearestPin(p.x, p.y, radius / zoom)
-  }
-
-  function samePin(a: PinRef, b: PinRef) {
-    return a.instanceId === b.instanceId && a.pin === b.pin
-  }
-
-
-  function wirePoints(w: Wire): Point[] {
-    const a = reroutingPoint(w, 'a') ?? pinPoint(w.a)
-    const b = reroutingPoint(w, 'b') ?? pinPoint(w.b)
-    if (!a || !b) return []
-    return [a, ...w.waypoints, b]
-  }
-
-  // The pin a wire being drawn would connect to right now (for the snap ring).
-  let wiringTarget = $derived.by(() => {
-    if (!wiring) return null
-    return nearestPin(cursor.x, cursor.y, 26 / zoom)
-  })
-
-  // The live path of the wire being drawn, from its pin to wherever we are.
-  let wiringPoints = $derived.by(() => {
-    if (!wiring) return [] as Point[]
-    const from = pinPoint(wiring.from)
-    if (!from) return [] as Point[]
-    const end = (wiringTarget && pinPoint(wiringTarget)) || cursor
-    return livePoints(from, wiring.waypoints, end)
-  })
-
-  function reroutingPoint(w: Wire, end: 'a' | 'b'): Point | null {
-    if (rerouting && rerouting.wireId === w.id && rerouting.end === end) {
-      return { x: rerouting.x, y: rerouting.y }
-    }
-    return null
-  }
-
-  function dedupeWires() {
-    const seen = new Set<string>()
-    wires = wires.filter((w) => {
-      const ka = `${w.a.instanceId}:${w.a.pin}`
-      const kb = `${w.b.instanceId}:${w.b.pin}`
-      const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-  }
-
-  // ---- Wiring: click a pin, click the destination (or empty space to bend) --
-  function handlePinPress(e: PointerEvent, ref: PinRef) {
-    if (e.button !== 0) return
-    // While a sketch runs the circuit is frozen — no wiring either.
-    if (running) return
-    e.stopPropagation()
-    e.preventDefault()
-    if (wiring) {
-      finishWire(ref)
-    } else {
-      const start = toCanvas(e.clientX, e.clientY)
-      cursor = { x: snapToGrid(start.x), y: snapToGrid(start.y) }
-      wiring = { from: ref, waypoints: [] }
-      // The part stays selected (see armPinPress) — the strip showing what you're
-      // wiring to is more useful than an empty one.
-    }
-  }
-
-  function finishWire(target: PinRef) {
-    if (!wiring) return
-    const { from, waypoints } = wiring
-    wiring = null
-    if (samePin(from, target)) return
-    const existing = wires.find(
-      (w) => (samePin(w.a, from) && samePin(w.b, target)) || (samePin(w.a, target) && samePin(w.b, from)),
-    )
-    // Clicking the same two pins again takes the wire away, the way Wokwi does.
-    // It used to find the duplicate and then do nothing, which reads as the app
-    // ignoring the click.
-    if (existing) {
-      commit()
-      wires = wires.filter((w) => w.id !== existing.id)
-      selectedWireId = null
-      return
-    }
-    commit()
-    wires.push({ id: `w${++wireSeq}`, a: from, b: target, waypoints })
-  }
-
-  // Distance from a point to a line segment.
-  function distToSegment(p: Point, a: Point, b: Point): number {
-    const dx = b.x - a.x
-    const dy = b.y - a.y
-    const len2 = dx * dx + dy * dy
-    let t = len2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0
-    t = Math.max(0, Math.min(1, t))
-    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
-  }
-
-  // Clicking a wire selects it; dragging from its middle reshapes it. The route
-  // is materialised into explicit waypoints and the grabbed segment slides along
-  // its perpendicular — endpoints that are pins stay put.
-  function startWireDrag(e: PointerEvent, wireId: string) {
-    if (running) return
-    e.stopPropagation()
-    e.preventDefault()
-    selectedWireId = wireId
-    selectedIds = []
-    if (e.button !== 0) return
-    const w = wires.find((x) => x.id === wireId)
-    if (!w) return
-    const a = pinPoint(w.a)
-    const b = pinPoint(w.b)
-    if (!a || !b) return
-    const line = expandPath([a, ...w.waypoints, b])
-    if (line.length < 2) return
-    const start = toCanvas(e.clientX, e.clientY)
-    let seg = -1
-    let bestDist = Infinity
-    for (let i = 0; i < line.length - 1; i++) {
-      const d = distToSegment(start, line[i], line[i + 1])
-      if (d < bestDist) {
-        bestDist = d
-        seg = i
-      }
-    }
-    if (seg < 0 || bestDist > 24 / zoom) return
-    const vertical = line[seg].x === line[seg + 1].x
-    let started = false
-
-    const applyMove = frameThrottle((ev: PointerEvent) => {
-      const cur = toCanvas(ev.clientX, ev.clientY)
-      const delta = vertical ? cur.x - start.x : cur.y - start.y
-      if (Math.abs(delta) < 3) return
-      if (!started) {
-        commit()
-        w.waypoints = line.slice(1, -1).map((p) => ({ ...p }))
-        started = true
-      }
-      for (const j of [seg, seg + 1]) {
-        if (j <= 0 || j >= line.length - 1) continue // a pin endpoint — fixed
-        const wp = w.waypoints[j - 1]
-        if (!wp) continue
-        if (vertical) wp.x = snapToGrid(line[j].x + delta)
-        else wp.y = snapToGrid(line[j].y + delta)
-      }
-    })
-    const onMove = (ev: PointerEvent) => applyMove(ev)
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
-
-  function startEndpointDrag(e: PointerEvent, wireId: string, end: 'a' | 'b') {
-    if (e.button !== 0) return
-    if (running) return
-    e.stopPropagation()
-    e.preventDefault()
-    const w = wires.find((x) => x.id === wireId)
-    if (!w) return
-    selectedWireId = wireId
-    const p = toCanvas(e.clientX, e.clientY)
-    rerouting = { wireId, end, x: p.x, y: p.y }
-
-    const applyMove = frameThrottle((ev: PointerEvent) => {
-      const q = toCanvas(ev.clientX, ev.clientY)
-      rerouting = { wireId, end, x: q.x, y: q.y }
-    })
-    const onMove = (ev: PointerEvent) => applyMove(ev)
-    const onUp = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      const target = pinAtClient(ev.clientX, ev.clientY)
-      if (target) {
-        const other = end === 'a' ? w.b : w.a
-        if (!samePin(target, other)) {
-          commit()
-          if (end === 'a') w.a = target
-          else w.b = target
-          dedupeWires()
-        }
-      }
-      rerouting = null
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    return surface.pinPoint(instances, ref)
   }
 
   // ---- Part dragging ----------------------------------------------------
-  function startPaletteDrag(e: PointerEvent, def: PartDef) {
-    if (e.button !== 0) return
-    if (running) return
-    e.preventDefault()
-    dragging = { def, x: e.clientX, y: e.clientY }
-
-    const onMove = (ev: PointerEvent) => {
-      dragging = { def, x: ev.clientX, y: ev.clientY }
-    }
-    const onUp = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      if (overCanvas(ev.clientX, ev.clientY)) {
-        const p = toCanvas(ev.clientX, ev.clientY)
-        addInstance(def.kind, p.x - 16, p.y - 16)
-      }
-      dragging = null
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
-
-  /**
-   * A press near a pin is *armed*, not committed. Move and it becomes a drag of
-   * the part; let go without moving and it's a pin press (start/finish a wire).
-   *
-   * This is what makes a breadboard grabbable: its holes are everywhere, so any
-   * press at all is "near a pin", and committing on press left no way to move it
-   * except by its edges.
-   */
-  function armPinPress(e: PointerEvent, ref: PinRef) {
-    e.stopPropagation()
-    e.preventDefault()
-    // Pressing a pin selects its part, so the properties strip follows what
-    // you're working on — and so clicking a small part (whose body is mostly
-    // within reach of its legs) doesn't leave you with no selection at all.
-    // Pressing a pin of an already-selected part keeps the selection. Collapsing it here
-    // made a multi-selection impossible to drag: most of a small part is within reach of
-    // its own legs, so the grab went through this path and threw the rest away.
-    if (!selectedIds.includes(ref.instanceId)) selectedIds = [ref.instanceId]
-    selectedWireId = null
-    const startX = e.clientX
-    const startY = e.clientY
-    let armed = true
-    const cleanup = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
-    }
-    const onMove = (ev: PointerEvent) => {
-      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) <= 4) return
-      armed = false
-      cleanup()
-      // It was a drag after all — hand over, starting from where the pointer is
-      // now, so the part doesn't jump.
-      const inst = instances.find((i) => i.id === ref.instanceId)
-      if (inst) beginPartDrag(ev, inst)
-    }
-    const onUp = () => {
-      cleanup()
-      if (armed) handlePinPress(e, ref)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
-  }
-
-  function startMove(e: PointerEvent, inst: Instance) {
-    if (e.button !== 0) return
-    const p = toCanvas(e.clientX, e.clientY)
-    const pin = nearestPin(p.x, p.y, 18 / zoom, inst.id)
-    if (pin) {
-      armPinPress(e, pin)
-      return
-    }
-    if (wiring) {
-      // A wire is in progress, so a press on a part's *body* is a corner, not a
-      // drag. Routing around a component used to be impossible: every press on one
-      // moved it instead. A press near one of its pins still finishes the wire —
-      // that is the branch above.
-      e.stopPropagation()
-      e.preventDefault()
-      addBend()
-      return
-    }
-    e.stopPropagation()
-    e.preventDefault()
-    beginPartDrag(e, inst)
-  }
-
-  function beginPartDrag(e: PointerEvent, inst: Instance) {
-    const p = toCanvas(e.clientX, e.clientY)
-    // Pressing a part inside the selection drags all of it; pressing one outside makes
-    // that the selection, which is what every editor does.
-    if (!selectedIds.includes(inst.id)) selectedIds = [inst.id]
-    selectedWireId = null
-
-    // A pushbutton is momentary: pressing it holds it down while the pointer is
-    // on it. (If the press turns into a drag, it's cancelled below.)
-    if (inst.kind === 'pushbutton') pressedButtons[inst.id] = true
-    if (running) {
-      // While a sketch runs the circuit is frozen — parts don't move. A
-      // pushbutton still presses, since that's how you drive the running sim.
-      const release = () => {
-        window.removeEventListener('pointerup', release)
-        window.removeEventListener('pointercancel', release)
-        if (inst.kind === 'pushbutton') pressedButtons[inst.id] = false
-      }
-      window.addEventListener('pointerup', release)
-      window.addEventListener('pointercancel', release)
-      return
-    }
-
-    const offsetX = p.x - inst.x
-    const offsetY = p.y - inst.y
-
-    const startX = p.x
-    const startY = p.y
-    let movedOnce = false
-    let dragged = false
-    /** The selection's positions when the drag began, so the group keeps its shape. */
-    let group: { inst: Instance; x: number; y: number }[] = []
-    let anchorX = inst.x
-    let anchorY = inst.y
-    const applyMove = frameThrottle((ev: PointerEvent) => {
-      const q = toCanvas(ev.clientX, ev.clientY)
-      if (!dragged && Math.hypot(q.x - startX, q.y - startY) > 4) {
-        dragged = true
-        // Dragging isn't pressing — release a button we pressed on the way in.
-        if (inst.kind === 'pushbutton') pressedButtons[inst.id] = false
-      }
-      if (!dragged) return
-      if (!movedOnce) {
-        commit()
-        movedOnce = true
-        // From here the *canvas* shows the movement. The invisible DOM only
-        // exists for hit-testing, and moving it makes WebKitGTK repaint the whole
-        // circuit layer every frame — which is what made dragging a breadboard
-        // crawl. Freeze it at where the drag began; it catches up on release.
-        dragAnchor = { id: inst.id, x: inst.x, y: inst.y }
-        // Everything selected moves by the anchor's delta. Only the anchor snaps — a
-        // group dragged across a breadboard should keep its shape rather than have
-        // each part independently jump to a hole.
-        anchorX = inst.x
-        anchorY = inst.y
-        group = selectedIds
-          .map((id) => instances.find((i) => i.id === id))
-          .filter((i): i is Instance => !!i)
-          .map((i) => ({ inst: i, x: i.x, y: i.y }))
-      }
-      // Holes first, from the raw pointer position; the free grid only if no hole
-      // is in reach. (See placePart — this order is the bug fix.)
-      const placed = placePart(inst.kind, pinOffsets(inst), q.x - offsetX, q.y - offsetY)
-      const dx = placed.x - anchorX
-      const dy = placed.y - anchorY
-      for (const part of group) {
-        part.inst.x = part.x + dx
-        part.inst.y = part.y + dy
-      }
-    })
-    const onMove = (ev: PointerEvent) => applyMove(ev)
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
-      dragAnchor = null
-      if (inst.kind === 'pushbutton') pressedButtons[inst.id] = false
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    // Letting go off-window still has to release the button.
-    window.addEventListener('pointercancel', onUp)
-  }
-
-  // Highlight the pin under the pointer (CSS :hover can't reach canvas pixels).
-  function onCanvasHover(e: PointerEvent) {
-    if (!canvasEl) return
-    const p = toCanvas(e.clientX, e.clientY)
-    // Only the part under the pointer — otherwise a board's holes win and the
-    // tooltip (and the marker) describe the board rather than the part you're on.
-    const under = ((e.target as Element | null)?.closest('.instance') as HTMLElement | null)
-      ?.dataset.id
-    const pin = nearestPin(p.x, p.y, 10 / zoom, under)
-    const id = pin ? `${pin.instanceId}:${pin.pin}` : null
-    const cur = hoveredPin ? `${hoveredPin.instanceId}:${hoveredPin.pin}` : null
-    if (id !== cur) {
-      hoveredPin = pin
-      // Only on change, so a drag doesn't churn the tooltip every pixel.
-      hoverPos = pin ? { x: e.clientX, y: e.clientY } : null
-    }
-  }
-
-  /**
-   * Commit the *bend* of the current leg, so the next leg starts from the corner
-   * rather than the free end — that is what lets a wire fold back over itself
-   * instead of locking the whole L. It is why clicking empty space mid-wire drops
-   * a corner, and it works over a part too now.
-   */
-  function addBend() {
-    if (!wiring) return
-    const from = pinPoint(wiring.from)
-    const last = wiring.waypoints.length ? wiring.waypoints[wiring.waypoints.length - 1] : from
-    if (!last) return
-    const bend = legBend(wiring.waypoints.length, last, cursor)
-    wiring = { ...wiring, waypoints: [...wiring.waypoints, bend ?? cursor] }
-  }
-
-  function onCanvasPointerDown(e: PointerEvent) {
-    const el = e.target as HTMLElement | null
-    if (el?.closest('.instance') || el?.closest('.wire__hit')) return
-    // Right-drag draws a selection box. It comes after the line above so that
-    // right-clicking *on* a part still opens the context menu.
-    if (e.button === 2) {
-      startMarquee(e)
-      return
-    }
-    if (wiring) {
-      addBend()
-      return
-    }
-    // Drag empty space to pan; a plain click clears the selection.
-    if (e.button !== 0 && e.button !== 1) return
-    e.preventDefault()
-    const startX = e.clientX
-    const startY = e.clientY
-    const startPanX = panX
-    const startPanY = panY
-    let moved = false
-    const applyPan = frameThrottle((ev: PointerEvent) => {
-      panX = startPanX + (ev.clientX - startX)
-      panY = startPanY + (ev.clientY - startY)
-    })
-    const onMove = (ev: PointerEvent) => {
-      if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) moved = true
-      applyPan(ev)
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      if (!moved) {
-        selectedIds = []
-        selectedWireId = null
-      }
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
 
   // Keep the drawn wire following the pointer, even between clicks.
-  $effect(() => {
-    const applyMove = frameThrottle((ev: PointerEvent) => {
-      const p = toCanvas(ev.clientX, ev.clientY)
-      cursor = { x: snapToGrid(p.x), y: snapToGrid(p.y) }
-    })
-    const onMove = (ev: PointerEvent) => {
-      if (wiring) applyMove(ev)
-    }
-    window.addEventListener('pointermove', onMove)
-    return () => window.removeEventListener('pointermove', onMove)
-  })
+  $effect(() => input.trackCursor())
 
   // Wheel zooms toward the pointer.
   $effect(() => {
@@ -1064,27 +354,21 @@ void loop() {
       const nudging =
         e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown'
       if (!running && selectedIds.length && nudging) {
-        commit()
-        for (const id of selectedIds) {
-          const inst = instances.find((i) => i.id === id)
-          if (!inst) continue
-          if (e.key === 'ArrowLeft') inst.x -= WIRE_GRID
-          else if (e.key === 'ArrowRight') inst.x += WIRE_GRID
-          else if (e.key === 'ArrowUp') inst.y -= WIRE_GRID
-          else inst.y += WIRE_GRID
-        }
+        const dx =
+          e.key === 'ArrowLeft' ? -WIRE_GRID : e.key === 'ArrowRight' ? WIRE_GRID : 0
+        const dy = e.key === 'ArrowUp' ? -WIRE_GRID : e.key === 'ArrowDown' ? WIRE_GRID : 0
+        input.nudge(dx, dy)
         e.preventDefault()
         return
       }
       if (e.key === 'Escape') {
-        wiring = null
-        selectedIds = []
-        selectedWireId = null
+        input.cancelWire()
+        input.clearSelection()
         return
       }
       if (!running && (e.key === 'Delete' || e.key === 'Backspace')) {
         if (selectedWireId || selectedIds.length) {
-          deleteSelection()
+          input.deleteSelection()
           e.preventDefault()
         }
       }
@@ -1107,7 +391,7 @@ void loop() {
         attrs: attrsOf(inst),
       })),
       wires: wires.map((w) => ({ a: w.a, b: w.b, colour: w.colour, waypoints: w.waypoints })),
-      sketch,
+      sketch: editor.text,
       // The one thing only the app can answer: where a pin actually sits.
       pinPoint,
     })
@@ -1117,17 +401,11 @@ void loop() {
     // Parsing and validation live in the format module, where they can be tested. A
     // file it cannot parse throws before anything here has been touched.
     const doc = parseDiagram(text)
-    instances = doc.parts
-    wires = []
-    history = []
-    future = []
-    clipboard = null
-    selectedIds = []
-    selectedWireId = null
+    project.load(doc.parts, [])
+    files.error = ''
+    input.clearSelection()
     pendingWires = doc.wires
-    if (doc.sketch !== null) sketch = doc.sketch
-    syncedSketch = sketch
-    dirty = false
+    editor.load(doc.sketch)
   }
 
   const SAVE_THEN_NEW = 'Save and start new'
@@ -1162,35 +440,14 @@ void loop() {
   }
 
   function resetToBlank() {
-    instances = []
-    wires = []
-    pendingWires = null
-    history = []
-    future = []
-    clipboard = null
-    selectedIds = []
-    selectedWireId = null
-    sketch = DEFAULT_SKETCH
-    syncedSketch = DEFAULT_SKETCH
-    dirty = false
+    project.reset()
     // A new circuit has no home, so the first Save asks. Without this it would write
     // over whatever had been open before.
-    savePath = null
-    avrPins = {}
-    pin13 = false
-    serial = ''
-    buildError = ''
-  }
-
-  /** Write the circuit to a path, and make that path this project's home. */
-  async function writeTo(path: string) {
-    const json = JSON.stringify(buildDiagram(), null, 2)
-    await invoke('write_text_file', { path, contents: json })
-    savePath = path
-    // In step with the disk again, so File -> New stops asking about it.
-    syncedSketch = sketch
-    dirty = false
-    noteSaved()
+    files.reset()
+    pendingWires = null
+    input.clearSelection()
+    editor.reset()
+    sim.reset()
   }
 
   /**
@@ -1202,45 +459,22 @@ void loop() {
    * Deliberately an unconfirmed overwrite, the way every editor behaves, which is what
    * makes Ctrl+S worth pressing. Save as… is how you move or rename it.
    */
-  async function onSave() {
-    const path = savePath
-    if (!path) return onSaveAs()
-    try {
-      await writeTo(path)
-    } catch (err) {
-      console.error('save failed', err)
-    }
+  async function saveCircuit(write: (json: string) => Promise<boolean>) {
+    const ok = await write(JSON.stringify(buildDiagram(), null, 2))
+    if (!ok) return false
+    // In step with the disk again, so File -> New stops asking about it.
+    project.markSaved()
+    editor.markSaved()
+    return true
   }
 
-  /**
-   * Where a first Save should offer to put the file.
-   *
-   * Absolute, and outside the app. A bare "diagram.json" resolves against the working
-   * directory — which for a dev build is `src-tauri/` — so the app used to offer to save
-   * into its own source tree, and once overwrote a tracked file that way.
-   */
-  async function defaultSavePath(): Promise<string> {
-    if (!inTauri) return 'diagram.json'
-    try {
-      const dir = await documentDir()
-      return `${dir.replace(/\/+$/, '')}/diagram.json`
-    } catch {
-      return 'diagram.json'
-    }
+  async function onSave() {
+    await saveCircuit((json) => files.save(json))
   }
 
   /** Always asks, even when there is a home — this is how the home moves. */
   async function onSaveAs() {
-    try {
-      const path = await saveDialog({
-        defaultPath: savePath ?? (await defaultSavePath()),
-        filters: [{ name: 'Wokwi diagram', extensions: ['json'] }],
-      })
-      if (!path) return
-      await writeTo(path)
-    } catch (err) {
-      console.error('save failed', err)
-    }
+    await saveCircuit((json) => files.saveAs(json))
   }
 
   /**
@@ -1257,20 +491,8 @@ void loop() {
     // Loading a diagram replaces the whole circuit, so it can't happen under a
     // live simulation — stop first rather than silently ignoring the click.
     if (running) await stopSim()
-    try {
-      const picked = await openDialog({
-        multiple: false,
-        filters: [{ name: 'Wokwi diagram', extensions: ['json'] }],
-      })
-      if (!picked || typeof picked !== 'string') return
-      const text = await invoke<string>('read_text_file', { path: picked })
-      loadDiagram(text)
-      // Only after it loaded: a file that fails to parse must not become the path
-      // the next Save writes over.
-      savePath = picked
-    } catch (err) {
-      console.error('open failed', err)
-    }
+    // The path becomes the circuit's home only after `loadDiagram` accepted the file.
+    await files.open((text) => loadDiagram(text))
   }
 
   // Decode loaded wire routes once the parts (and their pins) have rendered.
@@ -1282,14 +504,14 @@ void loop() {
       const b = pinPoint(p.b)
       if (!a || !b) return // pins not ready yet — wait for them
       created.push({
-        id: `w${++wireSeq}`,
+        id: input.nextWireId(),
         a: p.a,
         b: p.b,
         waypoints: p.route.length ? decodeRoute(a, p.route) : [],
         colour: p.colour,
       })
     }
-    wires = created
+    project.setWires(created)
     pendingWires = null
     // The file is now fully on the canvas, so frame it. Deferred a frame because the
     // instances have only just been inserted and their sizes aren't measured yet.
@@ -1297,83 +519,26 @@ void loop() {
   })
 
   // ---- Undo / redo -------------------------------------------------------
-  interface Snapshot {
-    instances: Instance[]
-    wires: Wire[]
-  }
-
-  let history = $state<Snapshot[]>([])
-  let future = $state<Snapshot[]>([])
-
-  function snapshot(): Snapshot {
-    return {
-      instances: instances.map((i) => ({ ...i })),
-      wires: wires.map((w) => ({
-        ...w,
-        a: { ...w.a },
-        b: { ...w.b },
-        waypoints: w.waypoints.map((p) => ({ ...p })),
-      })),
-    }
-  }
-
-  // Record the current state, so the mutation that follows can be undone.
   function commit() {
-    history = [...history, snapshot()].slice(-200)
-    future = []
-    dirty = true
-  }
-
-  function applySnapshot(s: Snapshot) {
-    instances = s.instances
-    wires = s.wires
-    selectedIds = []
-    selectedWireId = null
-    wiring = null
+    project.commit()
   }
 
   function undo() {
-    if (!history.length) return
-    future = [...future, snapshot()]
-    const prev = history[history.length - 1]
-    history = history.slice(0, -1)
-    applySnapshot(prev)
+    if (!project.undo()) return
+    input.clearSelection()
+    input.cancelWire()
   }
 
   function redo() {
-    if (!future.length) return
-    history = [...history, snapshot()]
-    const next = future[future.length - 1]
-    future = future.slice(0, -1)
-    applySnapshot(next)
+    if (!project.redo()) return
+    input.clearSelection()
+    input.cancelWire()
   }
 
   // ---- Clipboard ---------------------------------------------------------
-  /** One part on the clipboard, offset from the top-left of the copy it came from. */
-  interface ClipboardPart {
-    kind: PartKind
-    dx: number
-    dy: number
-    /** A copy carries how a part *looks*, not just what it is. */
-    attrs?: Record<string, string>
-    rotate?: number
-  }
-
-  let clipboard = $state<{ x: number; y: number; parts: ClipboardPart[] } | null>(null)
 
   function deleteSelection() {
-    if (selectedWireId) {
-      commit()
-      wires = wires.filter((w) => w.id !== selectedWireId)
-      selectedWireId = null
-    } else if (selectedIds.length) {
-      commit()
-      // A wire hanging off a part that is going goes with it, or it is left dangling.
-      const going = new Set(selectedIds)
-      wires = wires.filter((w) => !going.has(w.a.instanceId) && !going.has(w.b.instanceId))
-      instances = instances.filter((i) => !going.has(i.id))
-      selectedIds = []
-    }
+    input.deleteSelection()
   }
 
   /**
@@ -1383,138 +548,46 @@ void loop() {
    * not a thing the rest of the app could act on.
    */
   function selectAll() {
-    if (!instances.length) return
-    selectedIds = instances.map((i) => i.id)
-    selectedWireId = null
+    input.selectAll()
   }
 
   function copySelection() {
-    const parts = instances.filter((i) => selectedIds.includes(i.id))
-    if (!parts.length) return
-    // Stored relative to the top-left of the copy, so a group keeps its shape wherever
-    // it is pasted. Rotation *and* attributes come along too: without them a copied LED
-    // came back upright and red, and a copied resistor lost its value — the app
-    // forgetting what you had just set.
-    const x = Math.min(...parts.map((p) => p.x))
-    const y = Math.min(...parts.map((p) => p.y))
-    clipboard = {
-      x,
-      y,
-      parts: parts.map((p) => ({
-        kind: p.kind,
-        dx: p.x - x,
-        dy: p.y - y,
-        attrs: attrsOf(p),
-        rotate: p.rotate ?? 0,
-      })),
-    }
+    input.copySelection()
   }
 
   function cutSelection() {
-    copySelection()
-    deleteSelection()
+    input.cutSelection()
   }
 
   function paste() {
-    const clip = clipboard
-    if (!clip) return
-    // Each paste steps along, so pasting twice does not stack two copies in one spot.
-    const x = clip.x + WIRE_GRID
-    const y = clip.y + WIRE_GRID
-    const pasted: string[] = []
-    for (const part of clip.parts) {
-      // The offsets are deliberately not re-snapped to holes: a group should land in the
-      // shape it was copied, not have each part independently jump to the nearest one.
-      const made = addInstance(part.kind, x + part.dx, y + part.dy, part, false)
-      if (made) pasted.push(made.id)
-    }
-    // What you just pasted is what you are working on.
-    if (pasted.length) selectedIds = pasted
-    clipboard = { ...clip, x, y }
+    input.paste()
   }
 
   function duplicateSelection() {
-    if (!selectedIds.length) return
-    copySelection()
-    paste()
+    input.duplicateSelection()
   }
 
   // ---- Wires: colour, fit, clear -----------------------------------------
   // `quarterTurns` is 1 for the R shortcut / toolbar, 2 for "Rotate 180°".
   function rotatePart(quarterTurns = 1) {
-    const turning = instances.filter((i) => selectedIds.includes(i.id))
-    if (!turning.length) return
-    // One snapshot for the whole turn, so undo puts them all back together rather than
-    // stepping through them one at a time.
-    commit()
-    for (const inst of turning) rotateOne(inst, quarterTurns)
-  }
-
-  function rotateOne(inst: Instance, quarterTurns: number) {
-    inst.rotate = ((inst.rotate ?? 0) + 90 * quarterTurns) % 360
-    // Rotating moves the legs, so put the part back down where they still land in
-    // holes. On a breadboard you don't spin a part on the spot — you pull it out
-    // and push it back in. Without this, rotating a seated part left its legs
-    // between holes, which is what a rotated pushbutton looked like.
-    if (!isBreadboard(inst.kind)) {
-      const seated = snapToHoles(
-        { x: inst.x, y: inst.y },
-        pinOffsets(inst),
-        boardHolePoints(),
-        SNAP,
-      )
-      // Off the board, or nothing in reach: leave it exactly where it was.
-      if (seated) {
-        inst.x = seated.x
-        inst.y = seated.y
-      }
-    }
+    input.rotatePart(quarterTurns)
   }
 
   function setWireColour(name: string) {
-    const w = selectedWireId ? wires.find((x) => x.id === selectedWireId) : null
-    if (!w || w.colour === name) return
-    commit()
-    w.colour = name
+    input.setWireColour(name)
   }
 
   function fitView() {
     if (!canvasEl || !instances.length) return
-    const r = canvasEl.getBoundingClientRect()
-    const pad = 48
-    let minX = Infinity
-    let minY = Infinity
-    let maxX = -Infinity
-    let maxY = -Infinity
-    for (const inst of instances) {
-      const el = canvasEl.querySelector(`.instance[data-id="${inst.id}"]`) as HTMLElement | null
-      const w = el?.offsetWidth ?? 0
-      const h = el?.offsetHeight ?? 0
-      minX = Math.min(minX, inst.x)
-      minY = Math.min(minY, inst.y)
-      maxX = Math.max(maxX, inst.x + w)
-      maxY = Math.max(maxY, inst.y + h)
-    }
-    const bw = Math.max(1, maxX - minX)
-    const bh = Math.max(1, maxY - minY)
-    const z = Math.min(
-      ZOOM_MAX,
-      Math.max(ZOOM_MIN, Math.min((r.width - pad * 2) / bw, (r.height - pad * 2) / bh)),
-    )
-    zoom = z
-    panX = (r.width - bw * z) / 2 - minX * z
-    panY = (r.height - bh * z) / 2 - minY * z
+    view.fit(instances, sizesById, canvasEl.getBoundingClientRect())
   }
 
   function clearCanvas() {
     if (running) return
     if (!instances.length && !wires.length) return
-    commit()
-    instances = []
-    wires = []
-    selectedIds = []
-    selectedWireId = null
-    wiring = null
+    project.clear()
+    input.clearSelection()
+    input.cancelWire()
   }
 
   // ---- Menu bar ----------------------------------------------------------
@@ -1594,7 +667,7 @@ void loop() {
     // would act on parts you cannot see it acting on.
     const hit = (e.target as Element | null)?.closest('.instance') as HTMLElement | null
     const hitId = hit?.dataset.id
-    if (hitId && !selectedIds.includes(hitId)) selectedIds = [hitId]
+    if (hitId && !selectedIds.includes(hitId)) input.selectOnly(hitId)
     const el = e.target as Element | null
     const partEl = el?.closest('.instance') as HTMLElement | null
     const wireEl = el?.closest('.wire__hit') as Element | null
@@ -1609,8 +682,8 @@ void loop() {
     // part of it. It must not be narrowed again here, or right-clicking any part of a
     // multi-selection would throw the rest away and the menu could never act on a group.
     // Right-clicking a *wire* is not about parts at all, so that does clear them.
-    if (!partId) selectedIds = []
-    selectedWireId = wireId ?? null
+    if (!partId) input.clearSelection()
+    input.selectWire(wireId ?? null)
     menu = {
       x: Math.max(0, Math.min(e.clientX, window.innerWidth - MENU_W)),
       y: Math.max(0, Math.min(e.clientY, window.innerHeight - MENU_H)),
@@ -1680,21 +753,14 @@ void loop() {
   })
 
   // ---- Canvas renderer ---------------------------------------------------
-  // The circuit is drawn into a <canvas> at device resolution (crisp); the DOM
-  // stays invisible and handles hit-testing. See src/lib/circuit-render.ts.
-  let palette = $state<Palette>(readPalette())
-  const partImages = new Map<string, PartSprite>()
-  const pendingParts = new Set<string>()
-  let partImagesVersion = $state(0)
+  // The surface owns the sprite cache and the drawing (lib/canvas.svelte.ts).
 
-  function wireColour(name?: string): string {
-    return name ? (WIRE_HEX.get(name) ?? name) : palette.wire
-  }
-
-  /** A part's attributes: the catalogue's defaults, with its own on top. */
-  function attrsOf(inst: Instance): Record<string, string> {
-    return { ...partByKind(inst.kind).attrs, ...inst.attrs }
-  }
+  // Also re-run the palette thumbnails when the panel reopens, in case the tiles
+  // weren't mounted yet.
+  $effect(() => {
+    void rightCollapsed
+    requestAnimationFrame(() => surface.buildPaletteArt())
+  })
 
   /** Change one property of a part (undoable). */
   /**
@@ -1766,345 +832,13 @@ void loop() {
     inst.attrs = { ...inst.attrs, [name]: value }
   }
 
-  /**
-   * The key a part's sprite is cached under when only its *drawing* matters —
-   * what the simulation changes, not how big the part is.
-   *
-   * This split matters more than it looks. `pinCanvasPoint` runs inside the
-   * netlist effect's dependency read, and a *rotated* part needed its sprite size
-   * — which meant reading `partKey`, which reads `ledStates`. The effect then
-   * assigns `ledStates`, so it re-triggered itself forever: a busy loop that
-   * started the moment anything was rotated, never stopped, and got worse the
-   * more there was on the canvas. Sizes are keyed without state, so the rotation
-   * path can't reach any.
-   */
-  function baseKey(inst: Instance): string {
-    return `${partByKind(inst.kind).tag}|${JSON.stringify(attrsOf(inst))}`
-  }
-
-  function partKey(inst: Instance): string {
-    const chip = inst.kind === 'uno' && pin13 ? 1 : 0
-    const lit = inst.kind === 'led' ? LED_ORDER[ledStates[inst.id] ?? 'off'] : 0
-    const down = inst.kind === 'pushbutton' && pressedButtons[inst.id] ? 1 : 0
-    return `${baseKey(inst)}|${chip}${lit}${down}`
-  }
-
-  /** Rasterised size per `baseKey` — a plain Map, so reading it tracks nothing. */
-  const partSizes = new Map<string, { w: number; h: number }>()
-
-  /** The box a part rotates about. Deliberately free of simulation state. */
-  function partSizeOf(inst: Instance): { w: number; h: number } {
-    const cached = partSizes.get(baseKey(inst))
-    if (cached) return cached
-    const dom = sizesById[inst.id]
-    return { w: dom?.w ?? 0, h: dom?.h ?? 0 }
-  }
-
-  const partRetries = new Map<string, number>()
-
-  // The palette shows each part's *real* drawing, rasterised exactly like the
-  // canvas is (see lib/part-art.ts). The hand-drawn line icons are only a
-  // fallback for the frame or two before the thumbnail is ready.
-  let partsListEl = $state<HTMLElement | null>(null)
-  let partArt = $state<Record<string, { href: string; width: number; height: number }>>({})
-  const artPending = new Set<PartKind>()
-
-  // Each kind's pin offsets, taken from the palette's hidden elements. That's how
-  // a part can be dropped straight into a hole before it has ever been mounted.
-  const kindPins = new Map<PartKind, PinGeom[]>()
-  // A part within a hole's pitch of one snaps into it; anything further is free.
-  const SNAP_REACH = BREADBOARD_PITCH * 1.1
-  /** How far a part may move to find a placement, and what counts as seated. */
-  const SNAP = { reach: SNAP_REACH, seat: BREADBOARD_HOLE_R }
-
-  /** A part's pin offsets from its own origin, rotation included. */
-  function pinOffsets(inst: Instance): Point[] {
-    const pins = pinsById[inst.id]
-    if (!pins?.length) return []
-    return pins.map((p) => {
-      const at = pinCanvasPoint(inst, p)
-      return { x: at.x - inst.x, y: at.y - inst.y }
-    })
-  }
-
-  /** Every breadboard hole, in canvas space. */
-  function boardHolePoints(): Point[] {
-    const holes: Point[] = []
-    for (const board of instances) {
-      if (!isBreadboard(board.kind)) continue
-      for (const hole of pinsById[board.id] ?? []) holes.push(pinCanvasPoint(board, hole))
-    }
-    return holes
-  }
-
-  /**
-   * Where a part should sit: in a hole if one is within reach, otherwise on the
-   * free grid. The holes are tried **first**, from the raw pointer position.
-   *
-   * That order is the whole point. Quantising to the 12px free grid first moved
-   * the part up to 6px away before anyone asked about holes, which is further
-   * than the reach — so some columns simply could not be used, and which ones
-   * failed moved whenever either grid changed.
-   */
-  function placePart(kind: PartKind, offsets: Point[], rawX: number, rawY: number) {
-    const raw = { x: rawX, y: rawY }
-    // A board never snaps into another board: it has hundreds of holes of its own.
-    const onHoles = isBreadboard(kind)
-      ? null
-      : snapToHoles(raw, offsets, boardHolePoints(), SNAP)
-    if (onHoles) return onHoles
-    return { x: snapToGrid(raw.x), y: snapToGrid(raw.y) }
-  }
-
-  function buildPaletteArt(attempt = 0) {
-    const tiles = Array.from(partsListEl?.querySelectorAll<HTMLElement>('.part[data-kind]') ?? [])
-    let waitingForLayout = false
-    for (const tile of tiles) {
-      const kind = tile.dataset.kind as PartKind | undefined
-      if (!kind || partArt[kind] || artPending.has(kind)) continue
-      const host = tile.querySelector('.part__art > *:first-child') as
-        | (HTMLElement & { pinInfo?: PinGeom[] })
-        | null
-      // Remember this kind's pin offsets, for snapping straight into a hole.
-      if (host?.pinInfo?.length && !kindPins.has(kind)) {
-        kindPins.set(
-          kind,
-          host.pinInfo.map((p) => ({ name: p.name, x: p.x, y: p.y })),
-        )
-      }
-      let markup: string | null = null
-      try {
-        markup = host ? shadowSvgMarkup(host) : null
-      } catch {
-        markup = null
-      }
-      if (!markup) {
-        // Not laid out yet — try again next frame.
-        waitingForLayout = true
-        continue
-      }
-      artPending.add(kind)
-      svgMarkupToImage(markup)
-        .then((art) => {
-          artPending.delete(kind)
-          // The object URL is deliberately kept alive: the <img> shows it.
-          partArt = {
-            ...partArt,
-            [kind]: { href: art.href, width: art.width, height: art.height },
-          }
-        })
-        .catch(() => artPending.delete(kind))
-    }
-    if (waitingForLayout && attempt < 30) {
-      requestAnimationFrame(() => buildPaletteArt(attempt + 1))
-    }
-  }
-
-  // Also re-run when the panel reopens, in case the tiles weren't mounted yet.
-  $effect(() => {
-    void rightCollapsed
-    requestAnimationFrame(() => buildPaletteArt())
-  })
-
-  // Rasterise a part's element (its shadow-root contents) into an image we blit.
-  // `waited` makes the Lit wait below one-shot: `updateComplete` is a *reused*
-  // promise that still exists once settled, so re-reading it after awaiting it
-  // would spin forever — freezing the app the first time a part is rasterised.
-  function rasterizePart(inst: Instance, waited = false) {
-    const key = partKey(inst)
-    if (partImages.has(key) || pendingParts.has(key)) return
-    const host = canvasEl?.querySelector(
-      `.instance[data-id="${inst.id}"] > *:first-child`,
-    ) as HTMLElement | null
-    // Lit re-renders asynchronously — wait once for it before snapshotting, or
-    // we capture (and cache) the *previous* drawing. This matters when the
-    // drawing depends on a property we just changed: the LED's `value`, the
-    // button's `pressed`, the Uno's `led13`.
-    if (!waited) {
-      const ready = (host as unknown as { updateComplete?: Promise<unknown> } | null)
-        ?.updateComplete
-      if (ready && typeof ready.then === 'function') {
-        pendingParts.add(key)
-        const again = () => {
-          pendingParts.delete(key)
-          rasterizePart(inst, true)
-        }
-        ready.then(again, again)
-        return
-      }
-    }
-    // The state can move on while we wait (a press that turns into a drag).
-    // Never file a snapshot under a key it no longer matches.
-    if (partKey(inst) !== key) return
-
-    const w = host?.offsetWidth ?? 0
-    const h = host?.offsetHeight ?? 0
-    if (!host || !host.shadowRoot || !w || !h) {
-      // Not laid out yet — retry on the next frame until it is.
-      const tries = (partRetries.get(key) ?? 0) + 1
-      if (tries <= 120) {
-        partRetries.set(key, tries)
-        requestAnimationFrame(() => (partImagesVersion += 1))
-      }
-      return
-    }
-    let markup: string | null
-    try {
-      markup = shadowSvgMarkup(host)
-    } catch (err) {
-      renderError = `${key}: ${String(err)}`
-      return
-    }
-    if (!markup) return
-    pendingParts.add(key)
-    svgMarkupToImage(markup, { width: w, height: h })
-      .then((art) => {
-        // The image already holds the pixels; the URL only existed to load it.
-        URL.revokeObjectURL(art.href)
-        partImages.set(key, { image: art.image, w: art.width, h: art.height })
-        // The size, without the simulation state the key above carries.
-        partSizes.set(baseKey(inst), { w: art.width, h: art.height })
-        pendingParts.delete(key)
-        renderError = ''
-        partImagesVersion++
-      })
-      .catch((err) => {
-        pendingParts.delete(key)
-        renderError = `${key}: ${String(err)}`
-      })
-  }
-
-  /**
-   * A miswired part gets a badge on the canvas, and the properties strip spells it
-   * out once the part is selected. A bare dot would explain nothing on its own.
-   */
-  function drawWarning(
-    ctx: CanvasRenderingContext2D,
-    t: ReturnType<typeof makeTransform>,
-    inst: Instance,
-    palette: Palette,
-    zoom: number,
-  ) {
-    const size = sizesById[inst.id] ?? partImages.get(partKey(inst))
-    const at = t.toScreen({ x: inst.x + (size?.w ?? 0) - 2, y: inst.y + 2 })
-    drawDisc(ctx, at, 6 * zoom, palette.accent, palette.bg)
-    ctx.save()
-    ctx.fillStyle = palette.bg
-    ctx.font = `bold ${7 * zoom}px sans-serif`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText('!', at.x, at.y)
-    ctx.restore()
-  }
-
-  function drawCircuit() {
-    const c = renderCanvas
-    if (!c || !canvasEl) return
-    const ctx = c.getContext('2d')
-    if (!ctx) return
-    const dpr = window.devicePixelRatio || 1
-    const rect = canvasEl.getBoundingClientRect()
-    const view = {
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
-      dpr,
-      zoom,
-      panX,
-      panY,
-    }
-    if (c.width !== view.width * dpr || c.height !== view.height * dpr) {
-      c.width = view.width * dpr
-      c.height = view.height * dpr
-    }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    clear(ctx, view, palette)
-    drawGrid(ctx, view, palette, zoom >= 0.67)
-    const t = makeTransform(view)
-
-    // Each part is drawn with its own pins, so a part on top hides the pins of
-    // the parts beneath it; wires go over everything (like Wokwi).
-    for (const inst of renderOrder) {
-      const sprite = partImages.get(partKey(inst))
-      if (sprite) {
-        const p = t.toScreen({ x: inst.x, y: inst.y })
-        const pw = sprite.w * zoom
-        const ph = sprite.h * zoom
-        ctx.save()
-        if (inst.rotate) {
-          ctx.translate(p.x + pw / 2, p.y + ph / 2)
-          ctx.rotate((inst.rotate * Math.PI) / 180)
-          ctx.drawImage(sprite.image, -pw / 2, -ph / 2, pw, ph)
-        } else {
-          ctx.drawImage(sprite.image, p.x, p.y, pw, ph)
-        }
-        ctx.restore()
-      } else {
-        rasterizePart(inst)
-      }
-      // A marker only for the pin under the pointer: marking every pin reads as
-      // static on a breadboard and is clutter on anything else.
-      for (const pin of pinsById[inst.id] ?? []) {
-        const hovered = hoveredPin?.instanceId === inst.id && hoveredPin.pin === pin.name
-        if (!hovered) continue
-        drawSquare(
-          ctx,
-          t.toScreen(pinCanvasPoint(inst, pin)),
-          (hovered ? 10 : 7) * zoom,
-          hovered ? palette.accent : palette.wire,
-          palette.bg,
-        )
-      }
-      if (warnings[inst.id]) drawWarning(ctx, t, inst, palette, zoom)
-    }
-
-    for (const w of wires) {
-      const a = pinPoint(w.a)
-      const b = pinPoint(w.b)
-      if (!a || !b) continue
-      const pts = expandPath([a, ...w.waypoints, b]).map(t.toScreen)
-      drawPolyline(ctx, pts, wireColour(w.colour), (selectedWireId === w.id ? 4 : 2.5) * zoom)
-    }
-
-    // A ring for every selected part, not only the one the strip is editing.
-    for (const id of selectedIds) {
-      const inst = instances.find((i) => i.id === id)
-      if (inst) {
-        const p = t.toScreen({ x: inst.x, y: inst.y })
-        const sprite = partImages.get(partKey(inst))
-        const host = canvasEl.querySelector(`.instance[data-id="${inst.id}"]`) as HTMLElement | null
-        const sw = (sprite?.w ?? host?.offsetWidth ?? 0) * zoom
-        const sh = (sprite?.h ?? host?.offsetHeight ?? 0) * zoom
-        ctx.save()
-        ctx.translate(p.x + sw / 2, p.y + sh / 2)
-        if (inst.rotate) ctx.rotate((inst.rotate * Math.PI) / 180)
-        ctx.strokeStyle = palette.accent
-        ctx.lineWidth = 2 * zoom
-        ctx.strokeRect(-sw / 2 - 3 * zoom, -sh / 2 - 3 * zoom, sw + 6 * zoom, sh + 6 * zoom)
-        ctx.restore()
-      }
-    }
-
-    if (wiring) {
-      drawPolyline(ctx, expandPath(wiringPoints).map(t.toScreen), palette.wire, 2.5 * zoom, [4, 4])
-      const snap = wiringTarget ? pinPoint(wiringTarget) : null
-      if (snap) drawDisc(ctx, t.toScreen(snap), 7 * zoom, '', palette.accent)
-    }
-
-    if (selectedWireId) {
-      const w = wires.find((x) => x.id === selectedWireId)
-      if (w) {
-        for (const ref of [w.a, w.b]) {
-          const p = pinPoint(ref)
-          if (p) drawDisc(ctx, t.toScreen(p), 5 * zoom, palette.accent, palette.bg)
-        }
-      }
-    }
-  }
+  /** Change one property of a part (undoable). */
 
   // Redraw whenever anything the canvas shows changes.
   $effect(() => {
-    void partImagesVersion
-    void palette
+    void surface.partImagesVersion
+    void surface.sizeVersion
+    void surface.palette
     for (const inst of instances) {
       void inst.x
       void inst.y
@@ -2122,15 +856,29 @@ void loop() {
     void selectedWireId
     void hoveredPin
     void wiring
-    void cursor
     void rerouting
-    drawCircuit()
+    surface.draw({
+      instances,
+      wires,
+      selectedIds,
+      selectedWireId,
+      hoveredPin,
+      zoom,
+      panX,
+      panY,
+      wiring,
+      wiringPoints: input.wiringPoints,
+      wiringTarget: input.wiringTarget,
+    })
   })
+
+  // Keep the drawn bitmap in step with the canvas's layout size.
+  $effect(() => surface.watchSize())
 
   // Keep the canvas palette in step with the theme.
   $effect(() => {
     void theme
-    palette = readPalette()
+    surface.palette = readPalette()
   })
 
   // ---- Simulation --------------------------------------------------------
@@ -2169,8 +917,6 @@ void loop() {
     return { update: apply }
   }
 
-  const lastDrives = new Map<string, boolean>()
-
   // When the circuit or the chip's pins change: re-solve the netlist, light the
   // LEDs, and push any button-driven pins back into the simulator.
   $effect(() => {
@@ -2185,68 +931,30 @@ void loop() {
       })),
     }))
     const refs = wires.map((w) => ({ a: { ...w.a }, b: { ...w.b } }))
-    // Handed over by reference rather than spread, and that matters: reading
-    // `pressedButtons[id]` is tracked even for an id that is not in the object yet,
-    // which is what carries a press from the canvas into the simulator. Spreading
-    // reads only the keys it already has, so a button that had never been pressed
-    // was invisible to this effect and no pin was ever driven.
-    const result = evaluateCircuit(parts, refs, pressedButtons, avrPins)
-    ledStates = result.leds
-    warnings = result.warnings
-    if (!inTauri || !running) {
-      lastDrives.clear()
-      return
-    }
-    for (const d of result.drives) {
-      const k = `${d.port}${d.pin}`
-      if (lastDrives.get(k) === d.high) continue
-      lastDrives.set(k, d.high)
-      // Not fire-and-forget: a rejected command used to vanish silently, which is
-      // exactly how "the button does nothing" hid for this long.
-      invoke('set_input', { port: d.port.charCodeAt(0), pin: d.pin, high: d.high }).catch((err) =>
-        console.error('set_input failed', err),
-      )
-    }
+    // Handed over by reference: `Sim.solve` reads `pressedButtons[id]` even for an id
+    // that is not in the object yet, which is what carries a press from the canvas
+    // into the simulator. Spreading reads only the keys it already has, so a button
+    // that had never been pressed was invisible and no pin was ever driven.
+    sim.solve(parts, refs)
   })
 
   async function runSim() {
-    buildError = ''
-    serial = ''
-    pin13 = false
-    // A stopped chip drives nothing — clear the levels it last reported, or an
-    // external LED would stay lit at whatever the sketch left it on.
-    avrPins = {}
     // A fresh run never inherits a half-drawn wire or a held button.
-    wiring = null
-    rerouting = null
-    pressedButtons = {}
-    try {
-      const fw = await invoke<{ elf: string }>('compile_sketch', { sketch })
-      await invoke('start_sim', { elf: fw.elf, bounce: switchBounce })
-      running = true
-    } catch (err) {
-      buildError = String(err)
-      running = false
-    }
+    input.cancelWire()
+    input.rerouting = null
+    await sim.run(editor.text, switchBounce)
     showSerial = true
   }
 
   async function stopSim() {
-    try {
-      await invoke('stop_sim')
-    } catch {
-      /* ignore */
-    }
-    running = false
-    pin13 = false
-    avrPins = {}
-    pressedButtons = {}
+    await sim.stop()
   }
 
   // Apply an edited sketch without leaving the run: recompile and restart.
   async function restartSim() {
-    await stopSim()
-    await runSim()
+    input.cancelWire()
+    input.rerouting = null
+    await sim.restart(editor.text, switchBounce)
   }
 
   /**
@@ -2286,26 +994,7 @@ void loop() {
   })
 
   // Stream pin changes and serial bytes from the engine (set up once).
-  $effect(() => {
-    if (!inTauri) return
-    let alive = true
-    const unlisten: (() => void)[] = []
-    listen<{ port: number; pin: number; high: boolean }>('sim:pin', (e) => {
-      avrPins[`${String.fromCharCode(e.payload.port)}${e.payload.pin}`] = e.payload.high
-      if (e.payload.port === 66 && e.payload.pin === 5) pin13 = e.payload.high
-    }).then((u) => alive && unlisten.push(u))
-    listen<number>('sim:serial', (e) => {
-      // Append, then trim only when over the cap. Slicing on every byte is O(n²) — at
-      // 115200 baud that rebuilds a 20 000-character string a thousand times a second,
-      // which is enough to stutter the UI.
-      serial += String.fromCharCode(e.payload)
-      if (serial.length > 20000) serial = serial.slice(-20000)
-    }).then((u) => alive && unlisten.push(u))
-    return () => {
-      alive = false
-      unlisten.forEach((u) => u())
-    }
-  })
+  $effect(() => sim.attach())
 </script>
 
 <div class="app">
@@ -2529,7 +1218,7 @@ void loop() {
         </button>
       </header>
       <div class="panel__body panel__body--code">
-        <CodeEditor bind:value={sketch} />
+        <CodeEditor bind:value={editor.text} />
       </div>
     </section>
 
@@ -2698,18 +1387,21 @@ void loop() {
       {#if renderError}
         <div class="render-error">{renderError}</div>
       {/if}
+      {#if fileError}
+        <div class="file-error" role="alert" title={fileError}>{fileError}</div>
+      {/if}
       <div
         class="panel__body panel__body--canvas"
         class:is-wiring={!!wiring || !!rerouting}
         role="application"
         aria-label="Circuit canvas"
         tabindex="-1"
-        bind:this={canvasEl}
-        onpointerdown={onCanvasPointerDown}
-        onpointermove={onCanvasHover}
+        bind:this={surface.canvasEl}
+        onpointerdown={(e) => input.onCanvasPointerDown(e)}
+        onpointermove={(e) => input.onCanvasHover(e)}
         oncontextmenu={openContextMenu}
       >
-        <canvas class="circuit-canvas" bind:this={renderCanvas}></canvas>
+        <canvas class="circuit-canvas" bind:this={surface.renderCanvas}></canvas>
         {#if savedNote}
           <div class="saved-note" role="status">Saved</div>
         {/if}
@@ -2753,7 +1445,7 @@ void loop() {
         <!-- Wire hit-targets live under the parts, so they never block pins. -->
         <svg class="wires" aria-hidden="true">
           {#each wires as w (w.id)}
-            {@const pts = wirePoints(w)}
+            {@const pts = input.wirePoints(w)}
             {#if pts.length >= 2}
               <path
                 class="wire__hit"
@@ -2762,7 +1454,7 @@ void loop() {
                 aria-label="Select or reshape wire"
                 tabindex="-1"
                 d={routePath(pts)}
-                onpointerdown={(e) => startWireDrag(e, w.id)}
+                onpointerdown={(e) => input.startWireDrag(e, w.id)}
               />
             {/if}
           {/each}
@@ -2778,8 +1470,8 @@ void loop() {
               role="button"
               aria-label={def.label}
               tabindex="0"
-              style="transform: translate({domX(inst)}px, {domY(inst)}px) rotate({inst.rotate ?? 0}deg)"
-              onpointerdown={(e) => startMove(e, inst)}
+              style="transform: translate({input.domX(inst)}px, {input.domY(inst)}px) rotate({inst.rotate ?? 0}deg)"
+              onpointerdown={(e) => input.startMove(e, inst)}
             >
               <!-- One element for every part, named by the catalogue — so adding
                    a component is a catalogue entry, not a branch here. -->
@@ -2806,7 +1498,7 @@ void loop() {
              render above the parts, like Wokwi. -->
         <svg class="wires" aria-hidden="true">
           {#each wires as w (w.id)}
-            {@const pts = wirePoints(w)}
+            {@const pts = input.wirePoints(w)}
             {#if pts.length >= 2}
               <path
                 class="wire__line"
@@ -2818,11 +1510,11 @@ void loop() {
           {/each}
 
           {#if wiring}
-            {@const d = routePath(wiringPoints)}
+            {@const d = routePath(input.wiringPoints)}
             {#if d}
               <path class="wire__line wire__line--preview" d={d} />
             {/if}
-            {@const snap = wiringTarget ? pinPoint(wiringTarget) : null}
+            {@const snap = input.wiringTarget ? pinPoint(input.wiringTarget) : null}
             {#if snap}
               <circle class="wire__snap" cx={snap.x} cy={snap.y} r="7" />
             {/if}
@@ -2842,7 +1534,7 @@ void loop() {
                   cx={a.x}
                   cy={a.y}
                   r="5"
-                  onpointerdown={(e) => startEndpointDrag(e, w.id, 'a')}
+                  onpointerdown={(e) => input.startEndpointDrag(e, w.id, 'a')}
                 />
               {/if}
               {#if b}
@@ -2854,7 +1546,7 @@ void loop() {
                   cx={b.x}
                   cy={b.y}
                   r="5"
-                  onpointerdown={(e) => startEndpointDrag(e, w.id, 'b')}
+                  onpointerdown={(e) => input.startEndpointDrag(e, w.id, 'b')}
                 />
               {/if}
             {/if}
@@ -2928,14 +1620,14 @@ void loop() {
         </button>
       </header>
       <div class="panel__body">
-        <ul class="parts" bind:this={partsListEl}>
+        <ul class="parts" bind:this={surface.partsListEl}>
           {#each PARTS as part (part.kind)}
             <li
               class="part"
               class:is-locked={running}
               data-kind={part.kind}
               title={running ? 'Stop the simulation to add parts' : part.label}
-              onpointerdown={(e) => startPaletteDrag(e, part)}
+              onpointerdown={(e) => input.startPaletteDrag(e, part)}
             >
               {#if partArt[part.kind]}
                 <img
@@ -3397,6 +2089,19 @@ void loop() {
     font-size: 11px;
     color: var(--error);
     border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* A save or open that did not happen. Docked, like every other message here. */
+  .file-error {
+    flex: none;
+    padding: 4px var(--space-3);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--error);
+    border-bottom: 1px solid var(--error);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
