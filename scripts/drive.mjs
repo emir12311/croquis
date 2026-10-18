@@ -73,7 +73,10 @@ export class App {
         this.consoleErrors.push(msg.params.args.map((a) => a.value ?? a.description).join(' '))
       }
       if (msg.method === 'Runtime.exceptionThrown') {
-        this.consoleErrors.push('EXCEPTION ' + (msg.params.exceptionDetails?.text ?? ''))
+        const details = msg.params.exceptionDetails
+        this.consoleErrors.push(
+          'EXCEPTION ' + (details?.exception?.description ?? details?.text ?? ''),
+        )
       }
       const resolve = this.pending.get(msg.id)
       if (resolve) {
@@ -155,6 +158,27 @@ export class App {
     })()`)
   }
 
+  /** The screen-space centre of one named pin on a part. */
+  pinAt(tag, pin) {
+    return this.ev(`(() => {
+      const el = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === ${JSON.stringify(tag)})
+      const p = el?.querySelector(${JSON.stringify(`[data-pin="${pin}"]`)})
+      if (!p) return null
+      const r = p.getBoundingClientRect()
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+    })()`)
+  }
+
+  /** The screen-space centre of a part's body. */
+  partCentre(tag) {
+    return this.ev(`(() => {
+      const el = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === ${JSON.stringify(tag)})
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+    })()`)
+  }
+
   /** Load one of the shipped circuits by name, the way a person would. */
   async loadPreset(label) {
     const file = await this.ev(`(() => { const b = [...document.querySelectorAll('.menubar__btn')].find(e => e.textContent.trim() === 'File'); const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
@@ -164,6 +188,24 @@ export class App {
     if (!item) throw new Error(`no preset called ${label}`)
     await this.click(item.x, item.y)
     await sleep(900)
+  }
+
+  /** The screen-space centre of a palette tile. */
+  paletteTile(kind) {
+    return this.ev(`(() => {
+      const el = document.querySelector('.part[data-kind="${kind}"]')
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+    })()`)
+  }
+
+  /** The screen-space centre of the circuit canvas panel. */
+  async canvasCentre() {
+    return this.ev(`(() => {
+      const r = document.querySelector('.panel__body--canvas').getBoundingClientRect()
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+    })()`)
   }
 
   async close() {
@@ -308,6 +350,251 @@ check('a group drags past the old origin corner and keeps its shape', async (app
   assert(moved(resistorBefore, resistorAfter) === moved(ledBefore, ledAfter), `both moved together (${moved(resistorBefore, resistorAfter)})`)
   assert(resistorAfter.x - ledAfter.x === resistorBefore.x - ledBefore.x, 'the group kept its shape')
   assert(resistorAfter.y < resistorBefore.y - 200, 'it went past where the old clamp was')
+})
+
+check('clicking two pins wires them, and the same two again removes the wire', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Blink')
+  const count = () => app.ev(`document.querySelectorAll('.wire__line').length`)
+  const before = await count()
+  // Two pins on the Uno that the preset leaves free, so no wire sits over them.
+  const a = await app.pinAt('wokwi-arduino-uno', '12')
+  const b = await app.pinAt('wokwi-arduino-uno', '11')
+  assert(a && b, 'both free pins are on screen')
+  await app.click(a.x, a.y)
+  await sleep(200)
+  await app.click(b.x, b.y)
+  await sleep(400)
+  assert((await count()) === before + 1, `a wire was added (${before} -> ${await count()})`)
+  await app.click(a.x, a.y)
+  await sleep(200)
+  await app.click(b.x, b.y)
+  await sleep(400)
+  assert((await count()) === before, `the same two pins remove it again (${await count()})`)
+})
+
+check('undo and redo restore a dragged part', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Blink')
+  const before = await app.partBox('wokwi-resistor')
+  await app.drag({ x: before.x + 25, y: before.y + 5 }, { x: before.x + 125, y: before.y + 105 })
+  await sleep(400)
+  const after = await app.partBox('wokwi-resistor')
+  assert(after.x !== before.x || after.y !== before.y, `the drag moved it (${before.x},${before.y} -> ${after.x},${after.y})`)
+  await app.ev(`document.querySelector('.panel__body--canvas').focus()`)
+  await app.key('z', { code: 'KeyZ', vk: 90, modifiers: 2 })
+  await sleep(400)
+  const undone = await app.partBox('wokwi-resistor')
+  assert(undone.x === before.x && undone.y === before.y, `undo put it back (${undone.x},${undone.y})`)
+  await app.key('z', { code: 'KeyZ', vk: 90, modifiers: 10 })
+  await sleep(400)
+  const redone = await app.partBox('wokwi-resistor')
+  assert(redone.x === after.x && redone.y === after.y, `redo moved it again (${redone.x},${redone.y})`)
+})
+
+check('copy and paste duplicate the whole selection', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Blink')
+  const count = () => app.ev(`document.querySelectorAll('.instance').length`)
+  assert((await count()) === 3, 'starts with three parts')
+  await app.ev(`document.querySelector('.panel__body--canvas').focus()`)
+  await app.key('a', { code: 'KeyA', vk: 65, modifiers: 2 })
+  await app.key('c', { code: 'KeyC', vk: 67, modifiers: 2 })
+  await app.key('v', { code: 'KeyV', vk: 86, modifiers: 2 })
+  await sleep(500)
+  assert((await count()) === 6, `paste gave six parts (${await count()})`)
+  assert(
+    (await app.ev(`document.querySelectorAll('.instance--selected').length`)) === 3,
+    'the pasted copy is selected, not the original',
+  )
+})
+
+check('R rotates the selected part', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Blink')
+  const centre = await app.partCentre('wokwi-resistor')
+  await app.click(centre.x, centre.y)
+  await sleep(200)
+  await app.key('r', { code: 'KeyR', vk: 82 })
+  await sleep(300)
+  const transform = await app.ev(`(() => {
+    const el = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === 'wokwi-resistor')
+    return el?.style.transform ?? ''
+  })()`)
+  assert(transform.includes('rotate(90deg)'), `the resistor turned 90 degrees (${transform})`)
+})
+
+check('right-clicking a part opens the in-app menu', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Blink')
+  const centre = await app.partCentre('wokwi-led')
+  await app.ev(`(() => {
+    const el = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === 'wokwi-led')
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }))
+  })()`)
+  await sleep(200)
+  const items = await app.ev(`[...document.querySelectorAll('.menu__item')].map(b => b.textContent.trim())`)
+  assert(Array.isArray(items) && items.length > 0, `the menu opened (${JSON.stringify(items)})`)
+  assert(items.some((t) => t.includes('Duplicate')) && items.some((t) => t.includes('Delete')), 'it offers Duplicate and Delete')
+  await app.key('Escape', { code: 'Escape', vk: 27 })
+  await sleep(200)
+  assert((await app.ev(`document.querySelectorAll('.menu').length`)) === 0, 'Escape closes it')
+})
+
+check('editing a property changes the part, and undo restores it', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Blink')
+  // Selecting through the context menu avoids arming a wire on the LED's pins.
+  const centre = await app.partCentre('wokwi-led')
+  await app.ev(`(() => {
+    const el = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === 'wokwi-led')
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }))
+  })()`)
+  await sleep(200)
+  // Close the menu without Escape: Escape also clears the selection in this app.
+  await app.ev(`document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
+  await sleep(200)
+  // The colour is a property of the custom element, not an attribute it renders.
+  const colour = () => app.ev(`document.querySelector('wokwi-led')?.color`)
+  assert((await colour()) === 'red', 'the LED starts red')
+  await app.ev(`(() => {
+    const s = document.querySelector('.props select')
+    s.value = 'blue'
+    s.dispatchEvent(new Event('change', { bubbles: true }))
+  })()`)
+  await sleep(300)
+  assert((await colour()) === 'blue', `the property changed the part (${await colour()})`)
+  await app.ev(`document.querySelector('.panel__body--canvas').focus()`)
+  await app.key('z', { code: 'KeyZ', vk: 90, modifiers: 2 })
+  await sleep(300)
+  assert((await colour()) === 'red', `undo restored it (${await colour()})`)
+})
+
+check('a board on a fresh canvas seats a part dropped on it', async (app) => {
+  // The first-launch case: the palette's hidden elements are measured
+  // asynchronously, and a part dropped before that pass must still land in holes
+  // rather than on the free grid or a random single hole.
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.drag(await app.paletteTile('breadboard'), await app.canvasCentre())
+  await sleep(400)
+
+  const hole = await app.ev(`(() => {
+    const board = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === 'sim-breadboard')
+    if (!board) return null
+    const host = board.firstElementChild
+    const pins = host.pinInfo ?? []
+    const target = pins.find(p => p.name === 'e5') ?? pins[0]
+    if (!target) return null
+    const r = host.getBoundingClientRect()
+    return { x: Math.round(r.x + target.x), y: Math.round(r.y + target.y) }
+  })()`)
+  assert(!!hole, 'the breadboard is on the canvas with its holes measured')
+
+  await app.drag(await app.paletteTile('led'), hole)
+  await sleep(500)
+  const misses = await app.ev(`(() => {
+    const board = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === 'sim-breadboard')
+    const led = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === 'wokwi-led')
+    if (!board || !led) return null
+    const host = board.firstElementChild
+    const r = host.getBoundingClientRect()
+    const holes = (host.pinInfo ?? []).map(p => ({ x: r.x + p.x, y: r.y + p.y }))
+    return [...led.querySelectorAll('[data-pin]')].map(pin => {
+      const pr = pin.getBoundingClientRect()
+      const x = pr.x + pr.width / 2
+      const y = pr.y + pr.height / 2
+      return Math.round(Math.min(...holes.map(h => Math.hypot(h.x - x, h.y - y))) * 10) / 10
+    })
+  })()`)
+  assert(Array.isArray(misses) && misses.length === 2, `the LED has two legs (${JSON.stringify(misses)})`)
+  assert(
+    Array.isArray(misses) && misses.every((d) => d <= 2.2),
+    `both legs are in holes (misses ${JSON.stringify(misses)})`,
+  )
+
+  // The world origin is at the middle of the view, so a board dropped there sits
+  // at negative coordinates. Snapping used to clamp the pointer to >= 0, which
+  // made the origin a wall and pulled parts onto the board from well outside it.
+  const board = await app.ev(`(() => {
+    const b = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === 'sim-breadboard')
+    const r = b.getBoundingClientRect()
+    return { x: r.x, y: r.y, w: r.width }
+  })()`)
+  await app.drag(await app.paletteTile('led'), { x: board.x - 40, y: board.y + 100 })
+  await sleep(500)
+  const outsideMiss = await app.ev(`(() => {
+    const board = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === 'sim-breadboard')
+    const leds = [...document.querySelectorAll('.instance')].filter(e => e.firstElementChild.tagName.toLowerCase() === 'wokwi-led')
+    const led = leds[leds.length - 1]
+    if (!board || !led) return null
+    const host = board.firstElementChild
+    const r = host.getBoundingClientRect()
+    const holes = (host.pinInfo ?? []).map(p => ({ x: r.x + p.x, y: r.y + p.y }))
+    return [...led.querySelectorAll('[data-pin]')].map(pin => {
+      const pr = pin.getBoundingClientRect()
+      const x = pr.x + pr.width / 2
+      const y = pr.y + pr.height / 2
+      return Math.round(Math.min(...holes.map(h => Math.hypot(h.x - x, h.y - y))) * 10) / 10
+    })
+  })()`)
+  assert(
+    Array.isArray(outsideMiss) && outsideMiss.every((d) => d > 2.2),
+    `a part dropped left of the board is not pulled onto it (misses ${JSON.stringify(outsideMiss)})`,
+  )
+})
+
+check('the canvas bitmap follows a layout resize', async (app) => {
+  // The visible circuit is a bitmap. If it is not redrawn when the canvas changes
+  // size, CSS stretches the old bitmap and the circuit warps until something else
+  // happens to trigger a draw.
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Blink')
+  const size = () =>
+    app.ev(`(() => {
+      const c = document.querySelector('canvas.circuit-canvas')
+      const r = c.parentElement.getBoundingClientRect()
+      return { cw: c.width, ch: c.height, hw: Math.round(r.width), hh: Math.round(r.height), dpr: devicePixelRatio }
+    })()`)
+  const before = await size()
+  assert(
+    before.cw === Math.round(before.hw * before.dpr) && before.ch === Math.round(before.hh * before.dpr),
+    `starts in step with its layout (${before.cw}x${before.ch} for ${before.hw}x${before.hh} @${before.dpr})`,
+  )
+
+  await app.send('Emulation.setDeviceMetricsOverride', {
+    width: 1100,
+    height: 720,
+    deviceScaleFactor: 1,
+    mobile: false,
+  })
+  await sleep(500)
+  const resized = await size()
+  assert(
+    resized.cw === Math.round(resized.hw * resized.dpr) &&
+      resized.ch === Math.round(resized.hh * resized.dpr),
+    `redrew after a window resize (${resized.cw}x${resized.ch} for ${resized.hw}x${resized.hh} @${resized.dpr})`,
+  )
+  await app.send('Emulation.clearDeviceMetricsOverride')
+  await sleep(400)
+
+  // Opening the serial monitor shrinks the canvas; the same rule applies.
+  const toggle = await app.ev(`(() => {
+    const b = document.querySelector('button[title="Toggle the serial monitor"]')
+    const r = b.getBoundingClientRect()
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+  })()`)
+  await app.click(toggle.x, toggle.y)
+  await sleep(500)
+  const withSerial = await size()
+  assert(
+    withSerial.cw === Math.round(withSerial.hw * withSerial.dpr) &&
+      withSerial.ch === Math.round(withSerial.hh * withSerial.dpr),
+    `redrew when the serial monitor opened (${withSerial.cw}x${withSerial.ch} for ${withSerial.hw}x${withSerial.hh} @${withSerial.dpr})`,
+  )
+  await app.click(toggle.x, toggle.y)
+  await sleep(300)
 })
 
 async function main() {
