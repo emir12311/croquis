@@ -84,6 +84,8 @@ export class CanvasSurface {
   private pinsRetries = 0
   private partImages = new Map<string, PartSprite>()
   private pendingParts = new Set<string>()
+  /** Each part's newest ready sprite: held while the next re-raster is in flight. */
+  private recentSprites = new Map<string, PartSprite>()
   private partSizes = new Map<string, { w: number; h: number }>()
   private partRetries = new Map<string, number>()
   private artPending = new Set<PartKind>()
@@ -286,6 +288,29 @@ export class CanvasSurface {
   // ---- sprite cache ------------------------------------------------------
 
   /**
+   * A turn passes through hundreds of values, each its own sprite key. Once the
+   * part is showing its current sprite, every superseded key for the same
+   * element is dead weight — so drop them, unless another part still uses the
+   * exact same look (two potentiometers at one value share a sprite). Only for
+   * the potentiometer: an LED's or button's sprites alternate between states of
+   * the run, and that cached alternation is what keeps a blink from
+   * re-rasterising itself on every toggle.
+   */
+  private trimStaleSprites(inst: Instance, key: string, instances: Instance[]) {
+    if (inst.kind !== 'potentiometer') return
+    const tag = partByKind(inst.kind).tag
+    for (const existing of [...this.partImages.keys()]) {
+      if (existing === key || existing.split('|')[0] !== tag) continue
+      if (instances.some((o) => o.id !== inst.id && this.partKey(o) === existing)) continue
+      this.partImages.delete(existing)
+      // The measure cache is keyed without the draw-state suffix; drop the
+      // superseded value's entry the same way. A potentiometer's draw state is
+      // always 000 — no chip pin, no lit order, no press.
+      if (existing.endsWith('000')) this.partSizes.delete(existing.slice(0, -4))
+    }
+  }
+
+  /**
    * The key a part's sprite is cached under when only its *drawing* matters —
    * what the simulation changes, not how big the part is.
    *
@@ -448,7 +473,19 @@ export class CanvasSurface {
     // Each part is drawn with its own pins, so a part on top hides the pins of
     // the parts beneath it; wires go over everything (like Wokwi).
     for (const inst of renderOrderOf(scene.instances)) {
-      const sprite = this.partImages.get(this.partKey(inst))
+      const key = this.partKey(inst)
+      let sprite = this.partImages.get(key)
+      if (sprite) {
+        this.recentSprites.set(inst.id, sprite)
+        this.trimStaleSprites(inst, key, scene.instances)
+      } else {
+        // A raster is in flight for the part's current look — the sprite above
+        // may still land within this frame. Until it does, hold the last ready
+        // drawing instead of going blank: a turning knob re-rasterises per value
+        // step, and a blank frame per step is what made the knob flicker.
+        sprite = this.recentSprites.get(inst.id)
+        this.rasterizePart(inst)
+      }
       if (sprite) {
         const p = t.toScreen({ x: inst.x, y: inst.y })
         const pw = sprite.w * scene.zoom
@@ -462,8 +499,6 @@ export class CanvasSurface {
           ctx.drawImage(sprite.image, p.x, p.y, pw, ph)
         }
         ctx.restore()
-      } else {
-        this.rasterizePart(inst)
       }
       // A marker only for the pin under the pointer: marking every pin reads as
       // static on a breadboard and is clutter on anything else.
