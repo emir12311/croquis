@@ -24,7 +24,7 @@ A desktop app for building and running Arduino circuits without an Arduino.
 
 You drag components onto a canvas, wire them up, write a sketch and press Run. The sketch is compiled locally with `avr-gcc` and executed on a simulated AVR chip.
 
-There are three circuits to start from — **Blink**, **Button** and **Button + serial** — under File → Presets.
+There are four circuits to start from — **Blink**, **Button**, **Potentiometer** and **Button + serial** — under File → Presets.
 
 | Feature | What it does |
 | --- | --- |
@@ -174,7 +174,7 @@ That's basically it.
 
 * **A handful of components.** An Uno, an LED, a resistor, a pushbutton, a potentiometer, breadboards. No buzzer, display or servo.
 * **One board.** A second Uno gets its own circuit but shares the single sketch.
-* **A small electrical model, not a circuit solver.** A resistor does something real and a missing one is reported, but there are no parallel networks and no voltage dividers.
+* **A small electrical model, not a circuit solver.** A resistor does something real and a missing one is reported, and the potentiometer is a fixed divider between its rails. There are no arbitrary parallel networks.
 * **Wokwi files open with one caveat:** a wire using Wokwi's `*` route separator draws a different path here, to the same pins.
 
 ## License
