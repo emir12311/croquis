@@ -165,6 +165,43 @@ describe('Sim.solve', () => {
     ])
   })
 
+  it('re-sends held inputs to the fresh simulator after a restart', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    await sim.run('void setup(){}', false)
+
+    const potParts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'p1', kind: 'potentiometer', attrs: { value: '512' } },
+    ]
+    const potWires: EvalWire[] = [
+      { a: { instanceId: 'p1', pin: 'VCC' }, b: { instanceId: 'uno', pin: '5V' } },
+      { a: { instanceId: 'p1', pin: 'GND' }, b: { instanceId: 'uno', pin: 'GND.2' } },
+      { a: { instanceId: 'p1', pin: 'SIG' }, b: { instanceId: 'uno', pin: 'A0' } },
+    ]
+
+    sim.solve(potParts, potWires)
+    sim.pressedButtons.b1 = true
+    sim.solve(parts, wires)
+    expect(backend.analogs).toEqual([[0, 2502]])
+    expect(backend.inputs).toEqual([[68, 2, false]])
+
+    // The restart starts a new simulator, which knows neither level. The cache
+    // that suppresses duplicate sends must be cleared with it.
+    await sim.restart('void setup(){}', false)
+    sim.pressedButtons.b1 = true
+    sim.solve(potParts, potWires)
+    sim.solve(parts, wires)
+    expect(backend.analogs).toEqual([
+      [0, 2502],
+      [0, 2502],
+    ])
+    expect(backend.inputs).toEqual([
+      [68, 2, false],
+      [68, 2, false],
+    ])
+  })
+
   it('still solves the netlist in a plain browser, without sending anything', async () => {
     const backend = new FakeBackend()
     backend.desktop = false
