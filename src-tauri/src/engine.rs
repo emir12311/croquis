@@ -28,6 +28,8 @@ mod ffi {
 extern "C" {
     fn sim_shim_cycle(avr: *mut ffi::avr_t) -> u64;
     fn sim_shim_set_freq(avr: *mut ffi::avr_t, freq: u32);
+    /// Set VCC/AVCC/AREF together, in millivolts (a 5V Uno).
+    fn sim_shim_set_supply(avr: *mut ffi::avr_t, millivolts: u32);
 }
 
 /// Mirrors simavr's `AVR_IOCTL_DEF` macro (function-like, so bindgen skips it):
@@ -41,10 +43,18 @@ const fn ioport_getirq(name: u8) -> u32 {
 const fn uart_getirq(name: u8) -> u32 {
     ioctl(b'u', b'a', b'r', name as u32)
 }
+/// The ADC module's irq table (`AVR_IOCTL_DEF('a','d','c','0')`). Its channels are
+/// the header's `ADC_IRQ_ADC0..15`, so the IRQ index is the channel number.
+const fn adc_getirq() -> u32 {
+    ioctl(b'a', b'd', b'c', b'0' as u32)
+}
 
 /// The Uno's chip.
 const MCU: &str = "atmega328p";
 const F_CPU: u32 = 16_000_000;
+/// The Uno's supply and analogue reference, in millivolts. What the ADC measures
+/// against, and so the full-scale value `analogRead` divides by.
+const SUPPLY_MV: u32 = 5000;
 
 // ---- paths ----------------------------------------------------------------
 
@@ -351,6 +361,8 @@ pub type Emit = Arc<dyn Fn(SimEvent) + Send + Sync>;
 
 pub struct Simulator {
     input: Sender<(u8, u8, bool)>,
+    /// ADC channel and the voltage to hold on it, in millivolts.
+    analog: Sender<(u8, u16)>,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
@@ -361,18 +373,20 @@ impl Simulator {
     /// it the level changes cleanly, the way firmware wishes switches behaved.
     pub fn start(elf: &Path, emit: Emit, bounce: bool) -> Result<Self, String> {
         let (tx, rx) = mpsc::channel();
+        let (analog_tx, analog_rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
         let elf = elf.to_path_buf();
         let stop_thread = stop.clone();
         let handle = thread::spawn(move || {
-            if let Err(e) = sim_main(&elf, rx, stop_thread, emit, &ready_tx, bounce) {
+            if let Err(e) = sim_main(&elf, rx, analog_rx, stop_thread, emit, &ready_tx, bounce) {
                 let _ = ready_tx.send(Err(e));
             }
         });
         match ready_rx.recv() {
             Ok(Ok(())) => Ok(Self {
                 input: tx,
+                analog: analog_tx,
                 stop,
                 handle: Some(handle),
             }),
@@ -384,6 +398,11 @@ impl Simulator {
     /// Drive an input pin — a pressed button, a held line, etc.
     pub fn set_pin(&self, port: u8, pin: u8, high: bool) {
         let _ = self.input.send((port, pin, high));
+    }
+
+    /// Hold a voltage on an ADC channel — a potentiometer's wiper, in millivolts.
+    pub fn set_analog(&self, channel: u8, millivolts: u16) {
+        let _ = self.analog.send((channel, millivolts));
     }
 
     pub fn stop(&mut self) {
@@ -425,6 +444,7 @@ unsafe extern "C" fn uart_notify(_irq: *mut ffi::avr_irq_t, value: u32, param: *
 fn sim_main(
     elf: &Path,
     input: Receiver<(u8, u8, bool)>,
+    analog: Receiver<(u8, u16)>,
     stop: Arc<AtomicBool>,
     emit: Emit,
     ready: &Sender<Result<(), String>>,
@@ -446,6 +466,9 @@ fn sim_main(
         ffi::avr_load_firmware(avr, &mut *fw);
         // simavr defaults the clock to 1 MHz; our firmware is built for 16 MHz.
         sim_shim_set_freq(avr, F_CPU);
+        // The Uno runs at 5V, and analogRead defaults to measuring against AVCC.
+        // simavr starts with no supply set, so it silently measures against 3.3V.
+        sim_shim_set_supply(avr, SUPPLY_MV);
         ffi::avr_reset(avr);
 
         // Watch every pin of ports B/C/D (covers the built-in LED and the common
@@ -480,6 +503,19 @@ fn sim_main(
             let irq = ffi::avr_io_getirq(avr, ioport_getirq(port), pin as i32);
             if !irq.is_null() {
                 ffi::avr_raise_irq(irq, high as u32);
+            }
+        }
+
+        /// Hold a voltage on an ADC channel. simavr records the value and reads it
+        /// at the next conversion, so it can be set at any time and persists.
+        unsafe fn raise_adc(avr: *mut ffi::avr_t, channel: u8, millivolts: u16) {
+            let irq = ffi::avr_io_getirq(
+                avr,
+                adc_getirq(),
+                ffi::ADC_IRQ_ADC0 as i32 + channel as i32,
+            );
+            if !irq.is_null() {
+                ffi::avr_raise_irq(irq, millivolts as u32);
             }
         }
 
@@ -518,6 +554,11 @@ fn sim_main(
                     // A clean change, straight to the level asked for.
                     raise_pin(avr, port, pin, high);
                 }
+            }
+            // Analogue inputs are not momentary: whatever the circuit last said is
+            // the voltage that stays on the channel until it says something else.
+            while let Ok((channel, millivolts)) = analog.try_recv() {
+                raise_adc(avr, channel, millivolts);
             }
             let state = ffi::avr_run(avr);
             // Settle the contacts that are still chattering.
@@ -746,6 +787,52 @@ void loop() {
         assert!(highs >= 2, "pin 13 never went high ({highs})");
         assert!(lows >= 2, "pin 13 never went low ({lows})");
         assert!(serial.contains("hello"), "serial was {serial:?}");
+    }
+
+    /// The analogue path end to end: a sketch that reports `analogRead(A0)` should
+    /// print the value a fed voltage scales to, against the Uno's 5V reference.
+    #[test]
+    fn an_adc_voltage_reaches_analog_read() {
+        let dir = std::env::temp_dir().join("croquis-analog-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+void setup() {
+  Serial.begin(9600);
+}
+void loop() {
+  Serial.println(analogRead(A0));
+  delay(200);
+}
+"#;
+        let fw = compile(sketch, &dir).expect("sketch should compile");
+
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+        // Half of the 5 V supply on A0. Against a 5 V reference that is 511/512;
+        // against simavr's un-set 3.3 V default it would read ~776, so this also
+        // proves the supply was configured.
+        sim.set_analog(0, 2502);
+        thread::sleep(Duration::from_millis(700));
+        sim.stop();
+
+        let ev = events.lock().unwrap();
+        let serial: String = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Serial(b) => Some(*b as char),
+                _ => None,
+            })
+            .collect();
+        let readings: Vec<i32> = serial.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+        let last = *readings.last().unwrap_or_else(|| panic!("no analogRead output: {serial:?}"));
+        assert!(
+            (500..=525).contains(&last),
+            "2502 mV should read ~512 against a 5 V reference, got {last} (all: {readings:?})"
+        );
     }
 }
 

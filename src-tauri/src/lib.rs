@@ -29,7 +29,8 @@ pub fn run() {
             compile_sketch,
             start_sim,
             stop_sim,
-            set_input
+            set_input,
+            set_analog
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -154,6 +155,16 @@ fn set_input(port: u8, pin: u8, high: bool, state: State<SimState>) {
     if let Ok(slot) = state.0.lock() {
         if let Some(sim) = slot.as_ref() {
             sim.set_pin(port, pin, high);
+        }
+    }
+}
+
+/// Hold a voltage on an ADC channel — a potentiometer's wiper, in millivolts.
+#[tauri::command]
+fn set_analog(channel: u8, millivolts: u16, state: State<SimState>) {
+    if let Ok(slot) = state.0.lock() {
+        if let Some(sim) = slot.as_ref() {
+            sim.set_analog(channel, millivolts);
         }
     }
 }
