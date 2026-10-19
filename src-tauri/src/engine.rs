@@ -449,6 +449,13 @@ impl Drop for Simulator {
     }
 }
 
+/// A pin that toggles slower than this is not a PWM output; it is a digital line.
+/// At 16 MHz, 800k cycles is 50 ms (the slowest beginner PWM is a 20 ms servo frame).
+const PWM_MAX_PERIOD: u64 = 800_000;
+/// How many complete periods before a pin is trusted as PWM rather than a
+/// button's brief chatter.
+const PWM_MIN_PERIODS: u32 = 4;
+
 struct PinCtx {
     emit: Emit,
     port: u8,
@@ -463,14 +470,24 @@ unsafe extern "C" fn pin_notify(_irq: *mut ffi::avr_irq_t, value: u32, param: *m
     let ctx = &*(param as *const PinCtx);
     let high = value != 0;
     let now = sim_shim_cycle(ctx.avr as *mut ffi::avr_t);
+    let mut pwm = false;
     if let Ok(mut timing) = ctx.timing.lock() {
         timing.edge(now, high);
+        pwm = timing.periods() >= PWM_MIN_PERIODS
+            && timing
+                .timing()
+                .is_some_and(|timing| timing.period_cycles <= PWM_MAX_PERIOD);
     }
-    (ctx.emit)(SimEvent::Pin {
-        port: ctx.port,
-        pin: ctx.pin,
-        high,
-    });
+    // Once a pin is clearly PWM, its per-edge Pin event is noise: the UI gets a
+    // duty every 20 ms instead. A digital edge after the meter resets still gets
+    // its Pin event, and the UI clears the stale timing.
+    if !pwm {
+        (ctx.emit)(SimEvent::Pin {
+            port: ctx.port,
+            pin: ctx.pin,
+            high,
+        });
+    }
 }
 
 unsafe extern "C" fn uart_notify(_irq: *mut ffi::avr_irq_t, value: u32, param: *mut c_void) {
@@ -651,7 +668,13 @@ fn sim_main(
                                 .map(|edge| now.saturating_sub(edge) <= TIMING_STALE)
                                 .unwrap_or(false);
                             if recent {
-                                timing.timing()
+                                if timing.periods() < PWM_MIN_PERIODS {
+                                    None
+                                } else {
+                                    timing
+                                        .timing()
+                                        .filter(|timing| timing.period_cycles <= PWM_MAX_PERIOD)
+                                }
                             } else {
                                 None
                             }
@@ -1007,6 +1030,14 @@ void loop() {
                 _ => None,
             })
             .expect("no PWM timing reached the UI for pin 6 (D6)");
+        let pin_edges = ev
+            .iter()
+            .filter(|e| matches!(e, SimEvent::Pin { port: b'D', pin: 6, .. }))
+            .count();
+        assert!(
+            pin_edges < 100,
+            "PWM still floods the UI with per-edge Pin events: {pin_edges}"
+        );
         assert!(
             (200..=300).contains(&duty),
             "analogWrite(6, 64) should be about 25% duty, got {duty} per mille"

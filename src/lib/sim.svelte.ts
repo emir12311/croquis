@@ -197,7 +197,15 @@ export class Sim {
     const unlisten: (() => void)[] = []
     this.backend
       .onPin((port, pin, high) => {
-        this.avrPins[`${String.fromCharCode(port)}${pin}`] = high
+        const key = `${String.fromCharCode(port)}${pin}`
+        // A Pin event means this is no longer PWM; clear the timing so it does
+        // not keep overriding the level in solve().
+        if (this.pinTimings[key]) {
+          const next = { ...this.pinTimings }
+          delete next[key]
+          this.pinTimings = next
+        }
+        this.avrPins[key] = high
         if (port === 66 && pin === 5) this.pin13 = high
       })
       .then((u) => alive && unlisten.push(u))
