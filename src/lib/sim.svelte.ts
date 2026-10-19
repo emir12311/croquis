@@ -15,6 +15,8 @@ export interface SimBackend {
   start(elf: string, bounce: boolean): Promise<void>
   stop(): Promise<void>
   setInput(port: number, pin: number, high: boolean): Promise<void>
+  /** Hold a voltage on an ADC channel, in millivolts (0–5000). */
+  setAnalog(channel: number, millivolts: number): Promise<void>
   /** Subscribe to pin changes; resolves to the unsubscribe function. */
   onPin(cb: (port: number, pin: number, high: boolean) => void): Promise<() => void>
   /** Subscribe to serial bytes; resolves to the unsubscribe function. */
@@ -35,11 +37,15 @@ export class Sim {
   ledStates = $state<Record<string, LedState>>({})
   /** What is wrong with each part, for the canvas badge and the strip. */
   warnings = $state<Record<string, string>>({})
+  /** Voltages the circuit puts on the chip's ADC inputs, in millivolts. */
+  analogs = $state<{ channel: number; millivolts: number }[]>([])
   /** A button held on the canvas, by part id. */
   pressedButtons = $state<Record<string, boolean>>({})
 
   /** The last level sent per pin, so an unchanged drive is not re-sent every solve. */
   private lastDrives = new Map<string, boolean>()
+  /** The last voltage sent per ADC channel, for the same reason. */
+  private lastAnalogs = new Map<number, number>()
   private backend: SimBackend
 
   constructor(backend: SimBackend) {
@@ -90,6 +96,7 @@ export class Sim {
   reset() {
     this.avrPins = {}
     this.pressedButtons = {}
+    this.analogs = []
     this.pin13 = false
     this.serial = ''
     this.buildError = ''
@@ -109,8 +116,10 @@ export class Sim {
     const result = evaluateCircuit(parts, wires, this.pressedButtons, this.avrPins)
     this.ledStates = result.leds
     this.warnings = result.warnings
+    this.analogs = result.analogs
     if (!this.backend.isDesktop() || !this.running) {
       this.lastDrives.clear()
+      this.lastAnalogs.clear()
       return
     }
     for (const drive of result.drives) {
@@ -122,6 +131,13 @@ export class Sim {
       this.backend
         .setInput(drive.port.charCodeAt(0), drive.pin, drive.high)
         .catch((err) => console.error('set_input failed', err))
+    }
+    for (const analog of result.analogs) {
+      if (this.lastAnalogs.get(analog.channel) === analog.millivolts) continue
+      this.lastAnalogs.set(analog.channel, analog.millivolts)
+      this.backend
+        .setAnalog(analog.channel, analog.millivolts)
+        .catch((err) => console.error('set_analog failed', err))
     }
   }
 

@@ -35,7 +35,7 @@ function labelOf(id: string, text: string): string {
   return prettify(id)
 }
 
-/** Sorted by id, which happens to be a sensible teaching order: blink, button, serial. */
+/** Sorted by id, which happens to be a sensible teaching order. */
 export const PRESETS: Preset[] = Object.entries(files)
   .map(([path, text]) => {
     const id = path.split('/').pop()!.replace(/\.json$/, '')

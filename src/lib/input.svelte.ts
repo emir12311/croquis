@@ -53,6 +53,50 @@ function distToSegment(p: Point, a: Point, b: Point): number {
   }
 }
 
+/**
+ * The `@wokwi/elements` potentiometer draws its knob a little above the centre of
+ * its 20×20 view box (`knobCenter` at 9.91, 8.18), so the fractions are of the
+ * part's drawn box — what `partSizeOf` reports once the sprite is rasterised.
+ * While a turn is in flight the drawing re-rasters for the new value, and a frame
+ * may briefly fall back to the un-rasterised DOM box, which is a little taller
+ * (pin markers overflow below the drawing): a wobble of a few units at most, and
+ * it corrects itself on the next frame.
+ */
+const KNOB_CENTRE = { fx: 9.91 / 20, fy: 8.18 / 20 }
+/** The knob's reach from its centre, relative to the short side of the box. */
+const KNOB_RADIUS = 7.27 / 20
+/** The element's sweep, from `startDegree`/`endDegree`. */
+const KNOB_SWEEP = 135
+/** The element's value range, which the sweep maps onto. */
+const KNOB_MAX = 1023
+
+/**
+ * The value a pointer position asks of a knob centred at `centre`, undoing the
+ * part's own rotation first. The angle maths is the element's own `rotateHandler`,
+ * so dragging the knob on the canvas lands on exactly the value that interacting
+ * with the element would: upright is the middle of the track, and the ends clamp.
+ */
+export function knobValue(centre: Point, pointer: Point, rotate = 0): number | null {
+  const dx = pointer.x - centre.x
+  const dy = pointer.y - centre.y
+  if (Math.hypot(dx, dy) < 0.5) return null
+  // Back into the element's unrotated frame before asking it for an angle.
+  const rad = (rotate * Math.PI) / 180
+  const c = Math.cos(rad)
+  const s = Math.sin(rad)
+  const lx = dx * c + dy * s
+  const ly = -dx * s + dy * c
+  // The element measures from the centre to the pointer, reversed and screen-down.
+  const x = -lx
+  const y = -ly
+  let deg = Math.round((Math.atan2(y, x) * 180) / Math.PI)
+  if (deg < 0) deg += 360
+  deg -= 90
+  if (x > 0 && y <= 0 && deg > 0) deg -= 360
+  deg = Math.max(-KNOB_SWEEP, Math.min(KNOB_SWEEP, deg))
+  return Math.round(((deg + KNOB_SWEEP) / (2 * KNOB_SWEEP)) * KNOB_MAX)
+}
+
 export class Input {
   selectedIds = $state<string[]>([])
   selectedWireId = $state<string | null>(null)
@@ -486,9 +530,78 @@ export class Input {
       this.addBend()
       return
     }
+    // A potentiometer's knob turns wherever it is grabbed; the body still drags.
+    if (this.onKnob(inst, p)) {
+      this.startKnobDrag(e, inst)
+      return
+    }
     e.stopPropagation()
     e.preventDefault()
     this.beginPartDrag(e, inst)
+  }
+
+  /** The knob's centre in canvas space, following a rotated part. Null until measured. */
+  private knobCentre(inst: Instance): Point | null {
+    const size = this.deps.surface.partSizeOf(inst)
+    if (!size.w || !size.h) return null
+    const lx = KNOB_CENTRE.fx * size.w
+    const ly = KNOB_CENTRE.fy * size.h
+    const rot = inst.rotate ?? 0
+    if (!rot) return { x: inst.x + lx, y: inst.y + ly }
+    const rad = (rot * Math.PI) / 180
+    const c = Math.cos(rad)
+    const s = Math.sin(rad)
+    const dx = lx - size.w / 2
+    const dy = ly - size.h / 2
+    return {
+      x: inst.x + size.w / 2 + dx * c - dy * s,
+      y: inst.y + size.h / 2 + dx * s + dy * c,
+    }
+  }
+
+  /** Is the pointer on the knob rather than the body? */
+  private onKnob(inst: Instance, p: Point): boolean {
+    if (inst.kind !== 'potentiometer') return false
+    const centre = this.knobCentre(inst)
+    if (!centre) return false
+    const size = this.deps.surface.partSizeOf(inst)
+    return Math.hypot(p.x - centre.x, p.y - centre.y) <= KNOB_RADIUS * Math.min(size.w, size.h)
+  }
+
+  /**
+   * Turn a potentiometer. The pointer's angle about the knob sets the value while
+   * the sketch runs, so an `analogRead` moves under your hand. A whole turn is one
+   * undo step: the first real movement commits, the rest ride along.
+   */
+  startKnobDrag(e: PointerEvent, inst: Instance) {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!this.selectedIds.includes(inst.id)) this.selectedIds = [inst.id]
+    this.selectedWireId = null
+    const centre = this.knobCentre(inst)
+    if (!centre) return
+    const rot = inst.rotate ?? 0
+    let committed = false
+    const apply = frameThrottle((ev: PointerEvent) => {
+      const value = knobValue(centre, this.toCanvas(ev.clientX, ev.clientY), rot)
+      if (value === null) return
+      const next = String(value)
+      if (inst.attrs?.value === next) return
+      if (!committed) {
+        this.deps.project.commit()
+        committed = true
+      }
+      inst.attrs = { ...inst.attrs, value: next }
+    })
+    const onMove = (ev: PointerEvent) => apply(ev)
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   beginPartDrag(e: PointerEvent, inst: Instance) {

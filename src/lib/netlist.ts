@@ -44,6 +44,20 @@ const UNO_DIGITAL: Record<string, [string, number]> = {
   A5: ['C', 5],
 }
 
+/**
+ * The analogue inputs and the ADC channel each maps to. Arduino's `analogRead`
+ * numbers A0…A5 as 14…19 and subtracts 14, so the channel is the pin's own
+ * index — the same order the port map above gives (A0 → C0 … A5 → C5).
+ */
+const UNO_ANALOG_CHANNELS: [string, number][] = [
+  ['A0', 0],
+  ['A1', 1],
+  ['A2', 2],
+  ['A3', 3],
+  ['A4', 4],
+  ['A5', 5],
+]
+
 export type UnoPin =
   | { kind: 'mcu'; port: string; pin: number }
   | { kind: 'rail'; rail: 'GND' | 'VCC' }
@@ -93,6 +107,11 @@ export interface CircuitEval {
   drives: { port: string; pin: number; high: boolean }[]
   /** What's wrong with a part — for the properties strip and the canvas badge. */
   warnings: Record<string, string>
+  /**
+   * Voltages to hold on the chip's ADC inputs, in millivolts (the unit simavr
+   * wants). One entry per analogue pin a potentiometer's wiper reaches.
+   */
+  analogs: { channel: number; millivolts: number }[]
 }
 
 // A small, honest model rather than a real circuit solver: enough that a
@@ -316,6 +335,43 @@ export function evaluateCircuit(
     }
   }
 
+  // Analogue in. A potentiometer is a voltage divider between the two rails it
+  // reaches, and its wiper sets the voltage on whatever analogue pin shares its
+  // SIG net. That voltage is what the ADC reads, so `analogRead` sees the knob.
+  const analogs: CircuitEval['analogs'] = []
+  const analogChannels = new Map<string, number[]>()
+  for (const part of parts) {
+    if (part.kind !== 'uno') continue
+    for (const [pin, channel] of UNO_ANALOG_CHANNELS) {
+      const root = uf.find(`${part.id}:${nodeName('uno', pin)}`)
+      const list = analogChannels.get(root) ?? []
+      list.push(channel)
+      analogChannels.set(root, list)
+    }
+  }
+  for (const part of parts) {
+    if (part.kind !== 'potentiometer') continue
+    const sig = uf.find(`${part.id}:SIG`)
+    // Only a wiper that actually reaches an analogue input is worth a drive — and
+    // only then is a wiring complaint worth making, so an unconnected knob is quiet.
+    const channels = analogChannels.get(sig)
+    if (!channels?.length) continue
+    const gndSide = uf.find(`${part.id}:GND`)
+    const vccSide = uf.find(`${part.id}:VCC`)
+    // Swapped ends read the other way round, exactly as they would on a bench.
+    const forward = netHigh(vccSide) && netLow(gndSide)
+    const reverse = netHigh(gndSide) && netLow(vccSide)
+    if (!forward && !reverse) {
+      warnings[part.id] = 'Put one end on 5V and the other on GND.'
+      continue
+    }
+    const raw = Number(part.attrs?.value ?? 0)
+    const position = Number.isFinite(raw) ? Math.min(1023, Math.max(0, raw)) : 0
+    const fraction = (forward ? position : 1023 - position) / 1023
+    const millivolts = Math.round(SUPPLY_V * 1000 * fraction)
+    for (const channel of channels) analogs.push({ channel, millivolts })
+  }
+
   // Buttons: whichever side reaches an MCU pin drives it. Pressed, the switch is a
   // short to whichever rail it reaches — GND pulls the pin low, +5V pulls it high.
   // Released, it's an open circuit, so the pin's level is whatever else holds it:
@@ -348,5 +404,5 @@ export function evaluateCircuit(
     }
   }
 
-  return { leds, drives, warnings }
+  return { leds, drives, warnings, analogs }
 }
