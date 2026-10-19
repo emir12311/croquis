@@ -53,7 +53,8 @@ fn main() {
             "#include \"sim_avr.h\"\n\
              #include \"sim_elf.h\"\n\
              #include \"avr_ioport.h\"\n\
-             #include \"avr_uart.h\"\n",
+             #include \"avr_uart.h\"\n\
+             #include \"avr_adc.h\"\n",
         )
         .clang_arg(format!("-I{}", simavr.display()))
         .clang_arg(format!("-I{}", simavr.join("sim").display()))
@@ -64,6 +65,7 @@ fn main() {
         .allowlist_var("AVR_.*")
         .allowlist_var("IOPORT_.*")
         .allowlist_var("UART_.*")
+        .allowlist_var("ADC_.*")
         .allowlist_var("cpu_.*")
         .layout_tests(false)
         .generate()
