@@ -9,6 +9,7 @@ class FakeBackend implements SimBackend {
   stopped = 0
   inputs: [number, number, boolean][] = []
   analogs: [number, number][] = []
+  serialWrites: string[] = []
   failCompile = ''
   unsubscribed = 0
   pinCb: ((port: number, pin: number, high: boolean) => void) | null = null
@@ -33,6 +34,9 @@ class FakeBackend implements SimBackend {
   }
   async setAnalog(channel: number, millivolts: number) {
     this.analogs.push([channel, millivolts])
+  }
+  async writeSerial(text: string) {
+    this.serialWrites.push(text)
   }
   async onPin(cb: (port: number, pin: number, high: boolean) => void) {
     this.pinCb = cb
@@ -200,6 +204,22 @@ describe('Sim.solve', () => {
       [68, 2, false],
       [68, 2, false],
     ])
+  })
+
+  it('sends serial input only while a desktop simulation is running', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+
+    await sim.sendSerial('too early')
+    expect(backend.serialWrites).toEqual([])
+
+    await sim.run('void setup(){}', false)
+    await sim.sendSerial('hello')
+    expect(backend.serialWrites).toEqual(['hello'])
+
+    backend.desktop = false
+    await sim.sendSerial('not here')
+    expect(backend.serialWrites).toEqual(['hello'])
   })
 
   it('still solves the netlist in a plain browser, without sending anything', async () => {

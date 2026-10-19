@@ -25,13 +25,15 @@
   import CodeEditor from './lib/CodeEditor.svelte'
   import { readPalette } from './lib/circuit-render'
   import { WIRE_COLORS, wireHex } from './lib/wire-colours'
-  import { untrack } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { View } from './lib/view.svelte'
   import { Sketch } from './lib/sketch.svelte'
   import { Sim, type SimBackend } from './lib/sim.svelte'
   import { Input } from './lib/input.svelte'
+  import { parseCompileErrors, isSketchFile, type CompileError } from './lib/compile-errors'
   import { invoke } from '@tauri-apps/api/core'
   import { documentDir } from '@tauri-apps/api/path'
+  import { getCurrentWindow } from '@tauri-apps/api/window'
   import { listen } from '@tauri-apps/api/event'
   import {
     open as openDialog,
@@ -158,6 +160,9 @@
     setAnalog: async (channel, millivolts) => {
       await invoke('set_analog', { channel, millivolts })
     },
+    writeSerial: async (text) => {
+      await invoke('serial_input', { text })
+    },
     onPin: (cb) =>
       listen<{ port: number; pin: number; high: boolean }>('sim:pin', (e) =>
         cb(e.payload.port, e.payload.pin, e.payload.high),
@@ -169,6 +174,69 @@
   let running = $derived(sim.running)
   let serial = $derived(sim.serial)
   let buildError = $derived(sim.buildError)
+  let compileErrors = $derived(parseCompileErrors(buildError))
+  let jump = $state<{ line: number; nonce: number } | null>(null)
+  let jumpSeq = 0
+  let serialInput = $state('')
+  let serialNewline = $state(true)
+
+  function sendSerial() {
+    if (!serialInput) return
+    void sim.sendSerial(serialNewline ? `${serialInput}\n` : serialInput)
+    serialInput = ''
+  }
+
+  const SAVE_AND_CLOSE = 'Save and close'
+  const DISCARD_AND_CLOSE = 'Discard and close'
+  /** Set once the user has agreed, so the second close request is not re-asked. */
+  let allowClose = false
+
+  onMount(() => {
+    if (!inTauri) return
+    const win = getCurrentWindow()
+    let disposed = false
+    let unlisten: (() => void) | null = null
+
+    win
+      .onCloseRequested(async (event) => {
+        if (allowClose || !dirty) return
+        // Ask before the window goes away. This must happen synchronously, before
+        // the first await, or the close has already been allowed.
+        event.preventDefault()
+        const answer = await messageDialog(
+          'This circuit has changes that have not been saved yet.',
+          {
+            title: 'Close Croquis?',
+            kind: 'warning',
+            buttons: { yes: SAVE_AND_CLOSE, no: DISCARD_AND_CLOSE, cancel: 'Cancel' },
+          },
+        )
+        if (answer !== SAVE_AND_CLOSE && answer !== DISCARD_AND_CLOSE) return
+        if (answer === SAVE_AND_CLOSE) {
+          await onSave()
+          // Backed out of the file picker: the work is still unsaved, keep the window.
+          if (dirty) return
+        }
+        allowClose = true
+        await win.close()
+      })
+      .then((fn) => {
+        if (disposed) fn()
+        else unlisten = fn
+      })
+      .catch((err) => console.error('close guard failed', err))
+
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  })
+
+  function jumpToError(error: CompileError) {
+    if (!isSketchFile(error.file)) return
+    leftCollapsed = false
+    jump = { line: error.line, nonce: ++jumpSeq }
+  }
   let showSerial = $state(false)
   let pin13 = $derived(sim.pin13)
 
@@ -1247,7 +1315,7 @@
         </button>
       </header>
       <div class="panel__body panel__body--code">
-        <CodeEditor bind:value={editor.text} />
+        <CodeEditor bind:value={editor.text} {jump} />
       </div>
     </section>
 
@@ -1620,10 +1688,58 @@
             </button>
           </header>
           {#if buildError}
-            <pre class="serial__out serial__out--error">{buildError}</pre>
+            {#if compileErrors.length}
+              <div class="serial__errors">
+                {#each compileErrors as error}
+                  <button
+                    class="diagnostic"
+                    class:diagnostic--warning={error.severity === 'warning'}
+                    class:diagnostic--note={error.severity === 'note'}
+                    type="button"
+                    disabled={!isSketchFile(error.file)}
+                    title={isSketchFile(error.file) ? 'Jump to this line in the sketch' : error.file}
+                    onclick={() => jumpToError(error)}
+                  >
+                    <span class="diagnostic__where">
+                      {#if isSketchFile(error.file)}
+                        line {error.line}{#if error.column}:{error.column}{/if}
+                      {:else}
+                        {error.file}
+                      {/if}
+                    </span>
+                    <span class="diagnostic__msg">{error.message}</span>
+                  </button>
+                {/each}
+              </div>
+            {:else}
+              <pre class="serial__out serial__out--error">{buildError}</pre>
+            {/if}
           {:else}
             <pre class="serial__out">{serial || (running ? '' : 'No output.')}</pre>
           {/if}
+          <form
+            class="serial__send"
+            onsubmit={(e) => {
+              e.preventDefault()
+              sendSerial()
+            }}
+          >
+            <input
+              class="serial__input"
+              bind:value={serialInput}
+              placeholder="Send to sketch…"
+              aria-label="Serial input"
+              autocomplete="off"
+              disabled={!running || !inTauri}
+            />
+            <label class="serial__newline">
+              <input type="checkbox" bind:checked={serialNewline} disabled={!running || !inTauri} />
+              newline
+            </label>
+            <button class="btn" type="submit" disabled={!running || !inTauri || !serialInput}>
+              Send
+            </button>
+          </form>
         </div>
       {/if}
     </section>
@@ -2499,6 +2615,92 @@
 
   .serial__out--error {
     color: var(--error);
+  }
+
+  .serial__errors {
+    flex: 1;
+    margin: 0;
+    padding: 0;
+    overflow: auto;
+  }
+
+  .diagnostic {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    width: 100%;
+    padding: var(--space-1) var(--space-3);
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: none;
+    color: var(--error);
+    font-family: var(--font-mono);
+    font-size: var(--fs-code);
+    line-height: var(--lh-code);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .diagnostic:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+  }
+
+  .diagnostic:disabled {
+    color: var(--text-muted);
+    cursor: default;
+  }
+
+  .diagnostic--warning {
+    color: var(--warning);
+  }
+
+  .diagnostic--note {
+    color: var(--text-muted);
+  }
+
+  .diagnostic__where {
+    flex: none;
+    color: var(--text-muted);
+  }
+
+  .diagnostic__msg {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .serial__send {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: none;
+    padding: var(--space-1) var(--space-3);
+    border-top: 1px solid var(--border);
+  }
+
+  .serial__input {
+    flex: 1;
+    min-width: 0;
+    padding: 3px var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control, 2px);
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--fs-code);
+  }
+
+  .serial__input:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .serial__newline {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--text-muted);
+    font-size: var(--fs-ui-dense);
+    white-space: nowrap;
   }
 
   /* Parts: icon over label, in a two-up grid. */

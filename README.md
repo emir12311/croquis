@@ -120,6 +120,8 @@ alongside it, use `npm run dev -- --port 5199`.
 
 Write a sketch, place parts, wire them up, and press **Run** in the top right of the circuit bar. While a sketch runs the circuit is frozen — **Restart** applies an edited sketch, **Stop** lets you rewire.
 
+Compiler errors appear in the serial panel with their line number; click one to put the caret there. While a sketch runs, the serial monitor's input row sends text to `Serial.read()` — with an optional trailing newline. Closing the window with unsaved changes asks before discarding them.
+
 | Input | Does |
 | --- | --- |
 | Click a pin, then another pin | Wire them together |
