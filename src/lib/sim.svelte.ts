@@ -62,6 +62,10 @@ export class Sim {
     this.avrPins = {}
     // A fresh run never inherits a held button.
     this.pressedButtons = {}
+    // A new simulator has no memory of the levels sent to the old one, so the
+    // duplicate-suppression caches must not survive a restart either.
+    this.lastDrives.clear()
+    this.lastAnalogs.clear()
     try {
       const fw = await this.backend.compile(sketch)
       await this.backend.start(fw.elf, bounce)
@@ -100,6 +104,8 @@ export class Sim {
     this.pin13 = false
     this.serial = ''
     this.buildError = ''
+    this.lastDrives.clear()
+    this.lastAnalogs.clear()
   }
 
   press(partId: string, down: boolean) {
