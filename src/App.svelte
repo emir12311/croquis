@@ -155,6 +155,9 @@
     setInput: async (port, pin, high) => {
       await invoke('set_input', { port, pin, high })
     },
+    setAnalog: async (channel, millivolts) => {
+      await invoke('set_analog', { channel, millivolts })
+    },
     onPin: (cb) =>
       listen<{ port: number; pin: number; high: boolean }>('sim:pin', (e) =>
         cb(e.payload.port, e.payload.pin, e.payload.high),
@@ -832,6 +835,28 @@
     inst.attrs = { ...inst.attrs, [name]: value }
   }
 
+  /**
+   * A range control (the potentiometer's position) is dragged, not typed, so it
+   * applies live — the circuit re-solves on every step, which is the whole point of
+   * watching an `analogRead`. A whole drag is still one undo step: the first real
+   * movement commits and the rest ride along, until the pointer or key lets go.
+   */
+  let rangeDragging = false
+
+  function setRange(inst: Instance, name: string, value: number) {
+    const text = String(value)
+    if (attrsOf(inst)[name] === text) return
+    if (!rangeDragging) {
+      commit()
+      rangeDragging = true
+    }
+    inst.attrs = { ...inst.attrs, [name]: text }
+  }
+
+  function endRange() {
+    rangeDragging = false
+  }
+
   /** Change one property of a part (undoable). */
 
   // Redraw whenever anything the canvas shows changes.
@@ -931,6 +956,10 @@
       })),
     }))
     const refs = wires.map((w) => ({ a: { ...w.a }, b: { ...w.b } }))
+    // Re-solve when the run state flips too: `Sim.solve` only pushes its drives and
+    // analogue values while running, so start needs a solve to carry the state that
+    // was already on the canvas into a freshly started simulator.
+    void running
     // Handed over by reference: `Sim.solve` reads `pressedButtons[id]` even for an id
     // that is not in the object yet, which is what carries a press from the canvas
     // into the simulator. Spreading reads only the keys it already has, so a button
@@ -1348,6 +1377,23 @@
                       <option value={opt.value}>{opt.label}</option>
                     {/each}
                   </select>
+                </span>
+              {:else if field.control.kind === 'range'}
+                <span class="props__control">
+                  <input
+                    {id}
+                    class="props__range"
+                    type="range"
+                    min={field.control.min}
+                    max={field.control.max}
+                    step={field.control.step}
+                    value={attrs[field.name] ?? String(field.control.min)}
+                    oninput={(e) => setRange(selectedPart, field.name, Number(e.currentTarget.value))}
+                    onchange={endRange}
+                    onpointerup={endRange}
+                    onkeyup={endRange}
+                  />
+                  <span class="props__readout">{attrs[field.name] ?? field.control.min}</span>
                 </span>
               {:else}
                 <span class="props__control">
@@ -1903,6 +1949,20 @@
   .props__number {
     width: 5.5em;
     font-family: var(--font-mono);
+  }
+
+  .props__range {
+    width: 7em;
+    accent-color: var(--accent);
+    cursor: ew-resize;
+  }
+
+  /* The value a drag lands on, so a position is a number and not a guess. */
+  .props__readout {
+    min-width: 3.5em;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
   }
 
   .props__swatch {

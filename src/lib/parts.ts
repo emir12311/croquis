@@ -15,7 +15,14 @@
 
 import { BREADBOARDS, breadboardPinNode } from './breadboard'
 
-export type PartKind = 'uno' | 'led' | 'resistor' | 'pushbutton' | 'breadboard' | 'breadboard-full'
+export type PartKind =
+  | 'uno'
+  | 'led'
+  | 'resistor'
+  | 'pushbutton'
+  | 'potentiometer'
+  | 'breadboard'
+  | 'breadboard-full'
 
 /** Both breadboard sizes behave identically — one generator, two specs. */
 export function isBreadboard(kind: PartKind): boolean {
@@ -85,6 +92,12 @@ export type FieldControl =
    * netlist wants, so the unit is a way of reading and writing it.
    */
   | { kind: 'resistance'; units: ResistanceUnit[]; min: number; max: number }
+  /**
+   * A value you slide rather than type — a potentiometer's wiper. Unlike the
+   * others this stays live while a sketch runs, because a knob you cannot turn
+   * during a run is a knob with nothing to do.
+   */
+  | { kind: 'range'; min: number; max: number; step: number }
 
 export interface PartField {
   name: string
@@ -177,6 +190,23 @@ export const PARTS: PartDef[] = [
     // Four legs, two electrical nodes: the two on each side are one switch.
     pinNode: (pin) => (pin.startsWith('1') ? '1' : '2'),
     icon: '<circle cx="12" cy="13" r="4.5"/><path d="M9 9.2V6.5h6v2.7"/><path d="M4.5 13H2M19.5 13H22"/>',
+  },
+  {
+    kind: 'potentiometer',
+    label: 'Potentiometer',
+    tag: 'wokwi-potentiometer',
+    // Wokwi's own attribute name and scale: 0 is the GND end of the track, 1023 the
+    // VCC end, so the SIG voltage is value/1023 of the supply and `analogRead` reads
+    // it back unchanged at full scale.
+    attrs: { value: '0' },
+    fields: [
+      {
+        name: 'value',
+        label: 'Position',
+        control: { kind: 'range', min: 0, max: 1023, step: 1 },
+      },
+    ],
+    icon: '<circle cx="12" cy="9" r="5.5"/><path d="M12 9l3.4-3.4"/><path d="M7 15v4M12 15.5V20M17 15v4"/>',
   },
   {
     kind: 'breadboard',

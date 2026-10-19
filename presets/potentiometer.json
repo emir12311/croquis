@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Potentiometer",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "pot1",
+      "type": "wokwi-potentiometer",
+      "left": 430,
+      "top": 200,
+      "attrs": {
+        "value": "512"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "uno:5V",
+      "pot1:VCC"
+    ],
+    [
+      "pot1:GND",
+      "uno:GND.2"
+    ],
+    [
+      "pot1:SIG",
+      "uno:A0"
+    ]
+  ],
+  "sketch": "// Potentiometer — turn the knob and watch the voltage A0 sees.\n//\n// A potentiometer is a variable divider: the wiper (SIG) taps value/1023 of the\n// way from GND to VCC, so 512 reads about half the supply. Drag the knob on the\n// canvas — or slide it in the properties strip, which stays live while the sketch\n// runs — and the readings on the serial monitor follow.\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  int raw = analogRead(A0);\n  int volts = map(raw, 0, 1023, 0, 500);   // centivolts, to keep the maths in ints\n  Serial.print(\"A0 = \");\n  Serial.print(raw);\n  Serial.print(\"/1023  ~\");\n  Serial.print(volts / 100);\n  Serial.print('.');\n  Serial.print(volts % 100);\n  Serial.println(\" V\");\n  delay(200);\n}\n"
+}

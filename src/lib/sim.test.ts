@@ -8,6 +8,7 @@ class FakeBackend implements SimBackend {
   started: { elf: string; bounce: boolean }[] = []
   stopped = 0
   inputs: [number, number, boolean][] = []
+  analogs: [number, number][] = []
   failCompile = ''
   unsubscribed = 0
   pinCb: ((port: number, pin: number, high: boolean) => void) | null = null
@@ -29,6 +30,9 @@ class FakeBackend implements SimBackend {
   }
   async setInput(port: number, pin: number, high: boolean) {
     this.inputs.push([port, pin, high])
+  }
+  async setAnalog(channel: number, millivolts: number) {
+    this.analogs.push([channel, millivolts])
   }
   async onPin(cb: (port: number, pin: number, high: boolean) => void) {
     this.pinCb = cb
@@ -128,6 +132,36 @@ describe('Sim.solve', () => {
     expect(backend.inputs).toEqual([
       [68, 2, false],
       [68, 2, true],
+    ])
+  })
+
+  it('holds a potentiometer voltage on the ADC channel, and only when it changes', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    await sim.run('void setup(){}', false)
+
+    const parts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'p1', kind: 'potentiometer', attrs: { value: '512' } },
+    ]
+    const wires: EvalWire[] = [
+      { a: { instanceId: 'p1', pin: 'VCC' }, b: { instanceId: 'uno', pin: '5V' } },
+      { a: { instanceId: 'p1', pin: 'GND' }, b: { instanceId: 'uno', pin: 'GND.2' } },
+      { a: { instanceId: 'p1', pin: 'SIG' }, b: { instanceId: 'uno', pin: 'A0' } },
+    ]
+
+    sim.solve(parts, wires)
+    expect(backend.analogs).toEqual([[0, 2502]]) // 512/1023 of 5 V
+
+    // Nothing changed: the same voltage is not sent again.
+    sim.solve(parts, wires)
+    expect(backend.analogs).toHaveLength(1)
+
+    parts[1].attrs = { value: '1023' }
+    sim.solve(parts, wires)
+    expect(backend.analogs).toEqual([
+      [0, 2502],
+      [0, 5000],
     ])
   })
 

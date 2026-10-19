@@ -311,3 +311,68 @@ describe('the far ends of the resistance ladder', () => {
     expect(chain('1').leds.led).toBe('burnt')
   })
 })
+
+describe('a potentiometer sets the voltage an analogue pin reads', () => {
+  const pot = (value = '0'): EvalPart => ({ id: 'p1', kind: 'potentiometer', attrs: { value } })
+  const wired = (value?: string) =>
+    run(
+      [pot(value)],
+      [
+        wire(at('uno', '5V'), at('p1', 'VCC')),
+        wire(at('uno', 'GND.2'), at('p1', 'GND')),
+        wire(at('p1', 'SIG'), at('uno', 'A0')),
+      ],
+    )
+
+  it('is a fraction of the supply between its end stops', () => {
+    expect(wired('0').analogs).toEqual([{ channel: 0, millivolts: 0 }])
+    expect(wired('1023').analogs).toEqual([{ channel: 0, millivolts: 5000 }])
+    expect(wired('512').analogs).toEqual([{ channel: 0, millivolts: 2502 }])
+  })
+
+  it('reads the other way round when its ends are swapped, the way it would on a bench', () => {
+    const out = run(
+      [pot('1023')],
+      [
+        wire(at('uno', 'GND.2'), at('p1', 'VCC')),
+        wire(at('uno', '5V'), at('p1', 'GND')),
+        wire(at('p1', 'SIG'), at('uno', 'A0')),
+      ],
+    )
+    expect(out.analogs).toEqual([{ channel: 0, millivolts: 0 }])
+  })
+
+  it('says which rail is missing rather than reading nothing', () => {
+    const out = run(
+      [pot('512')],
+      [wire(at('uno', '5V'), at('p1', 'VCC')), wire(at('p1', 'SIG'), at('uno', 'A0'))],
+    )
+    expect(out.analogs).toEqual([])
+    expect(out.warnings.p1).toMatch(/5V.*GND/i)
+  })
+
+  it('is quiet until its wiper reaches an analogue input', () => {
+    const out = run(
+      [pot('512')],
+      [wire(at('uno', '5V'), at('p1', 'VCC')), wire(at('uno', 'GND.2'), at('p1', 'GND'))],
+    )
+    expect(out.analogs).toEqual([])
+    expect(out.warnings.p1).toBeUndefined()
+  })
+
+  it('feeds every analogue pin its wiper is wired to', () => {
+    const out = run(
+      [pot('1023')],
+      [
+        wire(at('uno', '5V'), at('p1', 'VCC')),
+        wire(at('uno', 'GND.2'), at('p1', 'GND')),
+        wire(at('p1', 'SIG'), at('uno', 'A0')),
+        wire(at('uno', 'A0'), at('uno', 'A3')),
+      ],
+    )
+    expect(out.analogs).toEqual([
+      { channel: 0, millivolts: 5000 },
+      { channel: 3, millivolts: 5000 },
+    ])
+  })
+})

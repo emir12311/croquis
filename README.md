@@ -28,9 +28,9 @@ There are three circuits to start from — **Blink**, **Button** and **Button + 
 
 | Feature | What it does |
 | --- | --- |
-| **Parts** | Uno, LED, resistor, pushbutton; half and full breadboards |
+| **Parts** | Uno, LED, resistor, pushbutton, potentiometer; half and full breadboards |
 | **Canvas** | Drag, rotate, snap; orthogonal wiring; multi-select; undo/redo; copy/paste |
-| **Simulation** | `avr-gcc` + `simavr`; LEDs at simulated current, live buttons, modelled bounce |
+| **Simulation** | `avr-gcc` + `simavr`; LEDs at simulated current, live buttons, analogue input, modelled bounce |
 | **Editor** | CodeMirror + Arduino API completions; serial monitor docked beside the circuit |
 | **Files** | Wokwi's `diagram.json` import and export, sketch included |
 
@@ -161,13 +161,18 @@ Your sketch
     and the other way, while you hold a button:              │
                                                              │
     the canvas ──▶ the netlist ──▶ set_input ──▶ simavr ─────┘
+
+    and analogue input, which has no button to hold:
+
+    the knob's position ──▶ the netlist ──▶ set_analog ──▶ simavr,
+    held as a voltage, so analogRead(A0) re-reads it every loop
 ```
 
 That's basically it.
 
 ## What it doesn't do yet
 
-* **A handful of components.** An Uno, an LED, a resistor, a pushbutton, breadboards. No potentiometer, buzzer, display or servo, and no analogue input.
+* **A handful of components.** An Uno, an LED, a resistor, a pushbutton, a potentiometer, breadboards. No buzzer, display or servo.
 * **One board.** A second Uno gets its own circuit but shares the single sketch.
 * **A small electrical model, not a circuit solver.** A resistor does something real and a missing one is reported, but there are no parallel networks and no voltage dividers.
 * **Wokwi files open with one caveat:** a wire using Wokwi's `*` route separator draws a different path here, to the same pins.

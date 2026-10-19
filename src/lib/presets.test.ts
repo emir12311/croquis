@@ -116,4 +116,10 @@ describe('what the shipped circuits actually do', () => {
     expect(evalPreset('serial', { b1: true }).drives).toContainEqual({ port: 'D', pin: 2, high: false })
     expect(evalPreset('serial', {}).drives).toContainEqual({ port: 'D', pin: 2, high: true })
   })
+
+  it('potentiometer: mid-track, A0 reads about half the supply, and wired right', () => {
+    const out = evalPreset('potentiometer')
+    expect(out.analogs).toContainEqual({ channel: 0, millivolts: 2502 })
+    expect(out.warnings.pot1).toBeUndefined()
+  })
 })
