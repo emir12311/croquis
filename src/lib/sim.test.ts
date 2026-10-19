@@ -285,6 +285,20 @@ describe('Sim.attach', () => {
     expect(backend.unsubscribed).toBe(3)
   })
 
+  it('clears a PWM timing when a pin event says it is digital again', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    const stop = sim.attach()
+    await Promise.resolve()
+
+    sim.pinTimings.B5 = { duty: 0.25, highMicros: 500, periodMicros: 2000 }
+    backend.pinCb?.(66, 5, false)
+
+    expect(sim.pinTimings).toEqual({})
+    expect(sim.avrPins.B5).toBe(false)
+    stop()
+  })
+
   it('does nothing in a plain browser', () => {
     const backend = new FakeBackend()
     backend.desktop = false

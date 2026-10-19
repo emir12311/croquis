@@ -47,6 +47,9 @@ pub struct PinTiming {
     level: Option<bool>,
     high_cycles: u64,
     period_cycles: u64,
+    /// Completed rising-to-rising periods. A real PWM pin needs several before it
+    /// is trusted; switch chatter must not be mistaken for PWM.
+    periods: u32,
 }
 
 /// Ignore transitions closer than this to the previous one. simavr emits
@@ -54,9 +57,19 @@ pub struct PinTiming {
 /// cycles is 2.5 µs, below any real PWM pulse we care about.
 const MIN_EDGE_GAP: u64 = 40;
 
+/// A gap longer than this means the next edge is a new signal, not the next
+/// PWM cycle; at 16 MHz, 1.6M cycles is 100 ms.
+const STALE_GAP: u64 = 1_600_000;
+
 impl PinTiming {
     /// Feed one edge. `cycle` is `sim_shim_cycle` at the transition.
     pub fn edge(&mut self, cycle: u64, high: bool) {
+        if self
+            .last_edge
+            .is_some_and(|last| cycle.saturating_sub(last) > STALE_GAP)
+        {
+            *self = Self::default();
+        }
         if self.level == Some(high) {
             return;
         }
@@ -73,6 +86,7 @@ impl PinTiming {
                 let period = cycle.saturating_sub(previous_rise);
                 if period > 0 {
                     self.period_cycles = period;
+                    self.periods = self.periods.saturating_add(1);
                 }
             }
             self.rise = Some(cycle);
@@ -103,6 +117,12 @@ impl PinTiming {
     /// The cycle of the most recent edge, for deciding whether a timing is stale.
     pub fn last_edge(&self) -> Option<u64> {
         self.last_edge
+    }
+
+    /// How many complete periods have been seen. Callers use this to require a
+    /// steady PWM stream rather than one noisy pair of edges.
+    pub fn periods(&self) -> u32 {
+        self.periods
     }
 }
 
@@ -211,6 +231,16 @@ mod tests {
         assert_eq!(timing.high_cycles, ONE_MS / 2);
         assert_eq!(timing.period_cycles, ONE_MS);
         assert_eq!(timing.duty_per_mille, 500);
+    }
+
+    #[test]
+    fn restarts_after_a_long_silence() {
+        let mut pin = PinTiming::default();
+        pin.edge(0, true);
+        pin.edge(1000, false);
+        // More than 100 ms later, this is a digital change, not a PWM period.
+        pin.edge(2_000_000, true);
+        assert!(pin.timing().is_none());
     }
 
     #[test]
