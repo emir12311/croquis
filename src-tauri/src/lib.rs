@@ -2,6 +2,7 @@
 //! simulation commands that drive `engine`.
 
 pub mod engine;
+pub mod timing;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
