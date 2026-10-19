@@ -30,7 +30,8 @@ pub fn run() {
             start_sim,
             stop_sim,
             set_input,
-            set_analog
+            set_analog,
+            serial_input
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -165,6 +166,16 @@ fn set_analog(channel: u8, millivolts: u16, state: State<SimState>) {
     if let Ok(slot) = state.0.lock() {
         if let Some(sim) = slot.as_ref() {
             sim.set_analog(channel, millivolts);
+        }
+    }
+}
+
+/// Feed text to the running sketch's serial input.
+#[tauri::command]
+fn serial_input(text: String, state: State<SimState>) {
+    if let Ok(slot) = state.0.lock() {
+        if let Some(sim) = slot.as_ref() {
+            sim.send_serial(text.as_bytes());
         }
     }
 }

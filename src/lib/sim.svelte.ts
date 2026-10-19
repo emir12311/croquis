@@ -17,6 +17,8 @@ export interface SimBackend {
   setInput(port: number, pin: number, high: boolean): Promise<void>
   /** Hold a voltage on an ADC channel, in millivolts (0–5000). */
   setAnalog(channel: number, millivolts: number): Promise<void>
+  /** Feed text into the sketch's Serial input. */
+  writeSerial(text: string): Promise<void>
   /** Subscribe to pin changes; resolves to the unsubscribe function. */
   onPin(cb: (port: number, pin: number, high: boolean) => void): Promise<() => void>
   /** Subscribe to serial bytes; resolves to the unsubscribe function. */
@@ -110,6 +112,16 @@ export class Sim {
 
   press(partId: string, down: boolean) {
     this.pressedButtons[partId] = down
+  }
+
+  /** Send text to the sketch's Serial input, if a desktop simulation is running. */
+  async sendSerial(text: string) {
+    if (!text || !this.running || !this.backend.isDesktop()) return
+    try {
+      await this.backend.writeSerial(text)
+    } catch (err) {
+      console.error('serial_input failed', err)
+    }
   }
 
   /**

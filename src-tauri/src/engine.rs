@@ -363,6 +363,8 @@ pub struct Simulator {
     input: Sender<(u8, u8, bool)>,
     /// ADC channel and the voltage to hold on it, in millivolts.
     analog: Sender<(u8, u16)>,
+    /// Bytes to feed into the simulated UART's receive side.
+    serial: Sender<u8>,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
@@ -374,12 +376,22 @@ impl Simulator {
     pub fn start(elf: &Path, emit: Emit, bounce: bool) -> Result<Self, String> {
         let (tx, rx) = mpsc::channel();
         let (analog_tx, analog_rx) = mpsc::channel();
+        let (serial_tx, serial_rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
         let elf = elf.to_path_buf();
         let stop_thread = stop.clone();
         let handle = thread::spawn(move || {
-            if let Err(e) = sim_main(&elf, rx, analog_rx, stop_thread, emit, &ready_tx, bounce) {
+            if let Err(e) = sim_main(
+                &elf,
+                rx,
+                analog_rx,
+                serial_rx,
+                stop_thread,
+                emit,
+                &ready_tx,
+                bounce,
+            ) {
                 let _ = ready_tx.send(Err(e));
             }
         });
@@ -387,6 +399,7 @@ impl Simulator {
             Ok(Ok(())) => Ok(Self {
                 input: tx,
                 analog: analog_tx,
+                serial: serial_tx,
                 stop,
                 handle: Some(handle),
             }),
@@ -403,6 +416,13 @@ impl Simulator {
     /// Hold a voltage on an ADC channel — a potentiometer's wiper, in millivolts.
     pub fn set_analog(&self, channel: u8, millivolts: u16) {
         let _ = self.analog.send((channel, millivolts));
+    }
+
+    /// Feed bytes into the simulated UART's receive side — serial monitor input.
+    pub fn send_serial(&self, bytes: &[u8]) {
+        for byte in bytes {
+            let _ = self.serial.send(*byte);
+        }
     }
 
     pub fn stop(&mut self) {
@@ -445,6 +465,7 @@ fn sim_main(
     elf: &Path,
     input: Receiver<(u8, u8, bool)>,
     analog: Receiver<(u8, u16)>,
+    serial: Receiver<u8>,
     stop: Arc<AtomicBool>,
     emit: Emit,
     ready: &Sender<Result<(), String>>,
@@ -492,6 +513,8 @@ fn sim_main(
             let ctx = Box::into_raw(Box::new(emit.clone()));
             ffi::avr_irq_register_notify(uart, Some(uart_notify), ctx as *mut c_void);
         }
+        // The receive side: raising this IRQ with a byte is simavr's UART input.
+        let uart_in = ffi::avr_io_getirq(avr, uart_getirq(b'0'), ffi::UART_IRQ_INPUT as i32);
 
         let freq = F_CPU as f64;
         let start_cycles = sim_shim_cycle(avr);
@@ -559,6 +582,13 @@ fn sim_main(
             // the voltage that stays on the channel until it says something else.
             while let Ok((channel, millivolts)) = analog.try_recv() {
                 raise_adc(avr, channel, millivolts);
+            }
+            // Serial input is a byte stream, like the monitor's Send button: each
+            // byte is pushed into the UART's receive side.
+            while let Ok(byte) = serial.try_recv() {
+                if !uart_in.is_null() {
+                    ffi::avr_raise_irq(uart_in, byte as u32);
+                }
             }
             let state = ffi::avr_run(avr);
             // Settle the contacts that are still chattering.
@@ -832,6 +862,49 @@ void loop() {
         assert!(
             (500..=525).contains(&last),
             "2502 mV should read ~512 against a 5 V reference, got {last} (all: {readings:?})"
+        );
+    }
+
+    /// The receive side of the serial monitor: bytes fed into the UART must reach
+    /// `Serial.read()`, not just appear in the output pane.
+    #[test]
+    fn serial_input_reaches_serial_read() {
+        let dir = std::env::temp_dir().join("croquis-uart-input-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+void setup() {
+  Serial.begin(9600);
+}
+void loop() {
+  if (Serial.available()) {
+    Serial.write(Serial.read());
+  }
+}
+"#;
+        let fw = compile(sketch, &dir).expect("sketch should compile");
+
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+        thread::sleep(Duration::from_millis(200)); // let setup() finish
+        sim.send_serial(b"hi");
+        thread::sleep(Duration::from_millis(600));
+        sim.stop();
+
+        let ev = events.lock().unwrap();
+        let serial: String = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Serial(b) => Some(*b as char),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            serial.contains("hi"),
+            "serial input never reached Serial.read(): {serial:?}"
         );
     }
 }

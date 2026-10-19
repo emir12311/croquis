@@ -10,10 +10,18 @@
   import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
   import { tags as t } from '@lezer/highlight'
 
-  let { value = $bindable('') }: { value?: string } = $props()
+  let {
+    value = $bindable(''),
+    jump = null,
+  }: {
+    value?: string
+    /** Set to a new object (line + nonce) to move the caret and scroll there. */
+    jump?: { line: number; nonce: number } | null
+  } = $props()
 
   let host: HTMLDivElement
-  let view: EditorView | null = null
+  // Raw: EditorView is a large class instance and must not be proxied.
+  let view = $state.raw<EditorView | null>(null)
 
   // Colours come from the app's own tokens, so the editor simply follows the
   // theme (dark/light, and any user palette override).
@@ -149,6 +157,21 @@
     if (value !== current) {
       view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
     }
+  })
+
+  // A compiler diagnostic was picked. `nonce` makes a second click on the same
+  // line work as well; the caret lands at the start of the line and the panel
+  // scrolls it into view.
+  $effect(() => {
+    if (!view || !jump) return
+    void jump.nonce
+    const line = Math.min(Math.max(1, jump.line), view.state.doc.lines)
+    const pos = view.state.doc.line(line).from
+    view.dispatch({
+      selection: { anchor: pos },
+      effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+    })
+    view.focus()
   })
 </script>
 
