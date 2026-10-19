@@ -95,6 +95,17 @@ export interface EvalPart {
 /** How hard an LED is being driven. `burnt` means over-driven *right now*. */
 export type LedState = 'off' | 'dim' | 'lit' | 'burnt'
 
+/**
+ * The number of brightness steps the renderer caches. The simulated brightness is
+ * continuous; a sprite per exact duty would be unbounded, so both the element and
+ * its sprite key use the same quantised value.
+ */
+export const LED_STEPS = 31
+
+export function ledStep(brightness: number): number {
+  return Math.round(Math.min(1, Math.max(0, brightness)) * LED_STEPS) / LED_STEPS
+}
+
 export interface EvalWire {
   a: PinRef
   b: PinRef
@@ -103,6 +114,8 @@ export interface EvalWire {
 export interface CircuitEval {
   /** LED instance id → how hard it's driven. */
   leds: Record<string, LedState>
+  /** LED instance id → brightness 0..1, so a PWM LED fades instead of flickering. */
+  ledBrightness: Record<string, number>
   /** Buttons pulled this pin to a level (because a button connects it to a rail). */
   drives: { port: string; pin: number; high: boolean }[]
   /** What's wrong with a part — for the properties strip and the canvas badge. */
@@ -167,6 +180,7 @@ export function evaluateCircuit(
   wires: EvalWire[],
   pressed: Record<string, boolean>,
   avr: Record<string, boolean>,
+  pinDuty: Record<string, number> = {},
 ): CircuitEval {
   const kindById = new Map(parts.map((p) => [p.id, p.kind]))
   const key = (ref: PinRef) => {
@@ -236,11 +250,11 @@ export function evaluateCircuit(
   }
 
   /**
-   * The resistance in series between one net and any of `targets`, following
-   * resistor edges only — an LED is a load, not a conductor. Fewest hops wins,
-   * which is exact for the series chains people actually build. Null: no path.
+   * The path with the least resistance between one net and any of `targets`,
+   * following resistor edges only — an LED is a load, not a conductor. Fewest hops
+   * wins, which is exact for the series chains people actually build. Null: no path.
    */
-  function resistanceTo(from: string, targets: Set<string>): number | null {
+  function reachTo(from: string, targets: Set<string>): { ohms: number; net: string } | null {
     const seen = new Map<string, { prev: string; ohms: number } | null>([[from, null]])
     const queue: string[] = [from]
     for (let i = 0; i < queue.length; i++) {
@@ -252,7 +266,7 @@ export function evaluateCircuit(
           ohms += step.ohms
           step = seen.get(step.prev)
         }
-        return ohms
+        return { ohms, net }
       }
       for (const edge of resistorEdges.get(net) ?? []) {
         if (seen.has(edge.to)) continue
@@ -263,12 +277,17 @@ export function evaluateCircuit(
     return null
   }
 
+  function resistanceTo(from: string, targets: Set<string>): number | null {
+    return reachTo(from, targets)?.ohms ?? null
+  }
+
   // What does each net carry?
   const vcc = new Set<string>()
   const gnd = new Set<string>()
   const mcuHigh = new Set<string>()
   const mcuLow = new Set<string>()
   const mcuPinOf = new Map<string, { port: string; pin: number }>()
+  const dutyByRoot = new Map<string, number>()
 
   for (const part of parts) {
     if (part.kind !== 'uno') continue
@@ -278,6 +297,12 @@ export function evaluateCircuit(
       const root = uf.find(`${part.id}:${nodeName('uno', pin)}`)
       const high = avr[`${info.port}${info.pin}`] === true
       ;(high ? mcuHigh : mcuLow).add(root)
+      if (high) {
+        // A PWM pin is still a source for connectivity; the duty says how hard.
+        const key = `${info.port}${info.pin}`
+        const duty = Math.min(1, Math.max(0, pinDuty[key] ?? 1))
+        dutyByRoot.set(root, Math.max(dutyByRoot.get(root) ?? 0, duty))
+      }
       mcuPinOf.set(root + `/${info.port}${info.pin}`, { port: info.port, pin: info.pin })
       if (pin.startsWith('A') || pin === '5V') continue
     }
@@ -304,15 +329,19 @@ export function evaluateCircuit(
   // LEDs: how much current actually flows. A resistor in series sets it, so this
   // is where a resistor stops being decoration — and where a missing one shows.
   const leds: Record<string, LedState> = {}
+  const ledBrightness: Record<string, number> = {}
   const warnings: Record<string, string> = {}
   for (const part of parts) {
     if (part.kind !== 'led') continue
     const a = uf.find(`${part.id}:A`)
     const c = uf.find(`${part.id}:C`)
-    const supply = resistanceTo(a, highNets)
-    const back = resistanceTo(c, lowNets)
+    const supplyPath = reachTo(a, highNets)
+    const backPath = reachTo(c, lowNets)
+    const supply = supplyPath?.ohms ?? null
+    const back = backPath?.ohms ?? null
     if (supply === null || back === null) {
       leds[part.id] = 'off'
+      ledBrightness[part.id] = 0
       // No path either way — but the *reverse* works, so it's in backwards.
       if (
         supply === null &&
@@ -327,11 +356,20 @@ export function evaluateCircuit(
     const ohms = PIN_OHMS + supply + back
     const forwardV = LED_FORWARD_V[part.attrs?.color ?? ''] ?? 2
     const mA = ((SUPPLY_V - forwardV) / ohms) * 1000
-    if (mA >= LED_BURN_MA) {
+    // A PWM pin is high for only part of each period. The average current is
+    // what heats the LED and what the eye sees; the pulse still carries the
+    // peak, but the teaching model is about the average.
+    const duty = supplyPath ? (dutyByRoot.get(supplyPath.net) ?? 1) : 0
+    const averageMa = mA * duty
+    if (averageMa >= LED_BURN_MA) {
       leds[part.id] = 'burnt'
-      warnings[part.id] = `Over-driven — ${Math.round(mA)} mA with nothing to limit it. Put a resistor in series.`
+      ledBrightness[part.id] = 0
+      warnings[part.id] = `Over-driven — ${Math.round(averageMa)} mA with nothing to limit it. Put a resistor in series.`
     } else {
-      leds[part.id] = mA >= LED_LIT_MA ? 'lit' : mA >= LED_DIM_MA ? 'dim' : 'off'
+      const state = averageMa >= LED_LIT_MA ? 'lit' : averageMa >= LED_DIM_MA ? 'dim' : 'off'
+      leds[part.id] = state
+      const base = mA >= LED_LIT_MA ? 1 : mA / LED_LIT_MA
+      ledBrightness[part.id] = state === 'off' ? 0 : Math.min(1, duty * base)
     }
   }
 
@@ -404,5 +442,5 @@ export function evaluateCircuit(
     }
   }
 
-  return { leds, drives, warnings, analogs }
+  return { leds, ledBrightness, drives, warnings, analogs }
 }

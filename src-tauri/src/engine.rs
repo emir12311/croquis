@@ -10,9 +10,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+use crate::timing::PinTiming;
 
 #[allow(
     non_upper_case_globals,
@@ -355,6 +357,14 @@ pub enum SimEvent {
     Pin { port: u8, pin: u8, high: bool },
     /// A byte written to the UART — the serial monitor.
     Serial(u8),
+    /// The latest PWM timing for a pin, emitted on a 20 ms tick.
+    Timing {
+        port: u8,
+        pin: u8,
+        duty_per_mille: u16,
+        high_micros: u64,
+        period_micros: u64,
+    },
 }
 
 pub type Emit = Arc<dyn Fn(SimEvent) + Send + Sync>;
@@ -443,14 +453,23 @@ struct PinCtx {
     emit: Emit,
     port: u8,
     pin: u8,
+    /// The simulator, as an address: the callback runs on the sim thread and only
+    /// needs this to read the cycle counter.
+    avr: usize,
+    timing: Mutex<PinTiming>,
 }
 
 unsafe extern "C" fn pin_notify(_irq: *mut ffi::avr_irq_t, value: u32, param: *mut c_void) {
     let ctx = &*(param as *const PinCtx);
+    let high = value != 0;
+    let now = sim_shim_cycle(ctx.avr as *mut ffi::avr_t);
+    if let Ok(mut timing) = ctx.timing.lock() {
+        timing.edge(now, high);
+    }
     (ctx.emit)(SimEvent::Pin {
         port: ctx.port,
         pin: ctx.pin,
-        high: value != 0,
+        high,
     });
 }
 
@@ -495,6 +514,7 @@ fn sim_main(
         // Watch every pin of ports B/C/D (covers the built-in LED and the common
         // digital pins), plus the UART output. The contexts are leaked on purpose:
         // simavr keeps the pointers for the lifetime of the simulation.
+        let mut meters: Vec<*mut PinCtx> = Vec::new();
         for port in [b'B', b'C', b'D'] {
             for pin in 0u8..8 {
                 let irq = ffi::avr_io_getirq(avr, ioport_getirq(port), pin as i32);
@@ -503,7 +523,10 @@ fn sim_main(
                         emit: emit.clone(),
                         port,
                         pin,
+                        avr: avr as usize,
+                        timing: Mutex::new(PinTiming::default()),
                     }));
+                    meters.push(ctx);
                     ffi::avr_irq_register_notify(irq, Some(pin_notify), ctx as *mut c_void);
                 }
             }
@@ -548,6 +571,11 @@ fn sim_main(
         // sketch that doesn't debounce will really see it.
         const BOUNCE_CHATTER_CYCLES: u64 = F_CPU as u64 / 5500; // ~180us between make/breaks
         const BOUNCE_FLIPS: u64 = 6; // ~1ms of chatter in all
+        // One timing event per pin per 20 ms: enough for fades and servo pulses,
+        // far below the edge rate of a 490 Hz PWM.
+        const TIMING_TICK: u64 = F_CPU as u64 / 50;
+        // A pin that stops toggling is no longer PWM; stop repeating its timing.
+        const TIMING_STALE: u64 = F_CPU as u64 / 10;
         struct Bounce {
             port: u8,
             pin: u8,
@@ -556,6 +584,7 @@ fn sim_main(
             next: u64,
         }
         let mut bounces: Vec<Bounce> = Vec::new();
+        let mut next_timing = sim_shim_cycle(avr) + TIMING_TICK;
 
         loop {
             if stop.load(Ordering::Relaxed) {
@@ -608,6 +637,38 @@ fn sim_main(
                     }
                     true
                 });
+            }
+            // A 20 ms cadence for PWM timing. Each meter is updated by the pin
+            // callback; this is where it becomes one UI event instead of an edge
+            // flood.
+            let now = sim_shim_cycle(avr);
+            if now >= next_timing {
+                for &ctx in &meters {
+                    let timing = match (*ctx).timing.lock() {
+                        Ok(timing) => {
+                            let recent = timing
+                                .last_edge()
+                                .map(|edge| now.saturating_sub(edge) <= TIMING_STALE)
+                                .unwrap_or(false);
+                            if recent {
+                                timing.timing()
+                            } else {
+                                None
+                            }
+                        }
+                        Err(_) => None,
+                    };
+                    if let Some(timing) = timing {
+                        (emit)(SimEvent::Timing {
+                            port: (*ctx).port,
+                            pin: (*ctx).pin,
+                            duty_per_mille: timing.duty_per_mille,
+                            high_micros: timing.high_micros(F_CPU as u64),
+                            period_micros: timing.period_micros(F_CPU as u64),
+                        });
+                    }
+                }
+                next_timing = now + TIMING_TICK;
             }
             if state == ffi::cpu_Done as i32 || state == ffi::cpu_Crashed as i32 {
                 break;
@@ -905,6 +966,50 @@ void loop() {
         assert!(
             serial.contains("hi"),
             "serial input never reached Serial.read(): {serial:?}"
+        );
+    }
+
+    /// The PWM path end to end: `analogWrite(9, 64)` is 25% duty, and the UI's
+    /// timing event must carry that rather than a flood of edges.
+    #[test]
+    fn pwm_duty_reaches_the_ui() {
+        let dir = std::env::temp_dir().join("croquis-pwm-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+void setup() {
+  pinMode(6, OUTPUT);
+}
+void loop() {
+  analogWrite(6, 64);
+}
+"#;
+        let fw = compile(sketch, &dir).expect("sketch should compile");
+
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+        thread::sleep(Duration::from_millis(300));
+        sim.stop();
+
+        let ev = events.lock().unwrap();
+        let duty = ev
+            .iter()
+            .find_map(|e| match e {
+                SimEvent::Timing {
+                    port: b'D',
+                    pin: 6,
+                    duty_per_mille,
+                    ..
+                } => Some(*duty_per_mille),
+                _ => None,
+            })
+            .expect("no PWM timing reached the UI for pin 6 (D6)");
+        assert!(
+            (200..=300).contains(&duty),
+            "analogWrite(6, 64) should be about 25% duty, got {duty} per mille"
         );
     }
 }

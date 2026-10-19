@@ -41,13 +41,33 @@ impl Timing {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct PinTiming {
     rise: Option<u64>,
+    last_edge: Option<u64>,
+    /// The last level seen, so a repeated notification for the same value does not
+    /// restart a pulse. simavr can deliver more than one notification per edge.
+    level: Option<bool>,
     high_cycles: u64,
     period_cycles: u64,
 }
 
+/// Ignore transitions closer than this to the previous one. simavr emits
+/// zero-width and ~6 µs glitches around a timer compare edge; at 16 MHz, 40
+/// cycles is 2.5 µs, below any real PWM pulse we care about.
+const MIN_EDGE_GAP: u64 = 40;
+
 impl PinTiming {
     /// Feed one edge. `cycle` is `sim_shim_cycle` at the transition.
     pub fn edge(&mut self, cycle: u64, high: bool) {
+        if self.level == Some(high) {
+            return;
+        }
+        if self
+            .last_edge
+            .is_some_and(|last| cycle.saturating_sub(last) < MIN_EDGE_GAP)
+        {
+            return;
+        }
+        self.level = Some(high);
+        self.last_edge = Some(cycle);
         if high {
             if let Some(previous_rise) = self.rise {
                 let period = cycle.saturating_sub(previous_rise);
@@ -78,6 +98,11 @@ impl PinTiming {
 
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    /// The cycle of the most recent edge, for deciding whether a timing is stale.
+    pub fn last_edge(&self) -> Option<u64> {
+        self.last_edge
     }
 }
 
@@ -156,6 +181,35 @@ mod tests {
         let timing = pin.timing().unwrap();
         assert_eq!(timing.high_cycles, 1_000);
         assert_eq!(timing.period_cycles, 2_000);
+        assert_eq!(timing.duty_per_mille, 500);
+    }
+
+    #[test]
+    fn ignores_repeated_levels() {
+        let mut pin = PinTiming::default();
+        pin.edge(0, true);
+        pin.edge(100, true); // a duplicate notification, not a new pulse
+        pin.edge(ONE_MS / 2, false);
+        pin.edge(ONE_MS, true);
+
+        let timing = pin.timing().unwrap();
+        assert_eq!(timing.high_cycles, ONE_MS / 2);
+        assert_eq!(timing.period_cycles, ONE_MS);
+        assert_eq!(timing.duty_per_mille, 500);
+    }
+
+    #[test]
+    fn ignores_contact_glitches() {
+        let mut pin = PinTiming::default();
+        pin.edge(0, true);
+        pin.edge(ONE_MS / 2, false);
+        pin.edge(ONE_MS / 2, true); // zero-width glitch at the real edge
+        pin.edge(ONE_MS / 2 + 100, false); // and its short low
+        pin.edge(ONE_MS, true);
+
+        let timing = pin.timing().unwrap();
+        assert_eq!(timing.high_cycles, ONE_MS / 2);
+        assert_eq!(timing.period_cycles, ONE_MS);
         assert_eq!(timing.duty_per_mille, 500);
     }
 

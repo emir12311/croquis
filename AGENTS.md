@@ -59,7 +59,7 @@ simavr steps; the rest are in [the README](README.md#build-from-source).
 | `src/lib/circuit-render.ts` | the canvas renderer |
 | `src/lib/part-art.ts` | rasterising the `@wokwi/elements` parts into sprites |
 | `src/lib/arduino-api.ts` | the editor's Arduino completions |
-| `src/lib/presets.ts` + `presets/*.json` | the three shipped circuits |
+| `src/lib/presets.ts` + `presets/*.json` | the shipped circuits |
 | `src-tauri/src/engine.rs` | compiling sketches, and the simavr bridge |
 | `src-tauri/src/lib.rs` | the Tauri commands |
 | `src/lib/*.test.ts` | a test file per module, next to it |

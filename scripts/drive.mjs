@@ -108,7 +108,18 @@ export class App {
 
   async goto(url) {
     await this.send('Page.navigate', { url })
-    await sleep(2500) // the app mounts its parts and fonts
+    // Wait for the app shell, not a fixed guess: the first load compiles the dev
+    // bundle, and a 2.5 s sleep made the first checks race that compile.
+    const deadline = Date.now() + 15_000
+    while (Date.now() < deadline) {
+      try {
+        if (await this.ev(`!!document.querySelector('.panel__body--canvas')`)) break
+      } catch {
+        /* the navigation is still settling */
+      }
+      await sleep(100)
+    }
+    await sleep(500) // fonts and the hidden part elements
   }
 
   mouse(type, x, y, button = 'left', buttons = 0) {
@@ -313,6 +324,13 @@ check('the view opens centred, not in the corner', async (app) => {
 check('a preset loads', async (app) => {
   await app.loadPreset('Blink')
   assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 3, 'Blink gives three parts')
+})
+
+check('the Fade preset loads with a PWM LED', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Fade')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 3, 'Fade gives three parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-led')`), 'the LED is on the canvas')
 })
 
 check('Ctrl+A selects everything', async (app) => {

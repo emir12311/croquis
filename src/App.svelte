@@ -7,7 +7,7 @@
     parseResistance,
     type PartField,
   } from './lib/parts'
-  import { type LedState } from './lib/netlist'
+  import { type LedState, ledStep } from './lib/netlist'
   import {
     attrsOf,
     WIRE_GRID,
@@ -167,6 +167,12 @@
       listen<{ port: number; pin: number; high: boolean }>('sim:pin', (e) =>
         cb(e.payload.port, e.payload.pin, e.payload.high),
       ),
+    onTiming: (cb) =>
+      listen<{ port: number; pin: number; duty: number; highMicros: number; periodMicros: number }>(
+        'sim:timing',
+        (e) =>
+          cb(e.payload.port, e.payload.pin, e.payload.duty, e.payload.highMicros, e.payload.periodMicros),
+      ),
     onSerial: (cb) => listen<number>('sim:serial', (e) => cb(e.payload)),
   }
   const sim = new Sim(simBackend)
@@ -254,6 +260,7 @@
   // Electrical state derived from the simulation (see lib/netlist.ts).
   let avrPins = $derived(sim.avrPins)
   let ledStates = $derived(sim.ledStates)
+  let ledBrightness = $derived(sim.ledBrightness)
   /** What's wrong with a part — the strip says it in words, the canvas badges it. */
   let warnings = $derived(sim.warnings)
   let pressedButtons = $derived(sim.pressedButtons)
@@ -270,6 +277,7 @@
   const surface = new CanvasSurface(() => ({
     pin13,
     ledStates,
+    ledBrightness,
     pressedButtons,
     warnings,
   }))
@@ -983,21 +991,18 @@
   function liveProp(inst: Instance): { name: string; value: unknown }[] | null {
     if (inst.kind === 'uno') return [{ name: 'led13', value: pin13 }]
     if (inst.kind === 'led') {
-      const state = ledStates[inst.id] ?? 'off'
-      // `brightness` is how the element shows a dim LED; `value` is on/off, and it
-      // has to be false when a burnt LED is dark or the element would still glow.
+      // `brightness` is how the element shows a dim LED; `value` is on/off. Both
+      // use the same quantised step as the sprite cache, so the drawn pixels and
+      // the cache key cannot disagree.
+      const step = ledStep(ledBrightness[inst.id] ?? 0)
       return [
-        { name: 'brightness', value: LED_BRIGHTNESS[state] },
-        { name: 'value', value: state === 'lit' || state === 'dim' },
+        { name: 'brightness', value: step },
+        { name: 'value', value: step > 0 },
       ]
     }
     if (inst.kind === 'pushbutton') return [{ name: 'pressed', value: !!pressedButtons[inst.id] }]
     return null
   }
-
-  /** How brightly each state shows, and a digit so variants cache separately. */
-  const LED_BRIGHTNESS: Record<LedState, number> = { off: 0, dim: 0.4, lit: 1, burnt: 0 }
-  const LED_ORDER: Record<LedState, number> = { off: 0, dim: 1, lit: 2, burnt: 3 }
 
   /** One action for every part: push that state into whichever element it is. */
   function liveState(node: HTMLElement, state: { name: string; value: unknown }[] | null) {
