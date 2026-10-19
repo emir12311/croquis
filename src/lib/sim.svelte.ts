@@ -21,8 +21,19 @@ export interface SimBackend {
   writeSerial(text: string): Promise<void>
   /** Subscribe to pin changes; resolves to the unsubscribe function. */
   onPin(cb: (port: number, pin: number, high: boolean) => void): Promise<() => void>
+  /** Subscribe to PWM timing; resolves to the unsubscribe function. */
+  onTiming(
+    cb: (port: number, pin: number, duty: number, highMicros: number, periodMicros: number) => void,
+  ): Promise<() => void>
   /** Subscribe to serial bytes; resolves to the unsubscribe function. */
   onSerial(cb: (byte: number) => void): Promise<() => void>
+}
+
+/** The latest PWM timing for one pin. Duty is 0..1. */
+export interface PinTiming {
+  duty: number
+  highMicros: number
+  periodMicros: number
 }
 
 const SERIAL_LIMIT = 20_000
@@ -35,8 +46,12 @@ export class Sim {
   pin13 = $state(false)
   /** Levels the chip last reported, keyed `"B5"`. */
   avrPins = $state<Record<string, boolean>>({})
+  /** Latest PWM timing per pin, keyed `"B5"`. */
+  pinTimings = $state<Record<string, PinTiming>>({})
   /** How hard each LED is driven. */
   ledStates = $state<Record<string, LedState>>({})
+  /** How brightly each LED is drawn (0..1); PWM makes this continuous. */
+  ledBrightness = $state<Record<string, number>>({})
   /** What is wrong with each part, for the canvas badge and the strip. */
   warnings = $state<Record<string, string>>({})
   /** Voltages the circuit puts on the chip's ADC inputs, in millivolts. */
@@ -62,6 +77,8 @@ export class Sim {
     // A stopped chip drives nothing — clear the levels it last reported, or an
     // external LED would stay lit at whatever the sketch left it on.
     this.avrPins = {}
+    this.pinTimings = {}
+    this.ledBrightness = {}
     // A fresh run never inherits a held button.
     this.pressedButtons = {}
     // A new simulator has no memory of the levels sent to the old one, so the
@@ -89,6 +106,8 @@ export class Sim {
     this.running = false
     this.pin13 = false
     this.avrPins = {}
+    this.pinTimings = {}
+    this.ledBrightness = {}
     this.pressedButtons = {}
   }
 
@@ -101,6 +120,8 @@ export class Sim {
   /** Forget everything a stopped circuit should not keep. */
   reset() {
     this.avrPins = {}
+    this.pinTimings = {}
+    this.ledBrightness = {}
     this.pressedButtons = {}
     this.analogs = []
     this.pin13 = false
@@ -131,8 +152,18 @@ export class Sim {
    * which is what carries a press from the canvas into the simulator.
    */
   solve(parts: EvalPart[], wires: EvalWire[]) {
-    const result = evaluateCircuit(parts, wires, this.pressedButtons, this.avrPins)
+    // A PWM pin is still a source for connectivity; its duty says how hard. Pass
+    // both views so the netlist can keep the LED on and scale its brightness,
+    // instead of seeing whichever edge happened to arrive last.
+    const pins = { ...this.avrPins }
+    const duty: Record<string, number> = {}
+    for (const [key, timing] of Object.entries(this.pinTimings)) {
+      pins[key] = timing.duty > 0
+      duty[key] = timing.duty
+    }
+    const result = evaluateCircuit(parts, wires, this.pressedButtons, pins, duty)
     this.ledStates = result.leds
+    this.ledBrightness = result.ledBrightness
     this.warnings = result.warnings
     this.analogs = result.analogs
     if (!this.backend.isDesktop() || !this.running) {
@@ -168,6 +199,15 @@ export class Sim {
       .onPin((port, pin, high) => {
         this.avrPins[`${String.fromCharCode(port)}${pin}`] = high
         if (port === 66 && pin === 5) this.pin13 = high
+      })
+      .then((u) => alive && unlisten.push(u))
+    this.backend
+      .onTiming((port, pin, duty, highMicros, periodMicros) => {
+        this.pinTimings[`${String.fromCharCode(port)}${pin}`] = {
+          duty,
+          highMicros,
+          periodMicros,
+        }
       })
       .then((u) => alive && unlisten.push(u))
     this.backend

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BREADBOARDS } from './breadboard'
-import { evaluateCircuit, type EvalPart, type EvalWire } from './netlist'
+import { evaluateCircuit, ledStep, type EvalPart, type EvalWire } from './netlist'
 
 const uno: EvalPart = { id: 'uno', kind: 'uno' }
 const led = (color = 'red'): EvalPart => ({ id: 'led', kind: 'led', attrs: { color } })
@@ -19,6 +19,24 @@ const wire = (a: ReturnType<typeof at>, b: ReturnType<typeof at>): EvalWire => (
 /** A circuit with the Uno's pin 13 (port B, bit 5) driven high. */
 const run = (parts: EvalPart[], wires: EvalWire[], pressed: Record<string, boolean> = {}) =>
   evaluateCircuit([uno, ...parts], wires, pressed, { B5: true })
+
+/** The same circuit, with the pin carrying a PWM duty instead of a steady high. */
+const runAtDuty = (
+  parts: EvalPart[],
+  wires: EvalWire[],
+  duty: number,
+  pressed: Record<string, boolean> = {},
+) => evaluateCircuit([uno, ...parts], wires, pressed, { B5: true }, { B5: duty })
+
+describe('ledStep', () => {
+  it('quantises to the sprite steps and clamps', () => {
+    expect(ledStep(-1)).toBe(0)
+    expect(ledStep(2)).toBe(1)
+    expect(ledStep(0)).toBe(0)
+    expect(ledStep(1)).toBe(1)
+    expect(ledStep(0.25)).toBeCloseTo(8 / 31)
+  })
+})
 
 describe('an LED draws whatever is in series with it', () => {
   // 13 -> [resistor] -> LED -> GND
@@ -40,6 +58,22 @@ describe('an LED draws whatever is in series with it', () => {
   it('lights through a resistor in the usual range', () => {
     expect(chain('220').leds.led).toBe('lit')
     expect(chain('1000').leds.led).toBe('lit')
+    expect(chain('220').ledBrightness.led).toBe(1)
+  })
+
+  it('follows PWM duty instead of flickering on and off', () => {
+    const wires = [
+      wire(at('uno', '13'), at('r', '1')),
+      wire(at('r', '2'), at('led', 'A')),
+      wire(at('led', 'C'), at('uno', 'GND.2')),
+    ]
+    const quarter = runAtDuty([resistor('220'), led()], wires, 0.25)
+    expect(quarter.leds.led).toBe('lit')
+    expect(quarter.ledBrightness.led).toBeCloseTo(0.25)
+
+    const nearlyOff = runAtDuty([resistor('220'), led()], wires, 0.01)
+    expect(nearlyOff.leds.led).toBe('off')
+    expect(nearlyOff.ledBrightness.led).toBe(0)
   })
 
   it('dims as the resistance climbs, and goes out when it is far too high', () => {

@@ -24,13 +24,13 @@ A desktop app for building and running Arduino circuits without an Arduino.
 
 You drag components onto a canvas, wire them up, write a sketch and press Run. The sketch is compiled locally with `avr-gcc` and executed on a simulated AVR chip.
 
-There are four circuits to start from — **Blink**, **Button**, **Potentiometer** and **Button + serial** — under File → Presets.
+There are five circuits to start from — **Blink**, **Button**, **Potentiometer**, **Button + serial** and **Fade** — under File → Presets.
 
 | Feature | What it does |
 | --- | --- |
 | **Parts** | Uno, LED, resistor, pushbutton, potentiometer; half and full breadboards |
 | **Canvas** | Drag, rotate, snap; orthogonal wiring; multi-select; undo/redo; copy/paste |
-| **Simulation** | `avr-gcc` + `simavr`; LEDs at simulated current, live buttons, analogue input, modelled bounce |
+| **Simulation** | `avr-gcc` + `simavr`; LEDs at simulated current and PWM brightness, live buttons, analogue input, modelled bounce |
 | **Editor** | CodeMirror + Arduino API completions; serial monitor docked beside the circuit |
 | **Files** | Wokwi's `diagram.json` import and export, sketch included |
 

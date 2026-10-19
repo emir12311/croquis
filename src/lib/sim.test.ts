@@ -13,6 +13,8 @@ class FakeBackend implements SimBackend {
   failCompile = ''
   unsubscribed = 0
   pinCb: ((port: number, pin: number, high: boolean) => void) | null = null
+  timingCb: ((port: number, pin: number, duty: number, high: number, period: number) => void) | null =
+    null
   serialCb: ((byte: number) => void) | null = null
 
   isDesktop() {
@@ -40,6 +42,12 @@ class FakeBackend implements SimBackend {
   }
   async onPin(cb: (port: number, pin: number, high: boolean) => void) {
     this.pinCb = cb
+    return () => {
+      this.unsubscribed++
+    }
+  }
+  async onTiming(cb: (port: number, pin: number, duty: number, high: number, period: number) => void) {
+    this.timingCb = cb
     return () => {
       this.unsubscribed++
     }
@@ -222,6 +230,27 @@ describe('Sim.solve', () => {
     expect(backend.serialWrites).toEqual(['hello'])
   })
 
+  it('turns a pin timing into LED brightness when solving', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    await sim.run('void setup(){}', false)
+
+    const ledParts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'r', kind: 'resistor', attrs: { value: '220' } },
+      { id: 'led', kind: 'led' },
+    ]
+    const ledWires: EvalWire[] = [
+      { a: { instanceId: 'uno', pin: '13' }, b: { instanceId: 'r', pin: '1' } },
+      { a: { instanceId: 'r', pin: '2' }, b: { instanceId: 'led', pin: 'A' } },
+      { a: { instanceId: 'led', pin: 'C' }, b: { instanceId: 'uno', pin: 'GND.2' } },
+    ]
+    sim.pinTimings.B5 = { duty: 0.25, highMicros: 500, periodMicros: 2000 }
+    sim.solve(ledParts, ledWires)
+    expect(sim.ledStates.led).toBe('lit')
+    expect(sim.ledBrightness.led).toBeCloseTo(0.25)
+  })
+
   it('still solves the netlist in a plain browser, without sending anything', async () => {
     const backend = new FakeBackend()
     backend.desktop = false
@@ -243,15 +272,17 @@ describe('Sim.attach', () => {
 
     backend.pinCb?.(66, 5, true)
     backend.pinCb?.(68, 2, false)
+    backend.timingCb?.(66, 5, 0.25, 500, 2000)
     backend.serialCb?.(72)
     backend.serialCb?.(105)
 
     expect(sim.pin13).toBe(true)
     expect(sim.avrPins).toEqual({ B5: true, D2: false })
+    expect(sim.pinTimings).toEqual({ B5: { duty: 0.25, highMicros: 500, periodMicros: 2000 } })
     expect(sim.serial).toBe('Hi')
 
     stop()
-    expect(backend.unsubscribed).toBe(2)
+    expect(backend.unsubscribed).toBe(3)
   })
 
   it('does nothing in a plain browser', () => {

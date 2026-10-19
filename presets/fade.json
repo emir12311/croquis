@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Fade",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "r1",
+      "type": "wokwi-resistor",
+      "left": 430,
+      "top": 200,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "id": "led1",
+      "type": "wokwi-led",
+      "left": 580,
+      "top": 170,
+      "attrs": {
+        "color": "red"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "uno:6",
+      "r1:1"
+    ],
+    [
+      "r1:2",
+      "led1:A"
+    ],
+    [
+      "led1:C",
+      "uno:GND.2"
+    ]
+  ],
+  "sketch": "// Fade \u2014 PWM, not just on and off.\n//\n// Pin 6 is a PWM pin. analogWrite() switches it fast enough that the LED's\n// brightness is the duty cycle: 25% is a quarter as bright, not flickering.\n\nint brightness = 0;\nint step = 5;\n\nvoid setup() {\n  pinMode(6, OUTPUT);\n}\n\nvoid loop() {\n  analogWrite(6, brightness);\n  brightness += step;\n  if (brightness <= 0 || brightness >= 255) step = -step;\n  delay(20);\n}\n"
+}

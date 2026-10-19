@@ -136,6 +136,24 @@ fn start_sim(
         engine::SimEvent::Serial(byte) => {
             let _ = app.emit("sim:serial", byte);
         }
+        engine::SimEvent::Timing {
+            port,
+            pin,
+            duty_per_mille,
+            high_micros,
+            period_micros,
+        } => {
+            let _ = app.emit(
+                "sim:timing",
+                serde_json::json!({
+                    "port": port,
+                    "pin": pin,
+                    "duty": f64::from(duty_per_mille) / 1000.0,
+                    "highMicros": high_micros,
+                    "periodMicros": period_micros,
+                }),
+            );
+        }
     });
     *slot = Some(engine::Simulator::start(Path::new(&elf), emitter, bounce)?);
     Ok(())

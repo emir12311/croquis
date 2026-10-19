@@ -32,7 +32,7 @@ import {
   type Wire,
 } from './document'
 import { WIRE_HEX } from './wire-colours'
-import type { LedState } from './netlist'
+import { type LedState, ledStep, LED_STEPS } from './netlist'
 
 export type PinGeom = { name: string; x: number; y: number; description?: string }
 
@@ -40,6 +40,7 @@ export type PinGeom = { name: string; x: number; y: number; description?: string
 export interface RenderState {
   pin13: boolean
   ledStates: Record<string, LedState>
+  ledBrightness: Record<string, number>
   pressedButtons: Record<string, boolean>
   warnings: Record<string, string>
 }
@@ -59,8 +60,6 @@ export interface Scene {
   wiringTarget: PinRef | null
 }
 
-const LED_ORDER: Record<LedState, number> = { off: 0, dim: 1, lit: 2, burnt: 3 }
-/** A part within a hole's pitch of one snaps into it; anything further is free. */
 const SNAP = { reach: BREADBOARD_PITCH * 1.1, seat: BREADBOARD_HOLE_R }
 
 export class CanvasSurface {
@@ -325,9 +324,12 @@ export class CanvasSurface {
   private partKey(inst: Instance): string {
     const state = this.state()
     const chip = inst.kind === 'uno' && state.pin13 ? 1 : 0
-    const lit = inst.kind === 'led' ? LED_ORDER[state.ledStates[inst.id] ?? 'off'] : 0
+    const bright =
+      inst.kind === 'led'
+        ? Math.round(ledStep(state.ledBrightness[inst.id] ?? 0) * LED_STEPS)
+        : 0
     const down = inst.kind === 'pushbutton' && state.pressedButtons[inst.id] ? 1 : 0
-    return `${this.baseKey(inst)}|${chip}${lit}${down}`
+    return `${this.baseKey(inst)}|${chip}${bright}${down}`
   }
 
   /** Rasterise a part's element (its shadow-root contents) into an image we blit. */
