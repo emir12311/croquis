@@ -597,6 +597,36 @@ check('the canvas bitmap follows a layout resize', async (app) => {
   await sleep(300)
 })
 
+check('the potentiometer knob turns a live value', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Potentiometer')
+  const knob = await app.ev(`(() => {
+    const inst = [...document.querySelectorAll('.instance')].find(e => e.firstElementChild.tagName.toLowerCase() === 'wokwi-potentiometer')
+    if (!inst) return null
+    const svg = inst.firstElementChild.shadowRoot?.querySelector('svg')
+    const r = svg?.getBoundingClientRect()
+    if (!r) return null
+    return { x: r.x + (9.91 / 20) * r.width, y: r.y + (8.18 / 20) * r.height, w: r.width }
+  })()`)
+  assert(!!knob, 'the potentiometer and its knob are on the canvas')
+  const read = () =>
+    app.ev(`(() => ({
+      value: Number(document.querySelector('wokwi-potentiometer')?.value),
+      readout: document.querySelector('.props__readout')?.textContent,
+    }))()`)
+
+  await app.drag({ x: knob.x, y: knob.y }, { x: knob.x + 27, y: knob.y })
+  await sleep(400)
+  const turned = await read()
+  assert(turned.value >= 840 && turned.value <= 865, `a drag to the right lands near 853 (${turned.value})`)
+  assert(turned.readout === String(turned.value), `the readout follows the knob (${turned.readout})`)
+
+  await app.drag({ x: knob.x, y: knob.y }, { x: knob.x, y: knob.y - 27 })
+  await sleep(400)
+  const up = await read()
+  assert(up.value >= 495 && up.value <= 525, `a drag straight up lands near mid-track (${up.value})`)
+})
+
 async function main() {
   if (process.argv.includes('--help')) {
     console.log(`
