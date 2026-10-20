@@ -122,4 +122,26 @@ describe('what the shipped circuits actually do', () => {
     expect(out.analogs).toContainEqual({ channel: 0, millivolts: 2502 })
     expect(out.warnings.pot1).toBeUndefined()
   })
+
+  it('slide-pot: mid-track, A0 reads half the supply, wired right', () => {
+    const out = evalPreset('slide-pot')
+    expect(out.analogs).toContainEqual({ channel: 0, millivolts: 2500 })
+    expect(out.warnings.s1).toBeUndefined()
+  })
+
+  it('photoresistor: mid-light, AO reads half the supply and DO is held high', () => {
+    const out = evalPreset('photoresistor')
+    expect(out.analogs).toContainEqual({ channel: 0, millivolts: 2500 })
+    // Light at the threshold sits on, exactly like a comparator without hysteresis.
+    expect(out.sensors.m1).toEqual({ powered: true, active: true })
+    expect(out.drives).toContainEqual({ port: 'D', pin: 2, high: true })
+    expect(out.warnings.m1).toBeUndefined()
+  })
+
+  it('thermometer: room temperature reads the module ramp, and nothing else', () => {
+    const out = evalPreset('thermometer')
+    // 25 °C is (25+15)/150 of the supply, reading in degrees on the monitor.
+    expect(out.analogs).toContainEqual({ channel: 0, millivolts: 1333 })
+    expect(out.warnings.t1).toBeUndefined()
+  })
 })

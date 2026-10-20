@@ -111,6 +111,15 @@ export interface EvalWire {
   b: PinRef
 }
 
+/**
+ * What a two-output sensor module reports. `powered` means its rails are wired
+ * the right way round; `active` means its digital output (if it has one) is high.
+ */
+export interface SensorState {
+  powered: boolean
+  active: boolean
+}
+
 export interface CircuitEval {
   /** LED instance id → how hard it's driven. */
   leds: Record<string, LedState>
@@ -122,9 +131,11 @@ export interface CircuitEval {
   warnings: Record<string, string>
   /**
    * Voltages to hold on the chip's ADC inputs, in millivolts (the unit simavr
-   * wants). One entry per analogue pin a potentiometer's wiper reaches.
+   * wants). One entry per analogue pin a part's output pin reaches.
    */
   analogs: { channel: number; millivolts: number }[]
+  /** Sensor modules that have an on/off output, by part id. */
+  sensors: Record<string, SensorState>
 }
 
 // A small, honest model rather than a real circuit solver: enough that a
@@ -147,6 +158,72 @@ const LED_FORWARD_V: Record<string, number> = {
 const LED_BURN_MA = 25
 const LED_LIT_MA = 3
 const LED_DIM_MA = 0.2
+
+/**
+ * A voltage: clamped to 0..1, or 0 when the attribute never parsed. An empty or
+ * untyped slider is the bottom of its range rather than a guess.
+ */
+function fractionOf(raw: unknown, top: number): number {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return 0
+  return Math.min(1, Math.max(0, n / top))
+}
+
+/**
+ * The parts whose output pin presents a voltage between two of their own rails —
+ * one table entry per part, and a new analogue part is a row, not a branch.
+ *
+ * A symmetric source is a bare divider (a pot can sit either way round, and then
+ * its track reads the other way, exactly as it would on a bench). An asymmetric
+ * one is a powered module, where reversing VCC and GND is a wiring mistake, not
+ * a convention: it does nothing until the rails land the right way.
+ */
+const ANALOG_SOURCES: {
+  kind: PartKind
+  /** The pin that carries the divided voltage. */
+  out: string
+  symmetric: boolean
+  /** Position along the part's own track, 0 at its GND end and 1 at its VCC end. */
+  fractionOf(attrs?: Record<string, string>): number
+  /** Optional on/off output driven by this part's own reading. */
+  onOff?: {
+    pin: string
+    /** Whether the comparator holds this output high. */
+    active(attrs?: Record<string, string>): boolean
+  }
+}[] = [
+  {
+    kind: 'potentiometer',
+    out: 'SIG',
+    symmetric: true,
+    fractionOf: (attrs) => fractionOf(attrs?.value, 1023),
+  },
+  {
+    kind: 'slide-potentiometer',
+    out: 'SIG',
+    symmetric: true,
+    // The element's own scale: min 0, max 100, the tip value/100 along the track.
+    fractionOf: (attrs) => fractionOf(attrs?.value, 100),
+  },
+  {
+    kind: 'photoresistor-sensor',
+    out: 'AO',
+    symmetric: false,
+    fractionOf: (attrs) => fractionOf(attrs?.light, 100),
+    // More light than the threshold, and the comparator holds DO high.
+    onOff: {
+      pin: 'DO',
+      active: (attrs) => fractionOf(attrs?.light, 100) >= fractionOf(attrs?.threshold, 100),
+    },
+  },
+  {
+    kind: 'ntc-temperature-sensor',
+    out: 'OUT',
+    symmetric: false,
+    // Hotter reads higher, across the −15…135 °C range the catalogue documents.
+    fractionOf: (attrs) => fractionOf((Number(attrs?.temperature) ?? 25) + 15, 150),
+  },
+]
 
 /** Union-find over pin keys. */
 function makeUnionFind() {
@@ -373,10 +450,11 @@ export function evaluateCircuit(
     }
   }
 
-  // Analogue in. A potentiometer is a voltage divider between the two rails it
-  // reaches, and its wiper sets the voltage on whatever analogue pin shares its
-  // SIG net. That voltage is what the ADC reads, so `analogRead` sees the knob.
+  // Analogue in. Every entry in ANALOG_SOURCES is a divider between the two rails
+  // it reaches, and its output pin sets the voltage on whatever analogue pin
+  // shares its net. That voltage is what the ADC reads.
   const analogs: CircuitEval['analogs'] = []
+  const sensors: CircuitEval['sensors'] = {}
   const analogChannels = new Map<string, number[]>()
   for (const part of parts) {
     if (part.kind !== 'uno') continue
@@ -387,27 +465,42 @@ export function evaluateCircuit(
       analogChannels.set(root, list)
     }
   }
-  for (const part of parts) {
-    if (part.kind !== 'potentiometer') continue
-    const sig = uf.find(`${part.id}:SIG`)
-    // Only a wiper that actually reaches an analogue input is worth a drive — and
-    // only then is a wiring complaint worth making, so an unconnected knob is quiet.
-    const channels = analogChannels.get(sig)
-    if (!channels?.length) continue
-    const gndSide = uf.find(`${part.id}:GND`)
-    const vccSide = uf.find(`${part.id}:VCC`)
-    // Swapped ends read the other way round, exactly as they would on a bench.
-    const forward = netHigh(vccSide) && netLow(gndSide)
-    const reverse = netHigh(gndSide) && netLow(vccSide)
-    if (!forward && !reverse) {
-      warnings[part.id] = 'Put one end on 5V and the other on GND.'
-      continue
+  /** Does this pin's net reach an MCU pin at all (so a complaint is worth making)? */
+  const reachesPin = (part: EvalPart, pin: string): boolean => {
+    const root = uf.find(`${part.id}:${pin}`)
+    for (const label of mcuPinOf.keys()) if (label.startsWith(root + '/')) return true
+    return false
+  }
+  for (const def of ANALOG_SOURCES) {
+    for (const part of parts) {
+      if (part.kind !== def.kind) continue
+      const highSide = uf.find(`${part.id}:VCC`)
+      const lowSide = uf.find(`${part.id}:GND`)
+      // A bare divider can sit either way round; a module's rails cannot.
+      const forward = netHigh(highSide) && netLow(lowSide)
+      const reverse = def.symmetric && netHigh(lowSide) && netLow(highSide)
+      const powered = forward || reverse
+      if (!powered) {
+        // A quiet hint the moment its output reaches a pin that would read it, and
+        // nothing at all while it isn't wired up — an unpowered module on the
+        // shelf is not an error.
+        if (reachesPin(part, def.out) || (def.onOff && reachesPin(part, def.onOff.pin))) {
+          warnings[part.id] = def.symmetric
+            ? 'Put one end on 5V and the other on GND.'
+            : 'Its VCC pin needs 5V and its GND pin needs GND.'
+        }
+        continue
+      }
+      if (def.onOff) {
+        sensors[part.id] = { powered: true, active: def.onOff.active(part.attrs) }
+      }
+      const raw = def.fractionOf(part.attrs)
+      // Swapped ends read the other way round, exactly as they would on a bench.
+      const position = forward ? raw : 1 - raw
+      const millivolts = Math.round(SUPPLY_V * 1000 * position)
+      const channels = analogChannels.get(uf.find(`${part.id}:${def.out}`))
+      for (const channel of channels ?? []) analogs.push({ channel, millivolts })
     }
-    const raw = Number(part.attrs?.value ?? 0)
-    const position = Number.isFinite(raw) ? Math.min(1023, Math.max(0, raw)) : 0
-    const fraction = (forward ? position : 1023 - position) / 1023
-    const millivolts = Math.round(SUPPLY_V * 1000 * fraction)
-    for (const channel of channels) analogs.push({ channel, millivolts })
   }
 
   // Buttons: whichever side reaches an MCU pin drives it. Pressed, the switch is a
@@ -442,5 +535,22 @@ export function evaluateCircuit(
     }
   }
 
-  return { leds, ledBrightness, drives, warnings, analogs }
+  // Sensor comparator outputs, unlike a pressed button, *drive* their level both
+  // ways: DO held low pulls the pin low, held high drives it high. An unpowered
+  // module drives nothing, so its pin settles at the sketch's pull-up as always.
+  for (const def of ANALOG_SOURCES) {
+    if (!def.onOff) continue
+    for (const part of parts) {
+      if (part.kind !== def.kind) continue
+      const state = sensors[part.id]
+      if (!state?.powered) continue
+      const root = uf.find(`${part.id}:${def.onOff.pin}`)
+      for (const [label, pins] of mcuPinOf) {
+        if (!label.startsWith(root + '/')) continue
+        drives.push({ port: pins.port, pin: pins.pin, high: state.active })
+      }
+    }
+  }
+
+  return { leds, ledBrightness, drives, warnings, analogs, sensors }
 }

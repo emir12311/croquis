@@ -1,11 +1,7 @@
-// Register only the five component elements we need (each import defines its
-// custom element). Importing the whole library would pull in every sensor and
-// display, which works against the "stay lightweight" rule.
-import '@wokwi/elements/dist/esm/arduino-uno-element'
-import '@wokwi/elements/dist/esm/led-element'
-import '@wokwi/elements/dist/esm/resistor-element'
-import '@wokwi/elements/dist/esm/pushbutton-element'
-import '@wokwi/elements/dist/esm/potentiometer-element'
+// The component elements we need, registered and corrected in one place
+// (lib/wokwi.ts): the visible circuit is drawn from them, and one import is
+// one custom element.
+import './lib/wokwi'
 
 import '@fontsource/ibm-plex-sans/400.css'
 import '@fontsource/ibm-plex-sans/500.css'

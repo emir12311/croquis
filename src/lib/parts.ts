@@ -21,6 +21,9 @@ export type PartKind =
   | 'resistor'
   | 'pushbutton'
   | 'potentiometer'
+  | 'slide-potentiometer'
+  | 'photoresistor-sensor'
+  | 'ntc-temperature-sensor'
   | 'breadboard'
   | 'breadboard-full'
 
@@ -133,6 +136,13 @@ export interface PartDef {
    * they mean — a new component brings its own.
    */
   fields?: PartField[]
+  /**
+   * The part's drawing depends on a value that changes often — a slider dragged
+   * through hundreds of positions, or simulation state pushed onto the element —
+   * so its sprite cache needs the live trim (see `canvas.svelte.ts`), not the
+   * cached-state alternation an LED or button wants.
+   */
+  live?: boolean
 }
 
 export const PARTS: PartDef[] = [
@@ -206,7 +216,69 @@ export const PARTS: PartDef[] = [
         control: { kind: 'range', min: 0, max: 1023, step: 1 },
       },
     ],
+    live: true,
     icon: '<circle cx="12" cy="9" r="5.5"/><path d="M12 9l3.4-3.4"/><path d="M7 15v4M12 15.5V20M17 15v4"/>',
+  },
+  {
+    kind: 'slide-potentiometer',
+    label: 'Slide potentiometer',
+    tag: 'wokwi-slide-potentiometer',
+    // The element's own scale and defaults (min 0, max 100): the slider's tip sits
+    // value/100 of the way along the track, so SIG is value/100 of the supply —
+    // the same divider as the rotary pot, read on a matching 0–100 scale.
+    attrs: { value: '0' },
+    fields: [
+      {
+        name: 'value',
+        label: 'Position',
+        control: { kind: 'range', min: 0, max: 100, step: 1 },
+      },
+    ],
+    live: true,
+    icon: '<rect x="3" y="11" width="18" height="4" rx="1"/><path d="M9 11v4" stroke-linecap="round"/><path d="M6 18v2M12 18v2M18 18v2"/>',
+  },
+  {
+    kind: 'photoresistor-sensor',
+    label: 'Photoresistor',
+    tag: 'wokwi-photoresistor-sensor',
+    // The module is an LDR divider plus a comparator. `light` sets where its AO
+    // sits between the rails (more light, higher voltage); `threshold` is where its
+    // matching DO output flips. The element's `ledPower`/`ledDO` indicator lamps are
+    // driven from the simulation in `App.svelte`, not stored here.
+    attrs: { light: '50', threshold: '50' },
+    fields: [
+      {
+        name: 'light',
+        label: 'Light',
+        control: { kind: 'range', min: 0, max: 100, step: 1 },
+      },
+      {
+        name: 'threshold',
+        label: 'DO threshold',
+        control: { kind: 'range', min: 0, max: 100, step: 1 },
+      },
+    ],
+    live: true,
+    icon: '<circle cx="8" cy="9" r="2.5"/><path d="M11.5 6.5l5-2-1.8 4.7z" fill="currentColor" stroke="none" opacity=".001"/><path d="M13 6.5a6 6 0 0 1 0 5.2"/><path d="M15.5 5a9 9 0 0 1 .1 8.6"/><path d="M7 13.5v6"/>',
+  },
+  {
+    kind: 'ntc-temperature-sensor',
+    label: 'NTC temperature sensor',
+    tag: 'wokwi-ntc-temperature-sensor',
+    // `temperature` is degrees Celsius and OUT rises with it, across the −15…135 °C
+    // range a bench would let you show: −15 °C reads 0 V, 135 °C the full supply,
+    // room temperature around 27% of it. The map is deliberately plain — the teaching
+    // point is "hotter reads higher", not the Steinhart–Hart polynomial.
+    attrs: { temperature: '25' },
+    fields: [
+      {
+        name: 'temperature',
+        label: 'Temperature',
+        control: { kind: 'range', min: -15, max: 135, step: 1 },
+      },
+    ],
+    live: true,
+    icon: '<circle cx="9" cy="11" r="3.5"/><path d="M9 14.5V19"/><path d="M15 6h4M15 9h3M15 12h4"/>',
   },
   {
     kind: 'breadboard',

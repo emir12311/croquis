@@ -32,7 +32,13 @@ import {
   type Wire,
 } from './document'
 import { WIRE_HEX } from './wire-colours'
-import { type LedState, ledStep, LED_STEPS } from './netlist'
+import { type LedState, ledStep, LED_STEPS, type SensorState } from './netlist'
+
+/** One of the three looks a sensor module's own indicator lamps can take. */
+function sensorLook(state: SensorState | undefined): 0 | 1 | 2 {
+  if (!state?.powered) return 0
+  return state.active ? 1 : 2
+}
 
 export type PinGeom = { name: string; x: number; y: number; description?: string }
 
@@ -42,6 +48,7 @@ export interface RenderState {
   ledStates: Record<string, LedState>
   ledBrightness: Record<string, number>
   pressedButtons: Record<string, boolean>
+  sensorStates: Record<string, SensorState>
   warnings: Record<string, string>
 }
 
@@ -296,16 +303,25 @@ export class CanvasSurface {
    * re-rasterising itself on every toggle.
    */
   private trimStaleSprites(inst: Instance, key: string, instances: Instance[]) {
-    if (inst.kind !== 'potentiometer') return
+    // Only parts whose look churns — a slider dragged through hundreds of values —
+    // trim. LEDs and buttons alternate between a few cached states a run, and
+    // that cached alternation is what keeps a blink from re-rasterising itself on
+    // every toggle.
+    if (!partByKind(inst.kind).live) return
     const tag = partByKind(inst.kind).tag
+    const current = new Set(
+      instances.filter((o) => partByKind(o.kind).tag === tag).map((o) => this.partKey(o)),
+    )
     for (const existing of [...this.partImages.keys()]) {
-      if (existing === key || existing.split('|')[0] !== tag) continue
-      if (instances.some((o) => o.id !== inst.id && this.partKey(o) === existing)) continue
+      if (existing === key || current.has(existing) || existing.split('|')[0] !== tag) continue
       this.partImages.delete(existing)
-      // The measure cache is keyed without the draw-state suffix; drop the
-      // superseded value's entry the same way. A potentiometer's draw state is
-      // always 000 — no chip pin, no lit order, no press.
-      if (existing.endsWith('000')) this.partSizes.delete(existing.slice(0, -4))
+    }
+    // Sprite keys are `<base>|<draw state>`; sizes are keyed by base alone. Drop a
+    // size entry only when no sprite of that base is kept, so a trimmed slider
+    // position frees its measure too, while nothing else is poked.
+    const bases = new Set([...this.partImages.keys()].map((k) => k.slice(0, k.lastIndexOf('|'))))
+    for (const base of [...this.partSizes.keys()]) {
+      if (!bases.has(base)) this.partSizes.delete(base)
     }
   }
 
@@ -329,7 +345,11 @@ export class CanvasSurface {
         ? Math.round(ledStep(state.ledBrightness[inst.id] ?? 0) * LED_STEPS)
         : 0
     const down = inst.kind === 'pushbutton' && state.pressedButtons[inst.id] ? 1 : 0
-    return `${this.baseKey(inst)}|${chip}${bright}${down}`
+    // The sensor module's two indicator lamps: 0 off, 1 DO lit in addition to the
+    // power lamp, 2 powered alone — the three looks its drawing can take.
+    const sensor =
+      inst.kind === 'photoresistor-sensor' ? sensorLook(state.sensorStates[inst.id]) : 0
+    return `${this.baseKey(inst)}|${chip}${bright}${down}${sensor}`
   }
 
   /** Rasterise a part's element (its shadow-root contents) into an image we blit. */
