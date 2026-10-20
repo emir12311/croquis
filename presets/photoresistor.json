@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Photoresistor",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "m1",
+      "type": "wokwi-photoresistor-sensor",
+      "left": 400,
+      "top": 120,
+      "attrs": {
+        "light": "50",
+        "threshold": "50"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "uno:5V",
+      "m1:VCC"
+    ],
+    [
+      "m1:GND",
+      "uno:GND.2"
+    ],
+    [
+      "m1:AO",
+      "uno:A0"
+    ],
+    [
+      "m1:DO",
+      "uno:2"
+    ]
+  ],
+  "sketch": "// Photoresistor — a light meter, both ways.\n//\n// The module has two outputs. AO is the LDR divider: more light, higher voltage\n// (move the Light slider in the properties strip and watch the readings). DO is\n// its comparator: high while light passes the threshold (the Threshold slider),\n// so digitalRead() is the lamp that decides.\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(2, INPUT);\n}\n\nvoid loop() {\n  Serial.print(\"light \");\n  Serial.print(analogRead(A0));\n  Serial.print(\"/1023  DO is \");\n  Serial.println(digitalRead(2) == HIGH ? \"on\" : \"off\");\n  delay(200);\n}\n"
+}
