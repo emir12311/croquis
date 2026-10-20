@@ -18,12 +18,14 @@ import { BREADBOARDS, breadboardPinNode } from './breadboard'
 export type PartKind =
   | 'uno'
   | 'led'
+  | 'rgb-led'
   | 'resistor'
   | 'pushbutton'
   | 'potentiometer'
   | 'slide-potentiometer'
   | 'photoresistor-sensor'
   | 'ntc-temperature-sensor'
+  | 'analog-joystick'
   | 'breadboard'
   | 'breadboard-full'
 
@@ -177,6 +179,16 @@ export const PARTS: PartDef[] = [
     icon: '<circle cx="12" cy="10" r="4"/><path d="M10 13.8V18M14 13.8V18"/><path d="M16.6 5.4l2.2-2.2M18.6 8.4l2.6-.6"/>',
   },
   {
+    kind: 'rgb-led',
+    label: 'RGB LED',
+    tag: 'wokwi-rgb-led',
+    attrs: {},
+    // Three LEDs in one package. The element takes ledRed/ledGreen/ledBlue as
+    // 0..1 brightness, which is exactly what the netlist computes per channel.
+    live: true,
+    icon: '<circle cx="12" cy="9" r="4.5"/><path d="M9 13.5V18M12 13.5V18M15 13.5V18"/><path d="M17 5l2-2M19 8l2.5-.5"/>',
+  },
+  {
     kind: 'resistor',
     label: 'Resistor',
     tag: 'wokwi-resistor',
@@ -279,6 +291,20 @@ export const PARTS: PartDef[] = [
     ],
     live: true,
     icon: '<circle cx="9" cy="11" r="3.5"/><path d="M9 14.5V19"/><path d="M15 6h4M15 9h3M15 12h4"/>',
+  },
+  {
+    kind: 'analog-joystick',
+    label: 'Analog joystick',
+    tag: 'wokwi-analog-joystick',
+    // The element's xValue/yValue are −1…1; the catalogue keeps a friendlier
+    // 0…100 pair and App maps it onto the element. SEL is the integrated button.
+    attrs: { x: '50', y: '50' },
+    fields: [
+      { name: 'x', label: 'Horizontal', control: { kind: 'range', min: 0, max: 100, step: 1 } },
+      { name: 'y', label: 'Vertical', control: { kind: 'range', min: 0, max: 100, step: 1 } },
+    ],
+    live: true,
+    icon: '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><path d="M12 4v3M12 17v3M4 12h3M17 12h3"/>',
   },
   {
     kind: 'breadboard',

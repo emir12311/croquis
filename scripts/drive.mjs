@@ -340,6 +340,26 @@ check('Ctrl+A selects everything', async (app) => {
   assert((await app.ev(`document.querySelectorAll('.instance--selected').length`)) === 3, 'all three parts selected')
 })
 
+check('the RGB preset loads with three channels', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('RGB LED')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 5, 'RGB gives five parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-rgb-led')`), 'the RGB LED is on the canvas')
+})
+
+check('the joystick preset loads, and its button presses', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Joystick')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 2, 'Joystick gives two parts')
+  const centre = await app.partCentre('wokwi-analog-joystick')
+  await app.mouse('mousePressed', centre.x, centre.y, 'left', 1)
+  await sleep(150)
+  assert(await app.ev(`!!document.querySelector('wokwi-analog-joystick')?.pressed`), 'the stick is pressed')
+  await app.mouse('mouseReleased', centre.x, centre.y, 'left', 0)
+  await sleep(150)
+  assert(!(await app.ev(`!!document.querySelector('wokwi-analog-joystick')?.pressed`)), 'the stick released')
+})
+
 check('a right-drag selects exactly what is in the box', async (app) => {
   await app.goto(`http://localhost:${DEV_PORT}`)
   await app.loadPreset('Blink')

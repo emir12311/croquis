@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Joystick",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "joy1",
+      "type": "wokwi-analog-joystick",
+      "left": 420,
+      "top": 150,
+      "attrs": {
+        "x": "50",
+        "y": "50"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "uno:5V",
+      "joy1:VCC"
+    ],
+    [
+      "joy1:GND",
+      "uno:GND.2"
+    ],
+    [
+      "joy1:VERT",
+      "uno:A0"
+    ],
+    [
+      "joy1:HORZ",
+      "uno:A1"
+    ],
+    [
+      "joy1:SEL",
+      "uno:2"
+    ]
+  ],
+  "sketch": "// Joystick \u2014 two potentiometers and a button in one module.\n//\n// VERT and HORZ each divide the supply, so A0/A1 read where the stick is.\n// SEL is the stick's push-button: the module pulls it high, pressing shorts it\n// low. Change Horizontal/Vertical in the properties strip; press the stick to\n// see the button.\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(2, INPUT);\n}\n\nvoid loop() {\n  Serial.print(\"x \");\n  Serial.print(analogRead(A1));\n  Serial.print(\"/1023  y \");\n  Serial.print(analogRead(A0));\n  Serial.print(\"/1023  button \");\n  Serial.println(digitalRead(2) == LOW ? \"pressed\" : \"released\");\n  delay(200);\n}\n"
+}
