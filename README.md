@@ -24,13 +24,13 @@ A desktop app for building and running Arduino circuits without an Arduino.
 
 You drag components onto a canvas, wire them up, write a sketch and press Run. The sketch is compiled locally with `avr-gcc` and executed on a simulated AVR chip.
 
-There are ten circuits to start from — **Blink**, **Button**, **Potentiometer**, **Photoresistor**, **Thermometer**, **Slide potentiometer**, **RGB LED**, **Joystick**, **Button + serial** and **Fade** — under File → Presets.
+There are eleven circuits to start from — **Blink**, **Button**, **Potentiometer**, **Photoresistor**, **Thermometer**, **Slide potentiometer**, **RGB LED**, **Joystick**, **Digital sensors**, **Button + serial** and **Fade** — under File → Presets.
 
 | Feature | What it does |
 | --- | --- |
-| **Parts** | Uno, LED and RGB LED, resistor, pushbutton, rotary and slide potentiometers, photoresistor, NTC temperature sensor and analog joystick; half and full breadboards |
+| **Parts** | Uno, LED and RGB LED, resistor, pushbutton, rotary and slide potentiometers, photoresistor, NTC temperature sensor, analog joystick, tilt switch, PIR, flame and sound sensors; half and full breadboards |
 | **Canvas** | Drag, rotate, snap; orthogonal wiring; multi-select; undo/redo; copy/paste |
-| **Simulation** | `avr-gcc` + `simavr`; LEDs and RGB LEDs at simulated current and PWM brightness, live buttons, analogue sensors (a divider, a LDR module with a thresholded output, an NTC, a two-axis joystick), modelled bounce |
+| **Simulation** | `avr-gcc` + `simavr`; LEDs and RGB LEDs at simulated current and PWM brightness, live buttons, analogue sensors (a divider, a LDR module with a thresholded output, an NTC, a two-axis joystick), digital sensors (tilt, PIR, flame and sound), modelled bounce |
 | **Editor** | CodeMirror + Arduino API completions; serial monitor docked beside the circuit |
 | **Files** | Wokwi's `diagram.json` import and export, sketch included |
 
@@ -174,7 +174,7 @@ That's basically it.
 
 ## What it doesn't do yet
 
-* **A handful of components.** An Uno, LEDs including RGB, a resistor, a pushbutton, a rotary or slide potentiometer, a photoresistor, an NTC temperature sensor and an analog joystick, breadboards. No buzzer, display or servo.
+* **A handful of components.** An Uno, LEDs including RGB, a resistor, a pushbutton, a rotary or slide potentiometer, a photoresistor, an NTC temperature sensor, an analog joystick, and tilt/PIR/flame/sound sensors, breadboards. No buzzer, display or servo.
 * **One board.** A second Uno gets its own circuit but shares the single sketch.
 * **A small electrical model, not a circuit solver.** A resistor does something real and a missing one is reported, and the potentiometer is a fixed divider between its rails. There are no arbitrary parallel networks.
 * **Wokwi files open with one caveat:** a wire using Wokwi's `*` route separator draws a different path here, to the same pins.

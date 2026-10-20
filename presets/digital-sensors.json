@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Digital sensors",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "tilt1",
+      "type": "wokwi-tilt-switch",
+      "left": 420,
+      "top": 100,
+      "attrs": {
+        "tilted": "0"
+      }
+    },
+    {
+      "id": "pir1",
+      "type": "wokwi-pir-motion-sensor",
+      "left": 420,
+      "top": 230,
+      "attrs": {
+        "motion": "0"
+      }
+    },
+    {
+      "id": "flame1",
+      "type": "wokwi-flame-sensor",
+      "left": 400,
+      "top": 380,
+      "attrs": {
+        "flame": "0"
+      }
+    },
+    {
+      "id": "sound1",
+      "type": "wokwi-small-sound-sensor",
+      "left": 420,
+      "top": 520,
+      "attrs": {
+        "noise": "0"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "tilt1:GND",
+      "uno:GND.2"
+    ],
+    [
+      "tilt1:VCC",
+      "uno:5V"
+    ],
+    [
+      "tilt1:OUT",
+      "uno:2"
+    ],
+    [
+      "pir1:VCC",
+      "uno:5V"
+    ],
+    [
+      "pir1:OUT",
+      "uno:3"
+    ],
+    [
+      "pir1:GND",
+      "uno:GND.2"
+    ],
+    [
+      "flame1:VCC",
+      "uno:5V"
+    ],
+    [
+      "flame1:GND",
+      "uno:GND.2"
+    ],
+    [
+      "flame1:DOUT",
+      "uno:4"
+    ],
+    [
+      "flame1:AOUT",
+      "uno:A0"
+    ],
+    [
+      "sound1:VCC",
+      "uno:5V"
+    ],
+    [
+      "sound1:GND",
+      "uno:GND.2"
+    ],
+    [
+      "sound1:DOUT",
+      "uno:5"
+    ],
+    [
+      "sound1:AOUT",
+      "uno:A1"
+    ]
+  ],
+  "sketch": "// Digital sensors \u2014 four modules, four ways of reading them.\n//\n// Tilt and motion are on/off. Flame and sound give both an analogue reading\n// and a comparator output that crosses at half scale. Flip Tilted or Motion,\n// or move the Flame/Noise slider, and run it.\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(2, INPUT);\n  pinMode(3, INPUT);\n  pinMode(4, INPUT);\n  pinMode(5, INPUT);\n}\n\nvoid loop() {\n  Serial.print(\"tilt \");\n  Serial.print(digitalRead(2));\n  Serial.print(\"  motion \");\n  Serial.print(digitalRead(3));\n  Serial.print(\"  flame \");\n  Serial.print(analogRead(A0));\n  Serial.print(\"/\");\n  Serial.print(digitalRead(4));\n  Serial.print(\"  sound \");\n  Serial.print(analogRead(A1));\n  Serial.print(\"/\");\n  Serial.println(digitalRead(5));\n  delay(250);\n}\n"
+}

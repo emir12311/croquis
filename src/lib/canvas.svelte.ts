@@ -353,7 +353,11 @@ export class CanvasSurface {
     // The sensor module's two indicator lamps: 0 off, 1 DO lit in addition to the
     // power lamp, 2 powered alone — the three looks its drawing can take.
     const sensor =
-      inst.kind === 'photoresistor-sensor' ? sensorLook(state.sensorStates[inst.id]) : 0
+      inst.kind === 'photoresistor-sensor' ||
+      inst.kind === 'flame-sensor' ||
+      inst.kind === 'sound-sensor'
+        ? sensorLook(state.sensorStates[inst.id])
+        : 0
     const rgb =
       inst.kind === 'rgb-led'
         ? [state.rgbLeds[inst.id]?.r ?? 0, state.rgbLeds[inst.id]?.g ?? 0, state.rgbLeds[inst.id]?.b ?? 0]
@@ -547,6 +551,12 @@ export class CanvasSurface {
         )
       }
       if (state.warnings[inst.id]) this.drawWarning(ctx, t, inst, scene.zoom)
+      if (
+        state.sensorStates[inst.id]?.active &&
+        (inst.kind === 'tilt-switch' || inst.kind === 'pir-motion-sensor')
+      ) {
+        this.drawActive(ctx, t, inst, scene.zoom)
+      }
     }
 
     for (const w of scene.wires) {
@@ -603,6 +613,17 @@ export class CanvasSurface {
         }
       }
     }
+  }
+
+  /** A triggered digital sensor gets a small green lamp. */
+  private drawActive(
+    ctx: CanvasRenderingContext2D,
+    t: ReturnType<typeof makeTransform>,
+    inst: Instance,
+    zoom: number,
+  ) {
+    const at = t.toScreen({ x: inst.x + 4, y: inst.y + 4 })
+    drawDisc(ctx, at, 5 * zoom, this.palette.wire, this.palette.bg)
   }
 
   /** A miswired part gets a badge on the canvas. */

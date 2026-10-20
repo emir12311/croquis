@@ -202,7 +202,12 @@ export class App {
   }
 
   /** The screen-space centre of a palette tile. */
-  paletteTile(kind) {
+  async paletteTile(kind) {
+    // The palette scrolls; a newly added part can push a tile below the fold.
+    // Scroll it into view before measuring, or the drag starts from a stale
+    // off-screen coordinate.
+    await this.ev(`document.querySelector('.part[data-kind="${kind}"]')?.scrollIntoView({ block: 'center' })`)
+    await sleep(100)
     return this.ev(`(() => {
       const el = document.querySelector('.part[data-kind="${kind}"]')
       if (!el) return null
@@ -338,6 +343,20 @@ check('Ctrl+A selects everything', async (app) => {
   await app.key('a', { code: 'KeyA', vk: 65, modifiers: 2 })
   await sleep(250)
   assert((await app.ev(`document.querySelectorAll('.instance--selected').length`)) === 3, 'all three parts selected')
+})
+
+check('the Digital sensors preset loads all four modules', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Digital sensors')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 5, 'Digital sensors gives five parts')
+  for (const tag of [
+    'wokwi-tilt-switch',
+    'wokwi-pir-motion-sensor',
+    'wokwi-flame-sensor',
+    'wokwi-small-sound-sensor',
+  ]) {
+    assert(await app.ev(`!!document.querySelector('${tag}')`), `${tag} is on the canvas`)
+  }
 })
 
 check('the RGB preset loads with three channels', async (app) => {

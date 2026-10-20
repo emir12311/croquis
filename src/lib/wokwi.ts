@@ -17,6 +17,10 @@ import '@wokwi/elements/dist/esm/slide-potentiometer-element'
 import '@wokwi/elements/dist/esm/photoresistor-sensor-element'
 import '@wokwi/elements/dist/esm/ntc-temperature-sensor-element'
 import '@wokwi/elements/dist/esm/analog-joystick-element'
+import '@wokwi/elements/dist/esm/tilt-switch-element'
+import '@wokwi/elements/dist/esm/pir-motion-sensor-element'
+import '@wokwi/elements/dist/esm/flame-sensor-element'
+import '@wokwi/elements/dist/esm/small-sound-sensor-element'
 
 /**
  * Feed a stylesheet into an element's own shadow root, once, after it connects.
