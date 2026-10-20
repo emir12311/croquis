@@ -232,6 +232,44 @@ const ANALOG_SOURCES: {
     // Hotter reads higher, across the −15…135 °C range the catalogue documents.
     fractionOf: (attrs) => fractionOf((Number(attrs?.temperature) ?? 25) + 15, 150),
   },
+  {
+    kind: 'flame-sensor',
+    out: 'AOUT',
+    symmetric: false,
+    fractionOf: (attrs) => fractionOf(attrs?.flame, 100),
+    onOff: {
+      pin: 'DOUT',
+      active: (attrs) => fractionOf(attrs?.flame, 100) >= 0.5,
+    },
+  },
+  {
+    kind: 'sound-sensor',
+    out: 'AOUT',
+    symmetric: false,
+    fractionOf: (attrs) => fractionOf(attrs?.noise, 100),
+    onOff: {
+      pin: 'DOUT',
+      active: (attrs) => fractionOf(attrs?.noise, 100) >= 0.5,
+    },
+  },
+]
+
+/** Powered modules with only an on/off output. */
+const DIGITAL_SENSORS: {
+  kind: PartKind
+  out: string
+  active(attrs?: Record<string, string>): boolean
+}[] = [
+  {
+    kind: 'tilt-switch',
+    out: 'OUT',
+    active: (attrs) => attrs?.tilted === '1',
+  },
+  {
+    kind: 'pir-motion-sensor',
+    out: 'OUT',
+    active: (attrs) => attrs?.motion === '1',
+  },
 ]
 
 /** Union-find over pin keys. */
@@ -579,6 +617,23 @@ export function evaluateCircuit(
     }
   }
 
+  // Digital-only modules: their OUT is the whole reading. Powered, they drive
+  // the pin both ways; unpowered, they drive nothing and are quiet unless wired.
+  for (const def of DIGITAL_SENSORS) {
+    for (const part of parts) {
+      if (part.kind !== def.kind) continue
+      const highSide = uf.find(`${part.id}:VCC`)
+      const lowSide = uf.find(`${part.id}:GND`)
+      if (!(netHigh(highSide) && netLow(lowSide))) {
+        if (reachesPin(part, def.out)) {
+          warnings[part.id] = 'Its VCC pin needs 5V and its GND pin needs GND.'
+        }
+        continue
+      }
+      sensors[part.id] = { powered: true, active: def.active(part.attrs) }
+    }
+  }
+
   // Buttons: whichever side reaches an MCU pin drives it. Pressed, the switch is a
   // short to whichever rail it reaches — GND pulls the pin low, +5V pulls it high.
   // Released, it's an open circuit, so the pin's level is whatever else holds it:
@@ -621,6 +676,20 @@ export function evaluateCircuit(
       const state = sensors[part.id]
       if (!state?.powered) continue
       const root = uf.find(`${part.id}:${def.onOff.pin}`)
+      for (const [label, pins] of mcuPinOf) {
+        if (!label.startsWith(root + '/')) continue
+        drives.push({ port: pins.port, pin: pins.pin, high: state.active })
+      }
+    }
+  }
+
+  // Digital-only modules drive their OUT high or low whenever they are powered.
+  for (const def of DIGITAL_SENSORS) {
+    for (const part of parts) {
+      if (part.kind !== def.kind) continue
+      const state = sensors[part.id]
+      if (!state?.powered) continue
+      const root = uf.find(`${part.id}:${def.out}`)
       for (const [label, pins] of mcuPinOf) {
         if (!label.startsWith(root + '/')) continue
         drives.push({ port: pins.port, pin: pins.pin, high: state.active })

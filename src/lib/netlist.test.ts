@@ -12,6 +12,26 @@ const joystick = (x = '50', y = '50'): EvalPart => ({
   kind: 'analog-joystick',
   attrs: { x, y },
 })
+const tilt = (tilted = '0'): EvalPart => ({
+  id: 'tilt',
+  kind: 'tilt-switch',
+  attrs: { tilted },
+})
+const pir = (motion = '0'): EvalPart => ({
+  id: 'pir',
+  kind: 'pir-motion-sensor',
+  attrs: { motion },
+})
+const flame = (value = '0'): EvalPart => ({
+  id: 'flame',
+  kind: 'flame-sensor',
+  attrs: { flame: value },
+})
+const sound = (value = '0'): EvalPart => ({
+  id: 'sound',
+  kind: 'sound-sensor',
+  attrs: { noise: value },
+})
 
 /**
  * Pin references are built one end at a time on purpose. The obvious
@@ -192,6 +212,65 @@ describe('the analog joystick', () => {
       {},
     )
     expect(out.warnings.joy).toMatch(/VCC.*5V.*GND/i)
+  })
+})
+
+describe('digital sensor modules', () => {
+  const powered = (part: EvalPart, out: string) => [
+    wire(at(part.id, 'VCC'), at('uno', '5V')),
+    wire(at(part.id, 'GND'), at('uno', 'GND.2')),
+    wire(at(part.id, out), at('uno', '2')),
+  ]
+
+  it('turns a tilt switch into a driven OUT level', () => {
+    const level = (tilted: string) =>
+      evaluateCircuit([uno, tilt(tilted)], powered(tilt(), 'OUT'), {}, {})
+    expect(level('0').drives).toEqual([{ port: 'D', pin: 2, high: false }])
+    expect(level('1').drives).toEqual([{ port: 'D', pin: 2, high: true }])
+    expect(level('1').sensors.tilt).toEqual({ powered: true, active: true })
+  })
+
+  it('turns PIR motion into a driven OUT level', () => {
+    const out = evaluateCircuit([uno, pir('1')], powered(pir(), 'OUT'), {}, {})
+    expect(out.drives).toEqual([{ port: 'D', pin: 2, high: true }])
+    expect(out.sensors.pir).toEqual({ powered: true, active: true })
+  })
+
+  it('splits the flame sensor into an analogue reading and a thresholded DOUT', () => {
+    const wires = [
+      wire(at('flame', 'VCC'), at('uno', '5V')),
+      wire(at('flame', 'GND'), at('uno', 'GND.2')),
+      wire(at('flame', 'AOUT'), at('uno', 'A0')),
+      wire(at('flame', 'DOUT'), at('uno', '3')),
+    ]
+    const strong = evaluateCircuit([uno, flame('80')], wires, {}, {})
+    expect(strong.analogs.find((a) => a.channel === 0)?.millivolts).toBe(4000)
+    expect(strong.drives).toEqual([{ port: 'D', pin: 3, high: true }])
+    const weak = evaluateCircuit([uno, flame('20')], wires, {}, {})
+    expect(weak.analogs.find((a) => a.channel === 0)?.millivolts).toBe(1000)
+    expect(weak.drives).toEqual([{ port: 'D', pin: 3, high: false }])
+  })
+
+  it('does the same for the sound sensor', () => {
+    const wires = [
+      wire(at('sound', 'VCC'), at('uno', '5V')),
+      wire(at('sound', 'GND'), at('uno', 'GND.2')),
+      wire(at('sound', 'AOUT'), at('uno', 'A1')),
+      wire(at('sound', 'DOUT'), at('uno', '4')),
+    ]
+    const out = evaluateCircuit([uno, sound('60')], wires, {}, {})
+    expect(out.analogs.find((a) => a.channel === 1)?.millivolts).toBe(3000)
+    expect(out.drives).toEqual([{ port: 'D', pin: 4, high: true }])
+  })
+
+  it('warns when a digital sensor is wired but not powered', () => {
+    const out = evaluateCircuit(
+      [uno, tilt()],
+      [wire(at('tilt', 'OUT'), at('uno', '2'))],
+      {},
+      {},
+    )
+    expect(out.warnings.tilt).toMatch(/VCC.*5V.*GND/i)
   })
 })
 

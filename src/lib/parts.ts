@@ -26,6 +26,10 @@ export type PartKind =
   | 'photoresistor-sensor'
   | 'ntc-temperature-sensor'
   | 'analog-joystick'
+  | 'tilt-switch'
+  | 'pir-motion-sensor'
+  | 'flame-sensor'
+  | 'sound-sensor'
   | 'breadboard'
   | 'breadboard-full'
 
@@ -103,6 +107,8 @@ export type FieldControl =
    * during a run is a knob with nothing to do.
    */
   | { kind: 'range'; min: number; max: number; step: number }
+  /** A sensor's on/off state, shown as a checkbox. */
+  | { kind: 'toggle' }
 
 export interface PartField {
   name: string
@@ -305,6 +311,44 @@ export const PARTS: PartDef[] = [
     ],
     live: true,
     icon: '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><path d="M12 4v3M12 17v3M4 12h3M17 12h3"/>',
+  },
+  {
+    kind: 'tilt-switch',
+    label: 'Tilt switch',
+    tag: 'wokwi-tilt-switch',
+    // A ball in a can: the module's comparator holds OUT high when tilted.
+    attrs: { tilted: '0' },
+    fields: [{ name: 'tilted', label: 'Tilted', control: { kind: 'toggle' } }],
+    icon: '<rect x="3" y="8" width="15" height="8" rx="1"/><circle cx="10" cy="12" r="1.5"/><path d="M18 10h3M18 14h3"/>',
+  },
+  {
+    kind: 'pir-motion-sensor',
+    label: 'PIR motion sensor',
+    tag: 'wokwi-pir-motion-sensor',
+    // HC-SR501-style module: OUT goes high while motion is detected.
+    attrs: { motion: '0' },
+    fields: [{ name: 'motion', label: 'Motion', control: { kind: 'toggle' } }],
+    icon: '<circle cx="10" cy="11" r="6"/><path d="M10 5v6l4 2"/><path d="M3 7l-1-1M3 15l-1 1M17 7l1-1M17 15l1 1"/>',
+  },
+  {
+    kind: 'flame-sensor',
+    label: 'Flame sensor',
+    tag: 'wokwi-flame-sensor',
+    // AOUT rises with the flame reading; DOUT crosses at half scale.
+    attrs: { flame: '0' },
+    fields: [{ name: 'flame', label: 'Flame', control: { kind: 'range', min: 0, max: 100, step: 1 } }],
+    live: true,
+    icon: '<path d="M12 3c3 4-1 5 1 8 1-1 2-2 2-4 2 3 2 8-3 10-4-2-5-5-3-8 1 1 1 2 2 3 0-3 2-5 1-9z"/>',
+  },
+  {
+    kind: 'sound-sensor',
+    label: 'Sound sensor',
+    tag: 'wokwi-small-sound-sensor',
+    // AOUT rises with the noise reading; DOUT crosses at half scale.
+    attrs: { noise: '0' },
+    fields: [{ name: 'noise', label: 'Noise', control: { kind: 'range', min: 0, max: 100, step: 1 } }],
+    live: true,
+    icon: '<path d="M4 10v4h3l4 4V6l-4 4H4z"/><path d="M15 9c1 1 1 5 0 6M18 7c2 2 2 8 0 10"/>',
   },
   {
     kind: 'breadboard',

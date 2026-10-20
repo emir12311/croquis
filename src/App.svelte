@@ -1034,6 +1034,13 @@
         { name: 'ledDO', value: !!state?.active },
       ]
     }
+    if (inst.kind === 'flame-sensor' || inst.kind === 'sound-sensor') {
+      const state = sensorStates[inst.id]
+      return [
+        { name: 'ledPower', value: !!state?.powered },
+        { name: 'ledSignal', value: !!state?.active },
+      ]
+    }
     return null
   }
 
@@ -1483,6 +1490,17 @@
                       <option value={opt.value}>{opt.label}</option>
                     {/each}
                   </select>
+                </span>
+              {:else if field.control.kind === 'toggle'}
+                <span class="props__control">
+                  <input
+                    {id}
+                    class="props__checkbox"
+                    type="checkbox"
+                    checked={attrs[field.name] === '1'}
+                    onchange={(e) => setAttr(selectedPart, field.name, e.currentTarget.checked ? '1' : '0')}
+                  />
+                  <span class="props__readout">{attrs[field.name] === '1' ? 'On' : 'Off'}</span>
                 </span>
               {:else if field.control.kind === 'range'}
                 <span class="props__control">
@@ -2103,6 +2121,13 @@
   .props__number {
     width: 5.5em;
     font-family: var(--font-mono);
+  }
+
+  .props__checkbox {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: var(--accent);
   }
 
   .props__range {
