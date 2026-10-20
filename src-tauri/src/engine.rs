@@ -878,7 +878,33 @@ void loop() {
         let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
 
         let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
-        thread::sleep(Duration::from_millis(900));
+        // Wait for the *events* the sketch must produce, not for a slice of wall
+        // clock. simavr paces itself against host time, so a fixed sleep counts
+        // host seconds: run this test beside the others and the simulator gets
+        // starved of host time, a 200 ms blink then turns slower than the sleep
+        // allows, and the test fails on load rather than on behaviour. The
+        // deadline is only the backstop for a sim that never runs at all.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            {
+                let ev = events.lock().unwrap();
+                let highs = ev
+                    .iter()
+                    .filter(|e| matches!(e, SimEvent::Pin { port: b'B', pin: 5, high: true }))
+                    .count();
+                let lows = ev
+                    .iter()
+                    .filter(|e| matches!(e, SimEvent::Pin { port: b'B', pin: 5, high: false }))
+                    .count();
+                if highs >= 2 && lows >= 2 {
+                    break;
+                }
+            }
+            if Instant::now() > deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
         sim.stop();
 
         let ev = events.lock().unwrap();
