@@ -564,6 +564,10 @@ export class Input {
       this.startTipDrag(e, inst)
       return
     }
+    if (this.onJoystickButton(inst, p)) {
+      this.startJoystickPress(e, inst)
+      return
+    }
     e.stopPropagation()
     e.preventDefault()
     this.beginPartDrag(e, inst)
@@ -711,6 +715,34 @@ export class Input {
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
+  }
+
+  /**
+   * Is the pointer on the joystick's centre button? The element's knob is a
+   * 27.2 × 31.8 mm drawing with its button around 13.6, 13.6; that is the
+   * pressable area. The rest of the body still drags the part.
+   */
+  private onJoystickButton(inst: Instance, p: Point): boolean {
+    if (inst.kind !== 'analog-joystick') return false
+    const local = this.unitPoint(inst, p)
+    if (!local) return false
+    return Math.abs(local.x - 0.5) <= 10.6 / 27.2 && Math.abs(local.y - 0.5) <= 10.6 / 31.8
+  }
+
+  /** Hold the joystick's SEL button while the pointer is down. */
+  startJoystickPress(e: PointerEvent, inst: Instance) {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!this.selectedIds.includes(inst.id)) this.selectedIds = [inst.id]
+    this.selectedWireId = null
+    this.deps.sim.press(inst.id, true)
+    const release = () => {
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+      this.deps.sim.press(inst.id, false)
+    }
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
   }
 
   beginPartDrag(e: PointerEvent, inst: Instance) {

@@ -4,8 +4,14 @@ import { evaluateCircuit, ledStep, type EvalPart, type EvalWire } from './netlis
 
 const uno: EvalPart = { id: 'uno', kind: 'uno' }
 const led = (color = 'red'): EvalPart => ({ id: 'led', kind: 'led', attrs: { color } })
+const rgb = (): EvalPart => ({ id: 'rgb', kind: 'rgb-led' })
 const resistor = (value: string): EvalPart => ({ id: 'r', kind: 'resistor', attrs: { value } })
 const button = (): EvalPart => ({ id: 'b', kind: 'pushbutton' })
+const joystick = (x = '50', y = '50'): EvalPart => ({
+  id: 'joy',
+  kind: 'analog-joystick',
+  attrs: { x, y },
+})
 
 /**
  * Pin references are built one end at a time on purpose. The obvious
@@ -105,6 +111,87 @@ describe('an LED draws whatever is in series with it', () => {
     )
     expect(out.leds.led).toBe('off')
     expect(out.warnings.led).toMatch(/wrong way round/i)
+  })
+})
+
+describe('an RGB LED mixes three independent channels', () => {
+  const channelWire = (channel: string, value = '220') => [
+    resistor(value),
+    rgb(),
+    [
+      wire(at('uno', '13'), at('r', '1')),
+      wire(at('r', '2'), at('rgb', channel)),
+      wire(at('rgb', 'COM'), at('uno', 'GND.2')),
+    ],
+  ] as const
+
+  it('lights the channel that has a path, and leaves the others dark', () => {
+    const [r, part, wires] = channelWire('R')
+    const out = run([r, part], [...wires])
+    expect(out.rgbLeds.rgb).toEqual({ r: 1, g: 0, b: 0 })
+  })
+
+  it('maps the green and blue pins separately', () => {
+    const [r, part, wires] = channelWire('G')
+    expect(run([r, part], [...wires]).rgbLeds.rgb).toEqual({ r: 0, g: 1, b: 0 })
+  })
+
+  it('uses PWM duty per channel', () => {
+    const [r, part, wires] = channelWire('R')
+    const out = runAtDuty([r, part], [...wires], 0.25)
+    expect(out.rgbLeds.rgb.r).toBeCloseTo(0.25)
+  })
+
+  it('warns when the common leg is not grounded', () => {
+    const out = run([rgb()], [wire(at('uno', '13'), at('rgb', 'R'))])
+    expect(out.rgbLeds.rgb).toEqual({ r: 0, g: 0, b: 0 })
+    expect(out.warnings.rgb).toMatch(/common leg/i)
+  })
+
+  it('warns when a channel has no resistor', () => {
+    const out = run(
+      [rgb()],
+      [
+        wire(at('uno', '13'), at('rgb', 'R')),
+        wire(at('rgb', 'COM'), at('uno', 'GND.2')),
+      ],
+    )
+    expect(out.warnings.rgb).toMatch(/over-driven/i)
+  })
+})
+
+describe('the analog joystick', () => {
+  const wires = [
+    wire(at('uno', '5V'), at('joy', 'VCC')),
+    wire(at('joy', 'GND'), at('uno', 'GND.2')),
+    wire(at('joy', 'VERT'), at('uno', 'A0')),
+    wire(at('joy', 'HORZ'), at('uno', 'A1')),
+    wire(at('joy', 'SEL'), at('uno', '2')),
+  ]
+  const read = (x: string, y: string, pressed: Record<string, boolean> = {}) =>
+    evaluateCircuit([uno, joystick(x, y)], wires, pressed, {})
+
+  it('puts the two axes on their own ADC channels', () => {
+    const out = read('0', '100')
+    expect(out.analogs.find((a) => a.channel === 0)?.millivolts).toBe(5000)
+    expect(out.analogs.find((a) => a.channel === 1)?.millivolts).toBe(0)
+  })
+
+  it('drives SEL high released and low while pressed', () => {
+    expect(read('50', '50').drives).toEqual([{ port: 'D', pin: 2, high: true }])
+    expect(read('50', '50', { joy: true }).drives).toEqual([
+      { port: 'D', pin: 2, high: false },
+    ])
+  })
+
+  it('warns when the module is wired but not powered', () => {
+    const out = evaluateCircuit(
+      [uno, joystick()],
+      [wire(at('joy', 'VERT'), at('uno', 'A0')), wire(at('joy', 'SEL'), at('uno', '2'))],
+      {},
+      {},
+    )
+    expect(out.warnings.joy).toMatch(/VCC.*5V.*GND/i)
   })
 })
 

@@ -32,7 +32,7 @@ import {
   type Wire,
 } from './document'
 import { WIRE_HEX } from './wire-colours'
-import { type LedState, ledStep, LED_STEPS, type SensorState } from './netlist'
+import { type LedState, ledStep, LED_STEPS, type RgbState, type SensorState } from './netlist'
 
 /** One of the three looks a sensor module's own indicator lamps can take. */
 function sensorLook(state: SensorState | undefined): 0 | 1 | 2 {
@@ -47,6 +47,7 @@ export interface RenderState {
   pin13: boolean
   ledStates: Record<string, LedState>
   ledBrightness: Record<string, number>
+  rgbLeds: Record<string, RgbState>
   pressedButtons: Record<string, boolean>
   sensorStates: Record<string, SensorState>
   warnings: Record<string, string>
@@ -344,12 +345,22 @@ export class CanvasSurface {
       inst.kind === 'led'
         ? Math.round(ledStep(state.ledBrightness[inst.id] ?? 0) * LED_STEPS)
         : 0
-    const down = inst.kind === 'pushbutton' && state.pressedButtons[inst.id] ? 1 : 0
+    const down =
+      (inst.kind === 'pushbutton' || inst.kind === 'analog-joystick') &&
+      state.pressedButtons[inst.id]
+        ? 1
+        : 0
     // The sensor module's two indicator lamps: 0 off, 1 DO lit in addition to the
     // power lamp, 2 powered alone — the three looks its drawing can take.
     const sensor =
       inst.kind === 'photoresistor-sensor' ? sensorLook(state.sensorStates[inst.id]) : 0
-    return `${this.baseKey(inst)}|${chip}${bright}${down}${sensor}`
+    const rgb =
+      inst.kind === 'rgb-led'
+        ? [state.rgbLeds[inst.id]?.r ?? 0, state.rgbLeds[inst.id]?.g ?? 0, state.rgbLeds[inst.id]?.b ?? 0]
+            .map((v) => Math.round(ledStep(v) * LED_STEPS))
+            .join('')
+        : ''
+    return `${this.baseKey(inst)}|${chip}${bright}${down}${sensor}${rgb}`
   }
 
   /** Rasterise a part's element (its shadow-root contents) into an image we blit. */

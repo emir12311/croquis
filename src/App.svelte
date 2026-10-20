@@ -261,6 +261,7 @@
   let avrPins = $derived(sim.avrPins)
   let ledStates = $derived(sim.ledStates)
   let ledBrightness = $derived(sim.ledBrightness)
+  let rgbLeds = $derived(sim.rgbLeds)
   /** What's wrong with a part — the strip says it in words, the canvas badges it. */
   let warnings = $derived(sim.warnings)
   let pressedButtons = $derived(sim.pressedButtons)
@@ -279,6 +280,7 @@
     pin13,
     ledStates,
     ledBrightness,
+    rgbLeds,
     pressedButtons,
     sensorStates,
     warnings,
@@ -1003,6 +1005,24 @@
       ]
     }
     if (inst.kind === 'pushbutton') return [{ name: 'pressed', value: !!pressedButtons[inst.id] }]
+    if (inst.kind === 'analog-joystick') {
+      const attrs = attrsOf(inst)
+      const x = Number(attrs.x ?? 50) / 50 - 1
+      const y = Number(attrs.y ?? 50) / 50 - 1
+      return [
+        { name: 'xValue', value: Math.min(1, Math.max(-1, x)) },
+        { name: 'yValue', value: Math.min(1, Math.max(-1, y)) },
+        { name: 'pressed', value: !!pressedButtons[inst.id] },
+      ]
+    }
+    if (inst.kind === 'rgb-led') {
+      const state = rgbLeds[inst.id] ?? { r: 0, g: 0, b: 0 }
+      return [
+        { name: 'ledRed', value: ledStep(state.r) },
+        { name: 'ledGreen', value: ledStep(state.g) },
+        { name: 'ledBlue', value: ledStep(state.b) },
+      ]
+    }
     // A sensor module's own indicator lamps say powered and on/off — the module
     // shows its comparator result, the same condition its DO pin drives.
     if (inst.kind === 'photoresistor-sensor') {

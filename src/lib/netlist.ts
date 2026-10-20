@@ -120,11 +120,20 @@ export interface SensorState {
   active: boolean
 }
 
+/** Brightness of an RGB LED's three channels, 0..1. */
+export interface RgbState {
+  r: number
+  g: number
+  b: number
+}
+
 export interface CircuitEval {
   /** LED instance id → how hard it's driven. */
   leds: Record<string, LedState>
   /** LED instance id → brightness 0..1, so a PWM LED fades instead of flickering. */
   ledBrightness: Record<string, number>
+  /** RGB LED instance id → per-channel brightness 0..1. */
+  rgbLeds: Record<string, RgbState>
   /** Buttons pulled this pin to a level (because a button connects it to a rail). */
   drives: { port: string; pin: number; high: boolean }[]
   /** What's wrong with a part — for the properties strip and the canvas badge. */
@@ -407,6 +416,7 @@ export function evaluateCircuit(
   // is where a resistor stops being decoration — and where a missing one shows.
   const leds: Record<string, LedState> = {}
   const ledBrightness: Record<string, number> = {}
+  const rgbLeds: Record<string, RgbState> = {}
   const warnings: Record<string, string> = {}
   for (const part of parts) {
     if (part.kind !== 'led') continue
@@ -447,6 +457,42 @@ export function evaluateCircuit(
       leds[part.id] = state
       const base = mA >= LED_LIT_MA ? 1 : mA / LED_LIT_MA
       ledBrightness[part.id] = state === 'off' ? 0 : Math.min(1, duty * base)
+    }
+  }
+
+  // RGB LEDs are three separate loads sharing one common leg. Each colour has
+  // its own resistor and PWM duty, so the channel brightness is independent.
+  const RGB_CHANNELS = [
+    { pin: 'R', key: 'r', forward: 1.8 },
+    { pin: 'G', key: 'g', forward: 2.2 },
+    { pin: 'B', key: 'b', forward: 3 },
+  ] as const
+  for (const part of parts) {
+    if (part.kind !== 'rgb-led') continue
+    const com = uf.find(`${part.id}:COM`)
+    const backPath = reachTo(com, lowNets)
+    const back = backPath?.ohms ?? null
+    const out: RgbState = { r: 0, g: 0, b: 0 }
+    if (back === null) {
+      rgbLeds[part.id] = out
+      warnings[part.id] = 'Wire the common leg to GND.'
+      continue
+    }
+    let overDriven = false
+    for (const channel of RGB_CHANNELS) {
+      const supplyPath = reachTo(uf.find(`${part.id}:${channel.pin}`), highNets)
+      if (!supplyPath) continue
+      const ohms = PIN_OHMS + supplyPath.ohms + back
+      const mA = ((SUPPLY_V - channel.forward) / ohms) * 1000
+      const duty = dutyByRoot.get(supplyPath.net) ?? 1
+      const averageMa = mA * duty
+      if (averageMa >= LED_BURN_MA) overDriven = true
+      const base = mA >= LED_LIT_MA ? 1 : mA / LED_LIT_MA
+      out[channel.key] = averageMa < LED_DIM_MA ? 0 : Math.min(1, duty * base)
+    }
+    rgbLeds[part.id] = out
+    if (overDriven) {
+      warnings[part.id] = 'Over-driven — put a resistor on each colour.'
     }
   }
 
@@ -503,6 +549,36 @@ export function evaluateCircuit(
     }
   }
 
+  // The joystick is two independent dividers on VERT/HORZ plus a button on SEL.
+  // Its rails are a module, so a reversed supply is a warning, not a mirrored axis.
+  const JOYSTICK_AXES = [
+    { pin: 'VERT', attr: 'y' },
+    { pin: 'HORZ', attr: 'x' },
+  ] as const
+  for (const part of parts) {
+    if (part.kind !== 'analog-joystick') continue
+    const highSide = uf.find(`${part.id}:VCC`)
+    const lowSide = uf.find(`${part.id}:GND`)
+    const powered = netHigh(highSide) && netLow(lowSide)
+    if (!powered) {
+      if (
+        reachesPin(part, 'VERT') ||
+        reachesPin(part, 'HORZ') ||
+        reachesPin(part, 'SEL')
+      ) {
+        warnings[part.id] = 'Its VCC pin needs 5V and its GND pin needs GND.'
+      }
+      continue
+    }
+    for (const axis of JOYSTICK_AXES) {
+      const fraction = fractionOf(part.attrs?.[axis.attr], 100)
+      const channels = analogChannels.get(uf.find(`${part.id}:${axis.pin}`))
+      for (const channel of channels ?? []) {
+        analogs.push({ channel, millivolts: Math.round(SUPPLY_V * 1000 * fraction) })
+      }
+    }
+  }
+
   // Buttons: whichever side reaches an MCU pin drives it. Pressed, the switch is a
   // short to whichever rail it reaches — GND pulls the pin low, +5V pulls it high.
   // Released, it's an open circuit, so the pin's level is whatever else holds it:
@@ -552,5 +628,20 @@ export function evaluateCircuit(
     }
   }
 
-  return { leds, ledBrightness, drives, warnings, analogs, sensors }
+  // The joystick's SEL switch has a pull-up on the module: released it drives the
+  // pin high, pressed it pulls it low. It is a powered module, so an unpowered one
+  // drives nothing at all.
+  for (const part of parts) {
+    if (part.kind !== 'analog-joystick') continue
+    const powered =
+      netHigh(uf.find(`${part.id}:VCC`)) && netLow(uf.find(`${part.id}:GND`))
+    if (!powered) continue
+    const root = uf.find(`${part.id}:SEL`)
+    for (const [label, pins] of mcuPinOf) {
+      if (!label.startsWith(root + '/')) continue
+      drives.push({ port: pins.port, pin: pins.pin, high: !pressed[part.id] })
+    }
+  }
+
+  return { leds, ledBrightness, rgbLeds, drives, warnings, analogs, sensors }
 }

@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "RGB LED",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "r1",
+      "type": "wokwi-resistor",
+      "left": 400,
+      "top": 120,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "id": "r2",
+      "type": "wokwi-resistor",
+      "left": 400,
+      "top": 220,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "id": "r3",
+      "type": "wokwi-resistor",
+      "left": 400,
+      "top": 320,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "id": "rgb1",
+      "type": "wokwi-rgb-led",
+      "left": 580,
+      "top": 190,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    [
+      "uno:9",
+      "r1:1"
+    ],
+    [
+      "r1:2",
+      "rgb1:R"
+    ],
+    [
+      "uno:10",
+      "r2:1"
+    ],
+    [
+      "r2:2",
+      "rgb1:G"
+    ],
+    [
+      "uno:11",
+      "r3:1"
+    ],
+    [
+      "r3:2",
+      "rgb1:B"
+    ],
+    [
+      "rgb1:COM",
+      "uno:GND.2"
+    ]
+  ],
+  "sketch": "// RGB LED \u2014 three LEDs in one package.\n//\n// Each colour has its own PWM pin and 220 ohm resistor, so the channels mix\n// independently. Run it to cycle red, green, blue and white.\n\nvoid setup() {\n  pinMode(9, OUTPUT);\n  pinMode(10, OUTPUT);\n  pinMode(11, OUTPUT);\n}\n\nvoid loop() {\n  analogWrite(9, 255); analogWrite(10, 0);   analogWrite(11, 0);   delay(400);\n  analogWrite(9, 0);   analogWrite(10, 255); analogWrite(11, 0);   delay(400);\n  analogWrite(9, 0);   analogWrite(10, 0);   analogWrite(11, 255); delay(400);\n  analogWrite(9, 255); analogWrite(10, 255); analogWrite(11, 255); delay(400);\n}\n"
+}

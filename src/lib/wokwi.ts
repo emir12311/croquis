@@ -9,12 +9,14 @@
 
 import '@wokwi/elements/dist/esm/arduino-uno-element'
 import '@wokwi/elements/dist/esm/led-element'
+import '@wokwi/elements/dist/esm/rgb-led-element'
 import '@wokwi/elements/dist/esm/resistor-element'
 import '@wokwi/elements/dist/esm/pushbutton-element'
 import '@wokwi/elements/dist/esm/potentiometer-element'
 import '@wokwi/elements/dist/esm/slide-potentiometer-element'
 import '@wokwi/elements/dist/esm/photoresistor-sensor-element'
 import '@wokwi/elements/dist/esm/ntc-temperature-sensor-element'
+import '@wokwi/elements/dist/esm/analog-joystick-element'
 
 /**
  * Feed a stylesheet into an element's own shadow root, once, after it connects.
