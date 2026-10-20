@@ -24,13 +24,13 @@ A desktop app for building and running Arduino circuits without an Arduino.
 
 You drag components onto a canvas, wire them up, write a sketch and press Run. The sketch is compiled locally with `avr-gcc` and executed on a simulated AVR chip.
 
-There are five circuits to start from — **Blink**, **Button**, **Potentiometer**, **Button + serial** and **Fade** — under File → Presets.
+There are eight circuits to start from — **Blink**, **Button**, **Potentiometer**, **Photoresistor**, **Thermometer**, **Slide potentiometer**, **Button + serial** and **Fade** — under File → Presets.
 
 | Feature | What it does |
 | --- | --- |
-| **Parts** | Uno, LED, resistor, pushbutton, potentiometer; half and full breadboards |
+| **Parts** | Uno, LED, resistor, pushbutton, rotary and slide potentiometers, photoresistor and NTC temperature sensors; half and full breadboards |
 | **Canvas** | Drag, rotate, snap; orthogonal wiring; multi-select; undo/redo; copy/paste |
-| **Simulation** | `avr-gcc` + `simavr`; LEDs at simulated current and PWM brightness, live buttons, analogue input, modelled bounce |
+| **Simulation** | `avr-gcc` + `simavr`; LEDs at simulated current and PWM brightness, live buttons, analogue sensors (a divider, a LDR module with a thresholded output, an NTC), modelled bounce |
 | **Editor** | CodeMirror + Arduino API completions; serial monitor docked beside the circuit |
 | **Files** | Wokwi's `diagram.json` import and export, sketch included |
 
@@ -174,7 +174,7 @@ That's basically it.
 
 ## What it doesn't do yet
 
-* **A handful of components.** An Uno, an LED, a resistor, a pushbutton, a potentiometer, breadboards. No buzzer, display or servo.
+* **A handful of components.** An Uno, an LED, a resistor, a pushbutton, a rotary or slide potentiometer, a photoresistor and an NTC temperature sensor, breadboards. No buzzer, display, joystick or servo.
 * **One board.** A second Uno gets its own circuit but shares the single sketch.
 * **A small electrical model, not a circuit solver.** A resistor does something real and a missing one is reported, and the potentiometer is a fixed divider between its rails. There are no arbitrary parallel networks.
 * **Wokwi files open with one caveat:** a wire using Wokwi's `*` route separator draws a different path here, to the same pins.

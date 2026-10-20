@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Thermometer",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "t1",
+      "type": "wokwi-ntc-temperature-sensor",
+      "left": 400,
+      "top": 160,
+      "attrs": {
+        "temperature": "25"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "uno:5V",
+      "t1:VCC"
+    ],
+    [
+      "t1:GND",
+      "uno:GND.2"
+    ],
+    [
+      "t1:OUT",
+      "uno:A0"
+    ]
+  ],
+  "sketch": "// Thermometer \u2014 an NTC on the breadboard.\n//\n// Push the Temperature slider (or drag the part) while the sketch runs: OUT\n// rises across \u221215\u2026135 \u00b0C, hotter reading higher. The readings land nowhere\n// without a thermometer equation, but the trend is the point.\nconst int TEMPERATURE_MIN = -15;\nconst int TEMPERATURE_MAX = 135;\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  int raw = analogRead(A0);\n  // A map into degrees Celsius \u2014 the same ramp the module simulates.\n  int dC = map(raw, 0, 1023, TEMPERATURE_MIN, TEMPERATURE_MAX);\n  Serial.print(\"A0 = \");\n  Serial.print(raw);\n  Serial.print(\"/1023  ~ \");\n  Serial.println(dC / 10.0);\n  delay(200);\n}\n"
+}

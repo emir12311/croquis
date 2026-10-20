@@ -7,7 +7,13 @@
  * trimmed without rebuilding the string per byte) can be tested without a
  * simulator.
  */
-import { evaluateCircuit, type EvalPart, type EvalWire, type LedState } from './netlist'
+import {
+  evaluateCircuit,
+  type EvalPart,
+  type EvalWire,
+  type LedState,
+  type SensorState,
+} from './netlist'
 
 export interface SimBackend {
   isDesktop(): boolean
@@ -56,6 +62,8 @@ export class Sim {
   warnings = $state<Record<string, string>>({})
   /** Voltages the circuit puts on the chip's ADC inputs, in millivolts. */
   analogs = $state<{ channel: number; millivolts: number }[]>([])
+  /** Sensor modules with an on/off output, by part id. */
+  sensors = $state<Record<string, SensorState>>({})
   /** A button held on the canvas, by part id. */
   pressedButtons = $state<Record<string, boolean>>({})
 
@@ -81,6 +89,7 @@ export class Sim {
     this.ledBrightness = {}
     // A fresh run never inherits a held button.
     this.pressedButtons = {}
+    this.sensors = {}
     // A new simulator has no memory of the levels sent to the old one, so the
     // duplicate-suppression caches must not survive a restart either.
     this.lastDrives.clear()
@@ -109,6 +118,7 @@ export class Sim {
     this.pinTimings = {}
     this.ledBrightness = {}
     this.pressedButtons = {}
+    this.sensors = {}
   }
 
   /** Apply an edited sketch without leaving the run: recompile and restart. */
@@ -123,6 +133,7 @@ export class Sim {
     this.pinTimings = {}
     this.ledBrightness = {}
     this.pressedButtons = {}
+    this.sensors = {}
     this.analogs = []
     this.pin13 = false
     this.serial = ''
@@ -166,6 +177,7 @@ export class Sim {
     this.ledBrightness = result.ledBrightness
     this.warnings = result.warnings
     this.analogs = result.analogs
+    this.sensors = result.sensors
     if (!this.backend.isDesktop() || !this.running) {
       this.lastDrives.clear()
       this.lastAnalogs.clear()

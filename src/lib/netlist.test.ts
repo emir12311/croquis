@@ -410,3 +410,168 @@ describe('a potentiometer sets the voltage an analogue pin reads', () => {
     ])
   })
 })
+
+describe('a slide potentiometer is the same divider on the element\'s 0–100 scale', () => {
+  const slider = (value = '0'): EvalPart => ({
+    id: 's1',
+    kind: 'slide-potentiometer',
+    attrs: { value },
+  })
+  const wired = (value?: string) =>
+    run(
+      [slider(value)],
+      [
+        wire(at('uno', '5V'), at('s1', 'VCC')),
+        wire(at('uno', 'GND.2'), at('s1', 'GND')),
+        wire(at('s1', 'SIG'), at('uno', 'A0')),
+      ],
+    )
+
+  it('is a fraction of the supply between its end stops', () => {
+    expect(wired('0').analogs).toEqual([{ channel: 0, millivolts: 0 }])
+    expect(wired('100').analogs).toEqual([{ channel: 0, millivolts: 5000 }])
+    expect(wired('50').analogs).toEqual([{ channel: 0, millivolts: 2500 }])
+  })
+
+  it('reads the other way round when its ends are swapped, like the rotary pot', () => {
+    const out = run(
+      [slider('100')],
+      [
+        wire(at('uno', 'GND.2'), at('s1', 'VCC')),
+        wire(at('uno', '5V'), at('s1', 'GND')),
+        wire(at('s1', 'SIG'), at('uno', 'A0')),
+      ],
+    )
+    expect(out.analogs).toEqual([{ channel: 0, millivolts: 0 }])
+  })
+
+  it('is quiet until its wiper reaches an analogue input', () => {
+    const out = run(
+      [slider('50')],
+      [wire(at('uno', '5V'), at('s1', 'VCC')), wire(at('uno', 'GND.2'), at('s1', 'GND'))],
+    )
+    expect(out.analogs).toEqual([])
+    expect(out.warnings.s1).toBeUndefined()
+  })
+
+  it('complains rather than reading nothing when a rail is missing', () => {
+    const out = run(
+      [slider('50')],
+      [wire(at('uno', '5V'), at('s1', 'VCC')), wire(at('s1', 'SIG'), at('uno', 'A0'))],
+    )
+    expect(out.analogs).toEqual([])
+    expect(out.warnings.s1).toMatch(/5V.*GND/i)
+  })
+})
+
+describe('a photoresistor module divides its rails and drives DO both ways', () => {
+  const light = (v: string, threshold = '50'): EvalPart => ({
+    id: 'm1',
+    kind: 'photoresistor-sensor',
+    attrs: { light: v, threshold },
+  })
+  const powered = [
+    wire(at('uno', '5V'), at('m1', 'VCC')),
+    wire(at('uno', 'GND.2'), at('m1', 'GND')),
+  ]
+
+  it('AO sits higher with more light', () => {
+    const ao = (v: string) =>
+      run([light(v)], [...powered, wire(at('m1', 'AO'), at('uno', 'A0'))])
+    expect(ao('0').analogs).toEqual([{ channel: 0, millivolts: 0 }])
+    expect(ao('50').analogs).toEqual([{ channel: 0, millivolts: 2500 }])
+    expect(ao('100').analogs).toEqual([{ channel: 0, millivolts: 5000 }])
+  })
+
+  it('DO follows light against the threshold, driving the pin high or low', () => {
+    const on = run([light('60')], [...powered, wire(at('m1', 'DO'), at('uno', '2'))])
+    expect(on.sensors.m1).toEqual({ powered: true, active: true })
+    expect(on.drives).toContainEqual({ port: 'D', pin: 2, high: true })
+
+    const off = run([light('40')], [...powered, wire(at('m1', 'DO'), at('uno', '2'))])
+    expect(off.sensors.m1).toEqual({ powered: true, active: false })
+    expect(off.drives).toContainEqual({ port: 'D', pin: 2, high: false })
+  })
+
+  it('sits high exactly at the threshold, like a comparator without hysteresis', () => {
+    const out = run([light('50')], [...powered, wire(at('m1', 'DO'), at('uno', '2'))])
+    expect(out.sensors.m1?.active).toBe(true)
+  })
+
+  it('drives nothing when its rails are backwards — a module is not a bare divider', () => {
+    const out = run(
+      [light('80')],
+      [
+        wire(at('uno', 'GND.2'), at('m1', 'VCC')),
+        wire(at('uno', '5V'), at('m1', 'GND')),
+        wire(at('m1', 'DO'), at('uno', '2')),
+        wire(at('m1', 'AO'), at('uno', 'A0')),
+      ],
+    )
+    expect(out.analogs).toEqual([])
+    expect(out.drives).toEqual([])
+    expect(out.sensors.m1).toBeUndefined()
+    expect(out.warnings.m1).toMatch(/VCC.*5V/i)
+  })
+
+  it('stays quiet with no rails at all', () => {
+    const out = run([light('80')], [
+      { a: at('m1', 'AO'), b: at('uno', 'A0') },
+      { a: at('m1', 'DO'), b: at('uno', '2') },
+    ])
+    // AO and DO reach pins, so it says what is wrong — but it does not fake readings.
+    expect(out.analogs).toEqual([])
+    expect(out.drives).toEqual([])
+    expect(out.warnings.m1).toMatch(/VCC/i)
+  })
+
+  it('shows its lamps with no outputs wired, and drives nothing', () => {
+    const out = run([light('80')], powered)
+    // Powered, and light above the threshold, the module lights its own DO lamp —
+    // that is the visible check it is alive — without reaching any pin.
+    expect(out.sensors.m1).toEqual({ powered: true, active: true })
+    expect(out.analogs).toEqual([])
+    expect(out.drives).toEqual([])
+    expect(out.warnings.m1).toBeUndefined()
+  })
+})
+
+describe('an NTC module reads higher the hotter it is', () => {
+  const thermo = (temperature: string): EvalPart => ({
+    id: 't1',
+    kind: 'ntc-temperature-sensor',
+    attrs: { temperature },
+  })
+  const wired = (temperature: string) =>
+    run(
+      [thermo(temperature)],
+      [
+        wire(at('uno', '5V'), at('t1', 'VCC')),
+        wire(at('uno', 'GND.2'), at('t1', 'GND')),
+        wire(at('t1', 'OUT'), at('uno', 'A0')),
+      ],
+    )
+
+  it('maps −15…135 °C across the supply', () => {
+    expect(wired('-15').analogs).toEqual([{ channel: 0, millivolts: 0 }])
+    expect(wired('25').analogs).toEqual([{ channel: 0, millivolts: 1333 }])
+    expect(wired('135').analogs).toEqual([{ channel: 0, millivolts: 5000 }])
+  })
+
+  it('clamps a temperature below the documented floor', () => {
+    expect(wired('-100').analogs).toEqual([{ channel: 0, millivolts: 0 }])
+  })
+
+  it('does nothing until its rails are the right way round', () => {
+    const out = run(
+      [thermo('25')],
+      [
+        wire(at('uno', 'GND.2'), at('t1', 'VCC')),
+        wire(at('uno', '5V'), at('t1', 'GND')),
+        wire(at('t1', 'OUT'), at('uno', 'A0')),
+      ],
+    )
+    expect(out.analogs).toEqual([])
+    expect(out.warnings.t1).toMatch(/GND/i)
+  })
+})

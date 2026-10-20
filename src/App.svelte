@@ -264,6 +264,7 @@
   /** What's wrong with a part — the strip says it in words, the canvas badges it. */
   let warnings = $derived(sim.warnings)
   let pressedButtons = $derived(sim.pressedButtons)
+  let sensorStates = $derived(sim.sensors)
   interface PendingWire {
     a: PinRef
     b: PinRef
@@ -279,6 +280,7 @@
     ledStates,
     ledBrightness,
     pressedButtons,
+    sensorStates,
     warnings,
   }))
   let canvasEl = $derived(surface.canvasEl)
@@ -1001,6 +1003,15 @@
       ]
     }
     if (inst.kind === 'pushbutton') return [{ name: 'pressed', value: !!pressedButtons[inst.id] }]
+    // A sensor module's own indicator lamps say powered and on/off — the module
+    // shows its comparator result, the same condition its DO pin drives.
+    if (inst.kind === 'photoresistor-sensor') {
+      const state = sensorStates[inst.id]
+      return [
+        { name: 'ledPower', value: !!state?.powered },
+        { name: 'ledDO', value: !!state?.active },
+      ]
+    }
     return null
   }
 

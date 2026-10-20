@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Slide potentiometer",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "s1",
+      "type": "wokwi-slide-potentiometer",
+      "left": 400,
+      "top": 160,
+      "attrs": {
+        "value": "50"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "uno:5V",
+      "s1:VCC"
+    ],
+    [
+      "s1:GND",
+      "uno:GND.2"
+    ],
+    [
+      "s1:SIG",
+      "uno:A0"
+    ]
+  ],
+  "sketch": "// Slide potentiometer — the divider of the knob, moved sideways.\n//\n// Slide the Position slider (or drag the tip on the canvas) while the sketch\n// runs: A0 reads value/100 of the supply, the same divider as the rotary knob.\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  Serial.print(\"A0 = \");\n  Serial.println(analogRead(A0));\n  delay(200);\n}\n"
+}

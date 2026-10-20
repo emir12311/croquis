@@ -71,6 +71,30 @@ const KNOB_SWEEP = 135
 const KNOB_MAX = 1023
 
 /**
+ * The slide potentiometer's drawing, in the element's own millimetres: the svg
+ * is `travelLength + 25` wide and 29 tall, the tip is a 12×19mm handle whose
+ * centre sits `5` (the case's x) + `tipOffset + 22.5` in from the left, and the
+ * travel begins 12.5 mm in — the case x plus its 7.5 mm border inside.
+ * travelLength 30 and min/max 0–100 are the element's own defaults, which the
+ * catalogue uses too.
+ */
+const SLIDE_TRAVEL = 30
+const SLIDE_WIDTH = SLIDE_TRAVEL + 25
+const SLIDE_HEIGHT = 29
+const SLIDE_TIP_LEFT = 12.5
+const SLIDE_RANGE = 100
+const SLIDE_TIP_HALF_W = 8
+const SLIDE_TIP_HALF_H = 12
+const SLIDE_TIP_CENTRE_Y = 14.5 / SLIDE_HEIGHT
+
+/** The value a slider carries, clamped into its own range (empty = the bottom). */
+function slideClamp(raw: unknown): number {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return 0
+  return Math.min(SLIDE_RANGE, Math.max(0, n))
+}
+
+/**
  * The value a pointer position asks of a knob centred at `centre`, undoing the
  * part's own rotation first. The angle maths is the element's own `rotateHandler`,
  * so dragging the knob on the canvas lands on exactly the value that interacting
@@ -530,9 +554,14 @@ export class Input {
       this.addBend()
       return
     }
-    // A potentiometer's knob turns wherever it is grabbed; the body still drags.
+    // A potentiometer's knob turns wherever it is grabbed; a slider's tip is the
+    // grab point for its own movement. Either way, the body still drags the part.
     if (this.onKnob(inst, p)) {
       this.startKnobDrag(e, inst)
+      return
+    }
+    if (this.onTip(inst, p)) {
+      this.startTipDrag(e, inst)
       return
     }
     e.stopPropagation()
@@ -569,6 +598,30 @@ export class Input {
   }
 
   /**
+   * A pointer position as fractions of a part's drawn box, undoing its rotation —
+   * the same frame the element itself works in, so the box maps onto the drawing.
+   * Null until the part has been measured.
+   */
+  private unitPoint(inst: Instance, p: Point): Point | null {
+    const size = this.deps.surface.partSizeOf(inst)
+    if (!size.w || !size.h) return null
+    const cx = inst.x + size.w / 2
+    const cy = inst.y + size.h / 2
+    let lx = p.x - cx
+    let ly = p.y - cy
+    const rot = inst.rotate ?? 0
+    if (rot) {
+      const rad = (-rot * Math.PI) / 180
+      const c = Math.cos(rad)
+      const s = Math.sin(rad)
+      const rx = lx * c - ly * s
+      ly = lx * s + ly * c
+      lx = rx
+    }
+    return { x: lx / size.w + 0.5, y: ly / size.h + 0.5 }
+  }
+
+  /**
    * Turn a potentiometer. The pointer's angle about the knob sets the value while
    * the sketch runs, so an `analogRead` moves under your hand. A whole turn is one
    * undo step: the first real movement commits, the rest ride along.
@@ -585,6 +638,62 @@ export class Input {
     const apply = frameThrottle((ev: PointerEvent) => {
       const value = knobValue(centre, this.toCanvas(ev.clientX, ev.clientY), rot)
       if (value === null) return
+      const next = String(value)
+      if (inst.attrs?.value === next) return
+      if (!committed) {
+        this.deps.project.commit()
+        committed = true
+      }
+      inst.attrs = { ...inst.attrs, value: next }
+    })
+    const onMove = (ev: PointerEvent) => apply(ev)
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+
+  /**
+   * Is the pointer on a slider's tip rather than the body? The tip is a
+   * value-dependent place: it sits where the current position puts it, so the
+   * hit test is asked with the value the part carries *right now*.
+   */
+  private onTip(inst: Instance, p: Point): boolean {
+    if (inst.kind !== 'slide-potentiometer') return false
+    const local = this.unitPoint(inst, p)
+    if (!local) return false
+    const value = slideClamp(inst.attrs?.value)
+    const tipFx = (SLIDE_TIP_LEFT + (value / SLIDE_RANGE) * SLIDE_TRAVEL) / SLIDE_WIDTH
+    return (
+      Math.abs(local.x - tipFx) <= SLIDE_TIP_HALF_W / SLIDE_WIDTH &&
+      Math.abs(local.y - SLIDE_TIP_CENTRE_Y) <= SLIDE_TIP_HALF_H / SLIDE_HEIGHT
+    )
+  }
+
+  /**
+   * Move a slider. Where the pointer sits along the track sets the value, the
+   * same absolute reading the element's own tip drag uses — grab, and the tip
+   * answers the hand. One undo step for the whole slide, like a knob's turn.
+   */
+  startTipDrag(e: PointerEvent, inst: Instance) {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!this.selectedIds.includes(inst.id)) this.selectedIds = [inst.id]
+    this.selectedWireId = null
+    if (!this.unitPoint(inst, this.toCanvas(e.clientX, e.clientY))) return
+    let committed = false
+    const apply = frameThrottle((ev: PointerEvent) => {
+      const local = this.unitPoint(inst, this.toCanvas(ev.clientX, ev.clientY))
+      if (!local) return
+      // The travel starts SLIDE_TIP_LEFT mm in from the drawing's left edge —
+      // the case's border, per the element's own `updateValueFromXCoordinate`.
+      const tipPos =
+        Math.min(SLIDE_TRAVEL, Math.max(0, local.x * SLIDE_WIDTH - SLIDE_TIP_LEFT))
+      const value = Math.round((tipPos / SLIDE_TRAVEL) * SLIDE_RANGE)
       const next = String(value)
       if (inst.attrs?.value === next) return
       if (!committed) {
