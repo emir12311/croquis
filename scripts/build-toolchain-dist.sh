@@ -66,8 +66,15 @@ cp -r "$SRC/ArduinoCore-avr-1.8.6" "$OUT/ArduinoCore-avr-1.8.6"
 cp -r "$SRC/core-cache" "$OUT/core-cache"
 
 # Prove it before anyone ships it. A missing device-specs produced a toolchain that looked
-# complete, packaged cleanly, and failed every single sketch — the app reported it as a
+# complete, packaged cleanly, and failed every compile — the app reported it as a
 # compile error, which looks like the sketch is wrong.
+#
+# Before that, keep every dist file writable by its owner. Some copied files genuinely
+# are read-only — the core's git pack files most of all — and tauri-build re-copies the
+# resources on the next `cargo test` or `tauri dev` by truncating destinations that
+# already exist, which fails with "Permission denied" on a read-only file. The first
+# build worked, and the second never did.
+chmod -R u+w "$OUT"
 echo 'int main() {}' > "$OUT/.selftest.cpp"
 if ! "$OUT/avr/bin/avr-g++" -mmcu=atmega328p -c "$OUT/.selftest.cpp" -o /dev/null 2>"$OUT/.selftest.err"; then
   echo "REFUSING TO SHIP: the trimmed toolchain cannot compile for atmega328p" >&2
