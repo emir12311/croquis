@@ -1007,7 +1007,9 @@
     if (inst.kind === 'pushbutton') return [{ name: 'pressed', value: !!pressedButtons[inst.id] }]
     if (inst.kind === 'analog-joystick') {
       const attrs = attrsOf(inst)
-      const x = Number(attrs.x ?? 50) / 50 - 1
+      // xValue positive moves the element's knob left, so invert it: dragging
+      // right (x = 100) must move the knob right.
+      const x = 1 - Number(attrs.x ?? 50) / 50
       const y = Number(attrs.y ?? 50) / 50 - 1
       return [
         { name: 'xValue', value: Math.min(1, Math.max(-1, x)) },

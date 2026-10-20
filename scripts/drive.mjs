@@ -347,11 +347,29 @@ check('the RGB preset loads with three channels', async (app) => {
   assert(await app.ev(`!!document.querySelector('wokwi-rgb-led')`), 'the RGB LED is on the canvas')
 })
 
-check('the joystick preset loads, and its button presses', async (app) => {
+check('the joystick preset loads, drags, snaps back and clicks', async (app) => {
   await app.goto(`http://localhost:${DEV_PORT}`)
   await app.loadPreset('Joystick')
   assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 2, 'Joystick gives two parts')
   const centre = await app.partCentre('wokwi-analog-joystick')
+
+  // Drag right: the stick moves, and the press is cancelled (not a click).
+  await app.mouse('mousePressed', centre.x, centre.y, 'left', 1)
+  await app.mouse('mouseMoved', centre.x + 30, centre.y, 'left', 1)
+  await sleep(200)
+  assert(
+    (await app.ev(`document.querySelector('wokwi-analog-joystick')?.xValue`)) < -0.05,
+    'the stick moved right',
+  )
+  assert(!(await app.ev(`!!document.querySelector('wokwi-analog-joystick')?.pressed`)), 'the drag is not a click')
+  await app.mouse('mouseReleased', centre.x + 30, centre.y, 'left', 0)
+  await sleep(200)
+  assert(
+    (await app.ev(`document.querySelector('wokwi-analog-joystick')?.xValue`)) === 0,
+    'the stick snapped back to centre',
+  )
+
+  // A click with no movement is the button.
   await app.mouse('mousePressed', centre.x, centre.y, 'left', 1)
   await sleep(150)
   assert(await app.ev(`!!document.querySelector('wokwi-analog-joystick')?.pressed`), 'the stick is pressed')

@@ -87,6 +87,10 @@ const SLIDE_TIP_HALF_W = 8
 const SLIDE_TIP_HALF_H = 12
 const SLIDE_TIP_CENTRE_Y = 14.5 / SLIDE_HEIGHT
 
+/** The joystick's knob travel, as fractions of its 27.2 × 31.8 mm drawing. */
+const JOYSTICK_TRAVEL_X = 10.6 / 27.2
+const JOYSTICK_TRAVEL_Y = 10.6 / 31.8
+
 /** The value a slider carries, clamped into its own range (empty = the bottom). */
 function slideClamp(raw: unknown): number {
   const n = Number(raw)
@@ -565,7 +569,7 @@ export class Input {
       return
     }
     if (this.onJoystickButton(inst, p)) {
-      this.startJoystickPress(e, inst)
+      this.startJoystickDrag(e, inst)
       return
     }
     e.stopPropagation()
@@ -726,23 +730,65 @@ export class Input {
     if (inst.kind !== 'analog-joystick') return false
     const local = this.unitPoint(inst, p)
     if (!local) return false
-    return Math.abs(local.x - 0.5) <= 10.6 / 27.2 && Math.abs(local.y - 0.5) <= 10.6 / 31.8
+    return (
+      Math.abs(local.x - 0.5) <= JOYSTICK_TRAVEL_X &&
+      Math.abs(local.y - 0.5) <= JOYSTICK_TRAVEL_Y
+    )
   }
 
-  /** Hold the joystick's SEL button while the pointer is down. */
-  startJoystickPress(e: PointerEvent, inst: Instance) {
+  /**
+   * Drag the stick, or click its centre. A press starts as a possible click;
+   * moving past the four-pixel threshold cancels the click and moves the axes.
+   * Releasing a drag snaps x/y back to 50/50 — a joystick is a momentary input,
+   * not a positioned part. The whole drag is transient: no undo entry and no
+   * dirty document, because the stick returns to where it started.
+   */
+  startJoystickDrag(e: PointerEvent, inst: Instance) {
     e.stopPropagation()
     e.preventDefault()
     if (!this.selectedIds.includes(inst.id)) this.selectedIds = [inst.id]
     this.selectedWireId = null
+    const startX = e.clientX
+    const startY = e.clientY
+    let dragged = false
     this.deps.sim.press(inst.id, true)
-    const release = () => {
-      window.removeEventListener('pointerup', release)
-      window.removeEventListener('pointercancel', release)
-      this.deps.sim.press(inst.id, false)
+
+    const onMove = frameThrottle((ev: PointerEvent) => {
+      if (!dragged) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) <= 4) return
+        dragged = true
+        // A moved stick is not a button click.
+        this.deps.sim.press(inst.id, false)
+      }
+      const local = this.unitPoint(inst, this.toCanvas(ev.clientX, ev.clientY))
+      if (!local) return
+      const x = Math.round(50 + ((local.x - 0.5) / JOYSTICK_TRAVEL_X) * 50)
+      const y = Math.round(50 - ((local.y - 0.5) / JOYSTICK_TRAVEL_Y) * 50)
+      const clamp = (n: number) => Math.min(100, Math.max(0, n))
+      inst.attrs = { ...inst.attrs, x: String(clamp(x)), y: String(clamp(y)) }
+    })
+    const snapBack = () => {
+      if (!dragged) return
+      inst.attrs = { ...inst.attrs, x: '50', y: '50' }
     }
-    window.addEventListener('pointerup', release)
-    window.addEventListener('pointercancel', release)
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+    }
+    const onUp = () => {
+      cleanup()
+      if (!dragged) this.deps.sim.press(inst.id, false)
+      snapBack()
+    }
+    const onCancel = () => {
+      cleanup()
+      this.deps.sim.press(inst.id, false)
+      snapBack()
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
   }
 
   beginPartDrag(e: PointerEvent, inst: Instance) {
