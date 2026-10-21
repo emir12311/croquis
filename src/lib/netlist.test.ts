@@ -284,8 +284,12 @@ describe('output parts', () => {
       wire(at('uno', '13'), at('buzzer', '1')),
       wire(at('buzzer', '2'), at('uno', 'GND.2')),
     ]
-    expect(evaluateCircuit([uno, buzzer()], wires, {}, { B5: true }).outputs.buzzer.active).toBe(true)
+    const out = evaluateCircuit([uno, buzzer()], wires, {}, { B5: true })
+    expect(out.outputs.buzzer.active).toBe(true)
+    expect(out.outputs.buzzer.frequency).toBe(1000)
     expect(evaluateCircuit([uno, buzzer()], wires, {}, {}).outputs.buzzer.active).toBe(false)
+    const tone = evaluateCircuit([uno, buzzer()], wires, {}, { B5: true }, {}, { B5: 440 })
+    expect(tone.outputs.buzzer.frequency).toBe(440)
   })
 
   it('energizes a relay coil the same way', () => {

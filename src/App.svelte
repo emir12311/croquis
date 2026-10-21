@@ -25,13 +25,14 @@
   import CodeEditor from './lib/CodeEditor.svelte'
   import { readPalette } from './lib/circuit-render'
   import { WIRE_COLORS, wireHex } from './lib/wire-colours'
-  import { onMount, untrack } from 'svelte'
+  import { onDestroy, onMount, untrack } from 'svelte'
   import { View } from './lib/view.svelte'
   import { Sketch } from './lib/sketch.svelte'
   import { Sim, type SimBackend } from './lib/sim.svelte'
   import { Input } from './lib/input.svelte'
   import { parseCompileErrors, isSketchFile, type CompileError } from './lib/compile-errors'
   import { isAtBottom } from './lib/serial-scroll'
+  import { BuzzerAudio } from './lib/buzzer-audio'
   import { invoke } from '@tauri-apps/api/core'
   import { documentDir } from '@tauri-apps/api/path'
   import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -281,6 +282,11 @@
   let ledBrightness = $derived(sim.ledBrightness)
   let rgbLeds = $derived(sim.rgbLeds)
   let outputs = $derived(sim.outputs)
+  const buzzerAudio = new BuzzerAudio()
+  $effect(() => {
+    buzzerAudio.update(outputs)
+  })
+  onDestroy(() => buzzerAudio.dispose())
   /** What's wrong with a part — the strip says it in words, the canvas badges it. */
   let warnings = $derived(sim.warnings)
   let pressedButtons = $derived(sim.pressedButtons)
@@ -1107,6 +1113,9 @@
   })
 
   async function runSim() {
+    // Unlock audio while the click/keypress is still a user gesture; the sketch
+    // may not produce a buzzer output until after an async compile.
+    buzzerAudio.unlock()
     // A fresh run never inherits a half-drawn wire or a held button.
     input.cancelWire()
     input.rerouting = null

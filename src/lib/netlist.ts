@@ -131,6 +131,8 @@ export interface RgbState {
 export interface OutputState {
   active: boolean
   values: number[]
+  /** A buzzer's tone, in Hz. Absent on non-audio outputs. */
+  frequency?: number
 }
 
 export interface CircuitEval {
@@ -313,6 +315,7 @@ export function evaluateCircuit(
   pressed: Record<string, boolean>,
   avr: Record<string, boolean>,
   pinDuty: Record<string, number> = {},
+  pinFrequency: Record<string, number> = {},
 ): CircuitEval {
   const kindById = new Map(parts.map((p) => [p.id, p.kind]))
   const key = (ref: PinRef) => {
@@ -420,6 +423,7 @@ export function evaluateCircuit(
   const mcuLow = new Set<string>()
   const mcuPinOf = new Map<string, { port: string; pin: number }>()
   const dutyByRoot = new Map<string, number>()
+  const frequencyByRoot = new Map<string, number>()
 
   for (const part of parts) {
     if (part.kind !== 'uno') continue
@@ -434,6 +438,10 @@ export function evaluateCircuit(
         const key = `${info.port}${info.pin}`
         const duty = Math.min(1, Math.max(0, pinDuty[key] ?? 1))
         dutyByRoot.set(root, Math.max(dutyByRoot.get(root) ?? 0, duty))
+        const frequency = pinFrequency[key]
+        if (Number.isFinite(frequency) && frequency > 0) {
+          frequencyByRoot.set(root, frequency)
+        }
       }
       mcuPinOf.set(root + `/${info.port}${info.pin}`, { port: info.port, pin: info.pin })
       if (pin.startsWith('A') || pin === '5V') continue
@@ -730,7 +738,13 @@ export function evaluateCircuit(
       const b = uf.find(`${part.id}:${part.kind === 'buzzer' ? '2' : 'COIL2'}`)
       const active =
         (highNets.has(a) && lowNets.has(b)) || (highNets.has(b) && lowNets.has(a))
-      outputs[part.id] = { active, values: [] }
+      if (part.kind === 'buzzer') {
+        const highRoot = highNets.has(a) ? a : highNets.has(b) ? b : null
+        const frequency = highRoot ? (frequencyByRoot.get(highRoot) ?? 1000) : 0
+        outputs[part.id] = { active, values: [], frequency: active ? frequency : 0 }
+      } else {
+        outputs[part.id] = { active, values: [] }
+      }
       continue
     }
     if (part.kind === 'seven-segment') {
