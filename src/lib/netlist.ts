@@ -734,8 +734,10 @@ export function evaluateCircuit(
       continue
     }
     if (part.kind === 'seven-segment') {
-      const common = uf.find(`${part.id}:COM`)
-      const lit = lowNets.has(common)
+      // The one-digit element names its two common pins COM.1/COM.2; the
+      // multi-digit variants use COM. Accept any of them.
+      const common = ['COM.1', 'COM.2', 'COM'].map((pin) => uf.find(`${part.id}:${pin}`))
+      const lit = common.some((root) => lowNets.has(root))
       outputs[part.id] = {
         active: lit,
         values: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'].map((pin) =>
