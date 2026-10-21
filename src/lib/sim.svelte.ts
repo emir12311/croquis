@@ -203,9 +203,8 @@ export class Sim {
     // A multiplexed display is sampled one digit at a time. Keep the last lit
     // segments for every digit so the next scan does not erase the others.
     for (const part of parts) {
-      if (part.kind !== 'seven-segment') continue
-      const digits = Math.min(4, Math.max(1, Number(part.attrs?.digits) || 1))
-      if (digits === 1) continue
+      if (part.kind !== 'seven-segment-4') continue
+      const digits = 4
       const state = outputs[part.id]
       if (!state) continue
       const memory = this.segmentMemory.get(part.id) ?? Array(digits * 8).fill(0)

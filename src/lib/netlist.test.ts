@@ -37,7 +37,7 @@ const relay = (): EvalPart => ({ id: 'relay', kind: 'relay' })
 const sevenSegment = (): EvalPart => ({ id: 'seg', kind: 'seven-segment' })
 const fourDigit = (): EvalPart => ({
   id: 'seg',
-  kind: 'seven-segment',
+  kind: 'seven-segment-4',
   attrs: { digits: '4' },
 })
 const ledBar = (): EvalPart => ({ id: 'bar', kind: 'led-bar-graph' })

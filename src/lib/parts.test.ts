@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RESISTANCE_UNITS, formatResistance, partByKind, parseResistance } from './parts'
+import { RESISTANCE_UNITS, formatResistance, kindForTag, partByKind, parseResistance } from './parts'
 
 /** The resistor's own control, so the tests use the real bounds. */
 function resistorField() {
@@ -9,6 +9,15 @@ function resistorField() {
 }
 const { min, max } = resistorField()
 const parse = (text: string, factor: number) => parseResistance(text, factor, min, max)
+
+describe('the display catalogue', () => {
+  it('keeps the 1- and 4-digit displays as separate kinds', () => {
+    expect(kindForTag('wokwi-7segment')).toBe('seven-segment')
+    expect(kindForTag('wokwi-7segment-4')).toBe('seven-segment-4')
+    expect(partByKind('seven-segment-4').attrs.digits).toBe('4')
+    expect(partByKind('seven-segment').fields).toBeUndefined()
+  })
+})
 
 describe('showing a resistance', () => {
   it('picks the unit that keeps the number readable', () => {
