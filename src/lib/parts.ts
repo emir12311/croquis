@@ -30,6 +30,10 @@ export type PartKind =
   | 'pir-motion-sensor'
   | 'flame-sensor'
   | 'sound-sensor'
+  | 'buzzer'
+  | 'relay'
+  | 'seven-segment'
+  | 'led-bar-graph'
   | 'breadboard'
   | 'breadboard-full'
 
@@ -349,6 +353,51 @@ export const PARTS: PartDef[] = [
     fields: [{ name: 'noise', label: 'Noise', control: { kind: 'range', min: 0, max: 100, step: 1 } }],
     live: true,
     icon: '<path d="M4 10v4h3l4 4V6l-4 4H4z"/><path d="M15 9c1 1 1 5 0 6M18 7c2 2 2 8 0 10"/>',
+  },
+  {
+    kind: 'buzzer',
+    label: 'Buzzer',
+    tag: 'wokwi-buzzer',
+    attrs: {},
+    live: true,
+    icon: '<path d="M8 9H5v6h3l5 4V5L8 9z"/><path d="M16 9c1.5 1.5 1.5 4.5 0 6M19 6c3 3 3 9 0 12"/>',
+  },
+  {
+    kind: 'relay',
+    label: 'Relay',
+    tag: 'wokwi-ks2e-m-dc5',
+    attrs: {},
+    icon: '<rect x="3" y="7" width="18" height="10" rx="1"/><path d="M7 7V5M17 7V5M7 17v2M17 17v2M9 12h6"/>',
+  },
+  {
+    kind: 'seven-segment',
+    label: '7-segment display',
+    tag: 'wokwi-7segment',
+    attrs: { digits: '1' },
+    live: true,
+    icon: '<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M8 8h8M8 12h8M8 16h8M8 8v4M16 8v4M8 12v4M16 12v4"/>',
+  },
+  {
+    kind: 'led-bar-graph',
+    label: 'LED bar graph',
+    tag: 'wokwi-led-bar-graph',
+    attrs: { color: 'red' },
+    fields: [
+      {
+        name: 'color',
+        label: 'Colour',
+        control: {
+          kind: 'select',
+          options: ['red', 'green', 'yellow', 'blue', 'white'].map((c) => ({
+            value: c,
+            label: c[0].toUpperCase() + c.slice(1),
+            swatch: c,
+          })),
+        },
+      },
+    ],
+    live: true,
+    icon: '<path d="M5 5v14M9 8v10M13 8v10M17 5v14"/>',
   },
   {
     kind: 'breadboard',

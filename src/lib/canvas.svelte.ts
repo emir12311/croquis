@@ -32,7 +32,7 @@ import {
   type Wire,
 } from './document'
 import { WIRE_HEX } from './wire-colours'
-import { type LedState, ledStep, LED_STEPS, type RgbState, type SensorState } from './netlist'
+import { type LedState, ledStep, LED_STEPS, type OutputState, type RgbState, type SensorState } from './netlist'
 
 /** One of the three looks a sensor module's own indicator lamps can take. */
 function sensorLook(state: SensorState | undefined): 0 | 1 | 2 {
@@ -48,6 +48,7 @@ export interface RenderState {
   ledStates: Record<string, LedState>
   ledBrightness: Record<string, number>
   rgbLeds: Record<string, RgbState>
+  outputs: Record<string, OutputState>
   pressedButtons: Record<string, boolean>
   sensorStates: Record<string, SensorState>
   warnings: Record<string, string>
@@ -364,7 +365,16 @@ export class CanvasSurface {
             .map((v) => Math.round(ledStep(v) * LED_STEPS))
             .join('')
         : ''
-    return `${this.baseKey(inst)}|${chip}${bright}${down}${sensor}${rgb}`
+    const output = state.outputs[inst.id]
+    const outputKey =
+      inst.kind === 'buzzer'
+        ? output?.active
+          ? '1'
+          : '0'
+        : inst.kind === 'seven-segment' || inst.kind === 'led-bar-graph'
+          ? (output?.values.join('') ?? '')
+          : ''
+    return `${this.baseKey(inst)}|${chip}${bright}${down}${sensor}${rgb}${outputKey}`
   }
 
   /** Rasterise a part's element (its shadow-root contents) into an image we blit. */
@@ -555,6 +565,9 @@ export class CanvasSurface {
         state.sensorStates[inst.id]?.active &&
         (inst.kind === 'tilt-switch' || inst.kind === 'pir-motion-sensor')
       ) {
+        this.drawActive(ctx, t, inst, scene.zoom)
+      }
+      if (inst.kind === 'relay' && state.outputs[inst.id]?.active) {
         this.drawActive(ctx, t, inst, scene.zoom)
       }
     }

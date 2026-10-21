@@ -127,6 +127,12 @@ export interface RgbState {
   b: number
 }
 
+/** An output part's driven state: on/off and, for displays, its lit channels. */
+export interface OutputState {
+  active: boolean
+  values: number[]
+}
+
 export interface CircuitEval {
   /** LED instance id → how hard it's driven. */
   leds: Record<string, LedState>
@@ -134,6 +140,8 @@ export interface CircuitEval {
   ledBrightness: Record<string, number>
   /** RGB LED instance id → per-channel brightness 0..1. */
   rgbLeds: Record<string, RgbState>
+  /** Buzzer, relay, seven-segment and LED-bar state by part id. */
+  outputs: Record<string, OutputState>
   /** Buttons pulled this pin to a level (because a button connects it to a rail). */
   drives: { port: string; pin: number; high: boolean }[]
   /** What's wrong with a part — for the properties strip and the canvas badge. */
@@ -455,6 +463,7 @@ export function evaluateCircuit(
   const leds: Record<string, LedState> = {}
   const ledBrightness: Record<string, number> = {}
   const rgbLeds: Record<string, RgbState> = {}
+  const outputs: Record<string, OutputState> = {}
   const warnings: Record<string, string> = {}
   for (const part of parts) {
     if (part.kind !== 'led') continue
@@ -712,5 +721,40 @@ export function evaluateCircuit(
     }
   }
 
-  return { leds, ledBrightness, rgbLeds, drives, warnings, analogs, sensors }
+  // Outputs are loads, not sources: they read the levels on their own pins.
+  // A buzzer or relay coil is on when its two terminals span high and low.
+  // The display and bar are direct pin mappings; the common leg must be low.
+  for (const part of parts) {
+    if (part.kind === 'buzzer' || part.kind === 'relay') {
+      const a = uf.find(`${part.id}:${part.kind === 'buzzer' ? '1' : 'COIL1'}`)
+      const b = uf.find(`${part.id}:${part.kind === 'buzzer' ? '2' : 'COIL2'}`)
+      const active =
+        (highNets.has(a) && lowNets.has(b)) || (highNets.has(b) && lowNets.has(a))
+      outputs[part.id] = { active, values: [] }
+      continue
+    }
+    if (part.kind === 'seven-segment') {
+      const common = uf.find(`${part.id}:COM`)
+      const lit = lowNets.has(common)
+      outputs[part.id] = {
+        active: lit,
+        values: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'].map((pin) =>
+          lit && highNets.has(uf.find(`${part.id}:${pin}`)) ? 1 : 0,
+        ),
+      }
+      continue
+    }
+    if (part.kind === 'led-bar-graph') {
+      outputs[part.id] = {
+        active: false,
+        values: Array.from({ length: 10 }, (_, i) => {
+          const anode = uf.find(`${part.id}:A${i + 1}`)
+          const cathode = uf.find(`${part.id}:C${i + 1}`)
+          return highNets.has(anode) && lowNets.has(cathode) ? 1 : 0
+        }),
+      }
+    }
+  }
+
+  return { leds, ledBrightness, rgbLeds, drives, warnings, analogs, sensors, outputs }
 }
