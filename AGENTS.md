@@ -50,7 +50,7 @@ simavr steps; the rest are in [the README](README.md#build-from-source).
 | `src/lib/sim.svelte.ts` | run/stop, chip pins, serial, netlist solving |
 | `src/lib/view.svelte.ts` | zoom/pan/fit and screen ↔ canvas coordinates |
 | `src/lib/sketch.svelte.ts` | the sketch text and its saved/dirty pair |
-| `src/lib/netlist.ts` | the circuit model: nets, LED current, buttons and analogue sources |
+| `src/lib/netlist.ts` | the circuit model: nets, LEDs/RGB, sensors, relays and outputs |
 | `src/lib/diagram.ts` | the `diagram.json` format, read and written |
 | `src/lib/route.ts` | orthogonal wire routing. **Nothing here may produce a diagonal** |
 | `src/lib/parts.ts` | the component catalogue — the registry everything else works from |
@@ -58,6 +58,8 @@ simavr steps; the rest are in [the README](README.md#build-from-source).
 | `src/lib/snap.ts` | dropping and moving parts onto holes |
 | `src/lib/circuit-render.ts` | the canvas renderer |
 | `src/lib/part-art.ts` | rasterising the `@wokwi/elements` parts into sprites |
+| `src/lib/buzzer-audio.ts` | the WebAudio voice for driven buzzers |
+| `src/lib/serial-scroll.ts` | whether the serial monitor should follow new output |
 | `src/lib/wokwi.ts` | the `@wokwi/elements` we import, and element fixes such as the slide pot's missing styles |
 | `src/lib/arduino-api.ts` | the editor's Arduino completions |
 | `src/lib/presets.ts` + `presets/*.json` | the shipped circuits |
