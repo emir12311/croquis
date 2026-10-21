@@ -300,6 +300,21 @@ describe('output parts', () => {
     expect(evaluateCircuit([uno, relay()], wires, {}, { B5: true }).outputs.relay.active).toBe(true)
   })
 
+  it('switches a load through its contacts', () => {
+    const parts = [relay(), resistor('220'), led()]
+    const wires = [
+      wire(at('uno', '5V'), at('relay', 'P1')),
+      wire(at('relay', 'NO1'), at('r', '1')),
+      wire(at('r', '2'), at('led', 'A')),
+      wire(at('led', 'C'), at('uno', 'GND.2')),
+      wire(at('uno', '13'), at('relay', 'COIL1')),
+      wire(at('relay', 'COIL2'), at('uno', 'GND.3')),
+    ]
+    expect(evaluateCircuit([uno, ...parts], wires, {}, { B5: true }).outputs.relay.active).toBe(true)
+    expect(evaluateCircuit([uno, ...parts], wires, {}, { B5: true }).leds.led).toBe('lit')
+    expect(evaluateCircuit([uno, ...parts], wires, {}, {}).leds.led).toBe('off')
+  })
+
   it('lights seven-segment segments only when their common is low', () => {
     const wires = [
       wire(at('uno', '2'), at('seg', 'A')),

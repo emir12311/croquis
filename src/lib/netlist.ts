@@ -366,6 +366,78 @@ export function evaluateCircuit(
     }
   }
 
+  // What does each net carry? This is collected twice: once to read the relay
+  // coils, then again after their contacts have been closed.
+  const vcc = new Set<string>()
+  const gnd = new Set<string>()
+  const mcuHigh = new Set<string>()
+  const mcuLow = new Set<string>()
+  const mcuPinOf = new Map<string, { port: string; pin: number }>()
+  const dutyByRoot = new Map<string, number>()
+  const frequencyByRoot = new Map<string, number>()
+
+  function collectRails() {
+    vcc.clear()
+    gnd.clear()
+    mcuHigh.clear()
+    mcuLow.clear()
+    mcuPinOf.clear()
+    dutyByRoot.clear()
+    frequencyByRoot.clear()
+    for (const part of parts) {
+      if (part.kind !== 'uno') continue
+      for (const pin of Object.keys(UNO_DIGITAL)) {
+        const info = unoPin(pin)
+        if (!info || info.kind !== 'mcu') continue
+        const root = uf.find(`${part.id}:${nodeName('uno', pin)}`)
+        const high = avr[`${info.port}${info.pin}`] === true
+        ;(high ? mcuHigh : mcuLow).add(root)
+        if (high) {
+          // A PWM pin is still a source for connectivity; the duty says how hard.
+          const key = `${info.port}${info.pin}`
+          const duty = Math.min(1, Math.max(0, pinDuty[key] ?? 1))
+          dutyByRoot.set(root, Math.max(dutyByRoot.get(root) ?? 0, duty))
+          const frequency = pinFrequency[key]
+          if (Number.isFinite(frequency) && frequency > 0) {
+            frequencyByRoot.set(root, frequency)
+          }
+        }
+        mcuPinOf.set(root + `/${info.port}${info.pin}`, { port: info.port, pin: info.pin })
+        if (pin.startsWith('A') || pin === '5V') continue
+      }
+    }
+    // Power rails: any Uno pin named GND / 5V that's actually wired into a net.
+    for (const w of wires) {
+      for (const ref of [w.a, w.b]) {
+        if (kindById.get(ref.instanceId) !== 'uno') continue
+        const info = unoPin(ref.pin)
+        if (!info || info.kind !== 'rail') continue
+        const root = uf.find(key(ref))
+        if (info.rail === 'VCC') vcc.add(root)
+        else gnd.add(root)
+      }
+    }
+  }
+
+  collectRails()
+
+  // A relay is a switch too: an energised coil joins P to NO, a released one
+  // joins P to NC. Do that before resistor and LED analysis, so a switched
+  // supply reaches the load just as a wire would.
+  for (const part of parts) {
+    if (part.kind !== 'relay') continue
+    const coil1 = uf.find(`${part.id}:COIL1`)
+    const coil2 = uf.find(`${part.id}:COIL2`)
+    const high = (root: string) => vcc.has(root) || mcuHigh.has(root)
+    const low = (root: string) => gnd.has(root) || mcuLow.has(root)
+    const energised = (high(coil1) && low(coil2)) || (high(coil2) && low(coil1))
+    uf.union(`${part.id}:P1`, `${part.id}:${energised ? 'NO1' : 'NC1'}`)
+    uf.union(`${part.id}:P2`, `${part.id}:${energised ? 'NO2' : 'NC2'}`)
+  }
+
+  // Contacts can join a coil path to a rail; rebuild the map before reading it.
+  collectRails()
+
   // A resistor is an edge between two nets with a resistance, not a wire. Walking
   // these edges is how we find how much sits in series with an LED.
   const resistorEdges = new Map<string, { to: string; ohms: number }[]>()
@@ -414,50 +486,6 @@ export function evaluateCircuit(
 
   function resistanceTo(from: string, targets: Set<string>): number | null {
     return reachTo(from, targets)?.ohms ?? null
-  }
-
-  // What does each net carry?
-  const vcc = new Set<string>()
-  const gnd = new Set<string>()
-  const mcuHigh = new Set<string>()
-  const mcuLow = new Set<string>()
-  const mcuPinOf = new Map<string, { port: string; pin: number }>()
-  const dutyByRoot = new Map<string, number>()
-  const frequencyByRoot = new Map<string, number>()
-
-  for (const part of parts) {
-    if (part.kind !== 'uno') continue
-    for (const pin of Object.keys(UNO_DIGITAL)) {
-      const info = unoPin(pin)
-      if (!info || info.kind !== 'mcu') continue
-      const root = uf.find(`${part.id}:${nodeName('uno', pin)}`)
-      const high = avr[`${info.port}${info.pin}`] === true
-      ;(high ? mcuHigh : mcuLow).add(root)
-      if (high) {
-        // A PWM pin is still a source for connectivity; the duty says how hard.
-        const key = `${info.port}${info.pin}`
-        const duty = Math.min(1, Math.max(0, pinDuty[key] ?? 1))
-        dutyByRoot.set(root, Math.max(dutyByRoot.get(root) ?? 0, duty))
-        const frequency = pinFrequency[key]
-        if (Number.isFinite(frequency) && frequency > 0) {
-          frequencyByRoot.set(root, frequency)
-        }
-      }
-      mcuPinOf.set(root + `/${info.port}${info.pin}`, { port: info.port, pin: info.pin })
-      if (pin.startsWith('A') || pin === '5V') continue
-    }
-  }
-  // Power rails: any Uno pin named GND / 5V that's actually wired into a net.
-  // (We join them as they appear in wires.)
-  for (const w of wires) {
-    for (const ref of [w.a, w.b]) {
-      if (kindById.get(ref.instanceId) !== 'uno') continue
-      const info = unoPin(ref.pin)
-      if (!info || info.kind !== 'rail') continue
-      const root = uf.find(key(ref))
-      if (info.rail === 'VCC') vcc.add(root)
-      else gnd.add(root)
-    }
   }
 
   const netHigh = (root: string) => vcc.has(root) || mcuHigh.has(root)
