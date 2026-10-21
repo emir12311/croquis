@@ -14,7 +14,7 @@ describe('the display catalogue', () => {
   it('keeps the 1- and 4-digit displays as separate kinds', () => {
     expect(kindForTag('wokwi-7segment')).toBe('seven-segment')
     expect(kindForTag('wokwi-7segment-4')).toBe('seven-segment-4')
-    expect(partByKind('seven-segment-4').attrs.digits).toBe('4')
+    expect(partByKind('seven-segment-4').tag).toBe('wokwi-7segment-4')
     expect(partByKind('seven-segment').fields).toBeUndefined()
   })
 })

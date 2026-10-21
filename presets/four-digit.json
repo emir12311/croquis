@@ -16,9 +16,7 @@
       "type": "wokwi-7segment-4",
       "left": 420,
       "top": 120,
-      "attrs": {
-        "digits": "4"
-      }
+      "attrs": {}
     }
   ],
   "connections": [
