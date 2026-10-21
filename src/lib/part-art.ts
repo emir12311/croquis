@@ -71,16 +71,20 @@ export function shadowSvgMarkup(host: HTMLElement): string | null {
       // back before writing the wrapper's viewBox, or the body comes out at the
       // zoom factor inside a full-size box.
       const scale = hostRect.width ? hostRect.width / width : 1
-      clone.setAttribute('x', String((svgRect.left - hostRect.left) / scale))
+      const artWidth = svgRect.width / scale
+      clone.setAttribute('x', '0')
       clone.setAttribute('y', String((svgRect.top - hostRect.top) / scale))
-      clone.setAttribute('width', String(svgRect.width / scale))
+      clone.setAttribute('width', String(artWidth))
       clone.setAttribute('height', String(svgRect.height / scale))
       const outer = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
       outer.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
       outer.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
-      outer.setAttribute('width', String(width))
+      // Trim the host's unused right-hand gap so the selection box hugs the body
+      // horizontally. The height stays the host height because the pins sit at
+      // its bottom edge.
+      outer.setAttribute('width', String(artWidth))
       outer.setAttribute('height', String(height))
-      outer.setAttribute('viewBox', `0 0 ${width} ${height}`)
+      outer.setAttribute('viewBox', `0 0 ${artWidth} ${height}`)
       outer.appendChild(clone)
       markup = new XMLSerializer().serializeToString(outer)
     } else {
