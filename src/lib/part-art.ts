@@ -66,10 +66,15 @@ export function shadowSvgMarkup(host: HTMLElement): string | null {
       // chosen SVG where layout put it; otherwise the drawing sits above its pins.
       const hostRect = host.getBoundingClientRect()
       const svgRect = svg.getBoundingClientRect()
-      clone.setAttribute('x', String(svgRect.left - hostRect.left))
-      clone.setAttribute('y', String(svgRect.top - hostRect.top))
-      clone.setAttribute('width', String(svgRect.width))
-      clone.setAttribute('height', String(svgRect.height))
+      // The hidden instance lives inside the zoomed canvas, so its rects are in
+      // screen pixels while offsetWidth/Height (and pinInfo) are unscaled. Convert
+      // back before writing the wrapper's viewBox, or the body comes out at the
+      // zoom factor inside a full-size box.
+      const scale = hostRect.width ? hostRect.width / width : 1
+      clone.setAttribute('x', String((svgRect.left - hostRect.left) / scale))
+      clone.setAttribute('y', String((svgRect.top - hostRect.top) / scale))
+      clone.setAttribute('width', String(svgRect.width / scale))
+      clone.setAttribute('height', String(svgRect.height / scale))
       const outer = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
       outer.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
       outer.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
