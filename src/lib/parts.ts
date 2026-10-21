@@ -374,6 +374,19 @@ export const PARTS: PartDef[] = [
     label: '7-segment display',
     tag: 'wokwi-7segment',
     attrs: { digits: '1' },
+    fields: [
+      {
+        name: 'digits',
+        label: 'Digits',
+        control: {
+          kind: 'select',
+          options: [
+            { value: '1', label: '1 digit' },
+            { value: '4', label: '4 digits' },
+          ],
+        },
+      },
+    ],
     live: true,
     icon: '<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M8 8h8M8 12h8M8 16h8M8 8v4M16 8v4M8 12v4M16 12v4"/>',
   },

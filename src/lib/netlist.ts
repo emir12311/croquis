@@ -133,6 +133,8 @@ export interface OutputState {
   values: number[]
   /** A buzzer's tone, in Hz. Absent on non-audio outputs. */
   frequency?: number
+  /** For a multiplexed display, which digit this sample belongs to. */
+  digit?: number
 }
 
 export interface CircuitEval {
@@ -776,12 +778,25 @@ export function evaluateCircuit(
       continue
     }
     if (part.kind === 'seven-segment') {
-      // The one-digit element names its two common pins COM.1/COM.2; the
-      // multi-digit variants use COM. Accept any of them.
-      const common = ['COM.1', 'COM.2', 'COM'].map((pin) => uf.find(`${part.id}:${pin}`))
-      const lit = common.some((root) => lowNets.has(root))
+      // One-digit modules use COM.1/COM.2/COM; the multiplexed modules select a
+      // digit by pulling one of DIG1..DIG4 low and share the segment pins.
+      const digits = Math.min(4, Math.max(1, Number(part.attrs?.digits) || 1))
+      const commons =
+        digits === 1
+          ? ['COM.1', 'COM.2', 'COM']
+          : ['DIG1', 'DIG2', 'DIG3', 'DIG4'].slice(0, digits)
+      let digit = 0
+      let lit = false
+      for (let i = 0; i < commons.length; i++) {
+        if (lowNets.has(uf.find(`${part.id}:${commons[i]}`))) {
+          digit = i
+          lit = true
+          break
+        }
+      }
       outputs[part.id] = {
         active: lit,
+        digit,
         values: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'].map((pin) =>
           lit && highNets.has(uf.find(`${part.id}:${pin}`)) ? 1 : 0,
         ),

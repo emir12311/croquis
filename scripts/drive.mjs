@@ -355,6 +355,7 @@ check('the Fade preset loads with a PWM LED', async (app) => {
 check('the output presets load', async (app) => {
   const cases = [
     ['Seven segment', 2, 'wokwi-7segment'],
+    ['Four digit', 2, 'wokwi-7segment'],
     ['LED bar', 2, 'wokwi-led-bar-graph'],
     ['Buzzer & relay', 3, 'wokwi-buzzer'],
   ]

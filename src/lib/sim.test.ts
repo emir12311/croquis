@@ -251,6 +251,29 @@ describe('Sim.solve', () => {
     expect(sim.ledBrightness.led).toBeCloseTo(0.25)
   })
 
+  it('remembers each digit of a multiplexed display', () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    const segParts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'seg', kind: 'seven-segment', attrs: { digits: '4' } },
+    ]
+    const wiresFor = (segment: string, common: string, pin: string): EvalWire[] => [
+      { a: { instanceId: 'uno', pin }, b: { instanceId: 'seg', pin: segment } },
+      { a: { instanceId: 'seg', pin: common }, b: { instanceId: 'uno', pin: 'GND.2' } },
+    ]
+
+    sim.avrPins = { D2: true }
+    sim.solve(segParts, wiresFor('A', 'DIG1', '2'))
+    expect(sim.outputs.seg.values[0]).toBe(1)
+
+    // The next scan drives digit 2's B segment; digit 1 must not be erased.
+    sim.avrPins = { D3: true }
+    sim.solve(segParts, wiresFor('B', 'DIG2', '3'))
+    expect(sim.outputs.seg.values[0]).toBe(1)
+    expect(sim.outputs.seg.values[8 + 1]).toBe(1)
+  })
+
   it('still solves the netlist in a plain browser, without sending anything', async () => {
     const backend = new FakeBackend()
     backend.desktop = false

@@ -35,6 +35,11 @@ const sound = (value = '0'): EvalPart => ({
 const buzzer = (): EvalPart => ({ id: 'buzzer', kind: 'buzzer' })
 const relay = (): EvalPart => ({ id: 'relay', kind: 'relay' })
 const sevenSegment = (): EvalPart => ({ id: 'seg', kind: 'seven-segment' })
+const fourDigit = (): EvalPart => ({
+  id: 'seg',
+  kind: 'seven-segment',
+  attrs: { digits: '4' },
+})
 const ledBar = (): EvalPart => ({ id: 'bar', kind: 'led-bar-graph' })
 
 /**
@@ -325,6 +330,26 @@ describe('output parts', () => {
     expect(out.outputs.seg.values).toEqual([1, 1, 0, 0, 0, 0, 0, 0])
     const floating = evaluateCircuit([uno, sevenSegment()], wires, {}, { D2: true, D3: true })
     expect(floating.outputs.seg.active).toBe(true)
+  })
+
+  it('selects a multiplexed digit by its low common', () => {
+    const first = evaluateCircuit(
+      [uno, fourDigit()],
+      [wire(at('uno', '2'), at('seg', 'A')), wire(at('seg', 'DIG1'), at('uno', 'GND.2'))],
+      {},
+      { D2: true },
+    )
+    expect(first.outputs.seg.digit).toBe(0)
+    expect(first.outputs.seg.values[0]).toBe(1)
+
+    const second = evaluateCircuit(
+      [uno, fourDigit()],
+      [wire(at('uno', '3'), at('seg', 'B')), wire(at('seg', 'DIG2'), at('uno', 'GND.2'))],
+      {},
+      { D3: true },
+    )
+    expect(second.outputs.seg.digit).toBe(1)
+    expect(second.outputs.seg.values[1]).toBe(1)
   })
 
   it('maps each LED bar pair independently', () => {

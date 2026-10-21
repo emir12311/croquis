@@ -43,6 +43,7 @@ const GROUPS: Record<string, PresetGroup> = {
   'digital-sensors': 'Sensors',
   rgb: 'Outputs',
   'seven-segment': 'Outputs',
+  'four-digit': 'Outputs',
   'led-bar': 'Outputs',
   'buzzer-relay': 'Outputs',
 }
