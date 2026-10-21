@@ -371,7 +371,9 @@ export class CanvasSurface {
         ? output?.active
           ? '1'
           : '0'
-        : inst.kind === 'seven-segment' || inst.kind === 'led-bar-graph'
+        : inst.kind === 'seven-segment' ||
+            inst.kind === 'seven-segment-4' ||
+            inst.kind === 'led-bar-graph'
           ? (output?.values.join('') ?? '')
           : ''
     return `${this.baseKey(inst)}|${chip}${bright}${down}${sensor}${rgb}${outputKey}`

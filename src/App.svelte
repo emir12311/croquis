@@ -1081,7 +1081,11 @@
     if (inst.kind === 'buzzer') {
       return [{ name: 'hasSignal', value: !!outputs[inst.id]?.active }]
     }
-    if (inst.kind === 'seven-segment' || inst.kind === 'led-bar-graph') {
+    if (
+      inst.kind === 'seven-segment' ||
+      inst.kind === 'seven-segment-4' ||
+      inst.kind === 'led-bar-graph'
+    ) {
       return [{ name: 'values', value: outputs[inst.id]?.values ?? [] }]
     }
     return null
