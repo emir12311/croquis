@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { evaluateCircuit, type EvalPart, type EvalWire } from './netlist'
 import { kindForTag } from './parts'
-import { PRESETS } from './presets'
+import { PRESETS, PRESET_GROUPS } from './presets'
 
 interface DiagramFile {
   title?: string
@@ -43,6 +43,18 @@ describe('the presets we ship', () => {
       expect(preset.label, preset.id).not.toMatch(/[-_]/)
       expect(preset.label.trim(), preset.id).toBe(preset.label)
       expect(preset.label.length, preset.id).toBeGreaterThan(2)
+    }
+  })
+
+  it('puts every preset under a tab that exists', () => {
+    for (const preset of PRESETS) {
+      expect(PRESET_GROUPS, preset.id).toContain(preset.group)
+    }
+  })
+
+  it('has something under every tab', () => {
+    for (const group of PRESET_GROUPS) {
+      expect(PRESETS.some((preset) => preset.group === group), group).toBe(true)
     }
   })
 

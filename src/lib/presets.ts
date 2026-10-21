@@ -17,8 +17,34 @@ const files = import.meta.glob('/presets/*.json', {
 export interface Preset {
   id: string
   label: string
+  /** Which tab in File → Presets holds it. */
+  group: PresetGroup
   /** `diagram.json` text, ready for the loader that opens a file. */
   text: string
+}
+
+export const PRESET_GROUPS = ['Basics', 'Sensors', 'Outputs'] as const
+export type PresetGroup = (typeof PRESET_GROUPS)[number]
+
+/**
+ * The teaching order, not the file order: start with the parts every lesson
+ * uses, then inputs, then outputs.
+ */
+const GROUPS: Record<string, PresetGroup> = {
+  blink: 'Basics',
+  button: 'Basics',
+  fade: 'Basics',
+  potentiometer: 'Basics',
+  serial: 'Basics',
+  'slide-pot': 'Basics',
+  photoresistor: 'Sensors',
+  thermometer: 'Sensors',
+  joystick: 'Sensors',
+  'digital-sensors': 'Sensors',
+  rgb: 'Outputs',
+  'seven-segment': 'Outputs',
+  'led-bar': 'Outputs',
+  'buzzer-relay': 'Outputs',
 }
 
 /** "button-serial" → "Button serial", for a file carrying no title of its own. */
@@ -39,6 +65,6 @@ function labelOf(id: string, text: string): string {
 export const PRESETS: Preset[] = Object.entries(files)
   .map(([path, text]) => {
     const id = path.split('/').pop()!.replace(/\.json$/, '')
-    return { id, label: labelOf(id, text), text }
+    return { id, label: labelOf(id, text), group: GROUPS[id] ?? 'Basics', text }
   })
   .sort((a, b) => a.id.localeCompare(b.id))

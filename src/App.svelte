@@ -19,7 +19,7 @@
   import { Project } from './lib/project.svelte'
   import { FileSession, type FileBackend } from './lib/file-session.svelte'
   import { CanvasSurface, type PinGeom } from './lib/canvas.svelte'
-  import { PRESETS, type Preset } from './lib/presets'
+  import { PRESETS, PRESET_GROUPS, type Preset, type PresetGroup } from './lib/presets'
   import { buildDiagram as buildDiagramFile, parseDiagram } from './lib/diagram'
   import { decodeRoute, routePath } from './lib/route'
   import CodeEditor from './lib/CodeEditor.svelte'
@@ -706,18 +706,29 @@
   // nothing *essential* lives only in here.
   type MenuId = 'file' | 'edit' | 'view' | 'run'
   let openMenu = $state<MenuId | null>(null)
+  let presetsOpen = $state(false)
+  let presetGroup = $state<PresetGroup>('Basics')
   const hasSelection = $derived(selectedIds.length > 0 || !!selectedWireId)
 
   function toggleMenu(id: MenuId) {
-    openMenu = openMenu === id ? null : id
+    if (openMenu === id) {
+      openMenu = null
+      presetsOpen = false
+      return
+    }
+    openMenu = id
+    if (id === 'file') presetsOpen = false
   }
 
   // With a menu open, sliding across the titles switches menus (menu-bar feel).
   function hoverMenu(id: MenuId) {
-    if (openMenu) openMenu = id
+    if (!openMenu) return
+    openMenu = id
+    if (id === 'file') presetsOpen = false
   }
 
   function menuPick(fn: () => void) {
+    presetsOpen = false
     openMenu = null
     fn()
   }
@@ -1206,15 +1217,38 @@
               <span>Save as…</span><span class="menu__key">Ctrl+Shift+S</span>
             </button>
             <div class="menu__rule"></div>
-            <!-- A labelled section rather than a submenu: one click, and a stack of
-                 menus is the thing this app keeps out. These work without Tauri too,
-                 since they are compiled in rather than read from disk. -->
-            <div class="menu__note">Presets</div>
-            {#each PRESETS as preset (preset.id)}
-              <button class="menu__item" onclick={() => menuPick(() => loadPreset(preset))}>
-                <span>{preset.label}</span>
-              </button>
-            {/each}
+            <!-- Presets are kept behind a disclosure so the File menu stays short.
+                 The tabs are part of the same bordered menu, not a stacked popup. -->
+            <button
+              class="menu__item"
+              aria-expanded={presetsOpen}
+              aria-controls="preset-list"
+              onclick={() => (presetsOpen = !presetsOpen)}
+            >
+              <span>Presets</span><span class="menu__key">{presetsOpen ? 'Hide' : 'Open'}</span>
+            </button>
+            {#if presetsOpen}
+              <div class="menu__tabs" role="tablist" aria-label="Preset groups">
+                {#each PRESET_GROUPS as group (group)}
+                  <button
+                    class="menu__tab"
+                    class:is-active={presetGroup === group}
+                    role="tab"
+                    aria-selected={presetGroup === group}
+                    onclick={() => (presetGroup = group)}
+                  >
+                    {group}
+                  </button>
+                {/each}
+              </div>
+              <div class="menu__tabpanel" id="preset-list" role="tabpanel">
+                {#each PRESETS.filter((preset) => preset.group === presetGroup) as preset (preset.id)}
+                  <button class="menu__item" onclick={() => menuPick(() => loadPreset(preset))}>
+                    <span>{preset.label}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/if}
       </div>
@@ -2322,6 +2356,44 @@
     padding: var(--space-1) var(--space-3) var(--space-2);
     font-size: 11px;
     color: var(--text-muted);
+  }
+
+  .menu__tabs {
+    display: flex;
+    gap: 2px;
+    margin: var(--space-1) var(--space-2);
+    padding: 2px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+  }
+
+  .menu__tab {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 2px;
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    cursor: pointer;
+  }
+
+  .menu__tab:hover {
+    color: var(--text);
+    background: var(--surface);
+  }
+
+  .menu__tab.is-active {
+    color: var(--text);
+    background: var(--surface-raised);
+    border-color: var(--border);
+  }
+
+  .menu__tabpanel {
+    padding-bottom: var(--space-1);
   }
 
   /* The keyboard shortcut, shown the way a menu bar normally shows it. */
