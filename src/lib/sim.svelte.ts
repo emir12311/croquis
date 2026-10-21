@@ -80,6 +80,8 @@ export class Sim {
   /** Bytes waiting for the next UI flush; serial arrives one byte per event. */
   private serialBuffer = ''
   private serialFlush: ReturnType<typeof setTimeout> | null = null
+  /** Per-digit segment memory for multiplexed displays, by part id. */
+  private segmentMemory = new Map<string, number[]>()
   private backend: SimBackend
 
   constructor(backend: SimBackend) {
@@ -99,6 +101,7 @@ export class Sim {
     this.ledBrightness = {}
     this.rgbLeds = {}
     this.outputs = {}
+    this.segmentMemory.clear()
     // A fresh run never inherits a held button.
     this.pressedButtons = {}
     this.sensors = {}
@@ -133,6 +136,7 @@ export class Sim {
     this.ledBrightness = {}
     this.rgbLeds = {}
     this.outputs = {}
+    this.segmentMemory.clear()
     this.pressedButtons = {}
     this.sensors = {}
   }
@@ -151,6 +155,7 @@ export class Sim {
     this.ledBrightness = {}
     this.rgbLeds = {}
     this.outputs = {}
+    this.segmentMemory.clear()
     this.pressedButtons = {}
     this.sensors = {}
     this.analogs = []
@@ -194,10 +199,26 @@ export class Sim {
       if (timing.periodMicros > 0) frequency[key] = 1_000_000 / timing.periodMicros
     }
     const result = evaluateCircuit(parts, wires, this.pressedButtons, pins, duty, frequency)
+    const outputs = { ...result.outputs }
+    // A multiplexed display is sampled one digit at a time. Keep the last lit
+    // segments for every digit so the next scan does not erase the others.
+    for (const part of parts) {
+      if (part.kind !== 'seven-segment') continue
+      const digits = Math.min(4, Math.max(1, Number(part.attrs?.digits) || 1))
+      if (digits === 1) continue
+      const state = outputs[part.id]
+      if (!state) continue
+      const memory = this.segmentMemory.get(part.id) ?? Array(digits * 8).fill(0)
+      if (state.active && typeof state.digit === 'number') {
+        memory.splice(state.digit * 8, 8, ...state.values.slice(0, 8))
+      }
+      this.segmentMemory.set(part.id, memory)
+      outputs[part.id] = { ...state, values: [...memory] }
+    }
     this.ledStates = result.leds
     this.ledBrightness = result.ledBrightness
     this.rgbLeds = result.rgbLeds
-    this.outputs = result.outputs
+    this.outputs = outputs
     this.warnings = result.warnings
     this.analogs = result.analogs
     this.sensors = result.sensors

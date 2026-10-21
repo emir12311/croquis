@@ -24,11 +24,11 @@ A desktop app for building and running Arduino circuits without an Arduino.
 
 You drag components onto a canvas, wire them up, write a sketch and press Run. The sketch is compiled locally with `avr-gcc` and executed on a simulated AVR chip.
 
-There are fourteen circuits to start from — **Blink**, **Button**, **Potentiometer**, **Photoresistor**, **Thermometer**, **Slide potentiometer**, **RGB LED**, **Joystick**, **Digital sensors**, **Seven segment**, **LED bar**, **Buzzer & relay**, **Button + serial** and **Fade** — under File → Presets.
+There are fifteen circuits to start from — **Blink**, **Button**, **Potentiometer**, **Photoresistor**, **Thermometer**, **Slide potentiometer**, **RGB LED**, **Joystick**, **Digital sensors**, **Seven segment**, **Four digit**, **LED bar**, **Buzzer & relay**, **Button + serial** and **Fade** — under File → Presets.
 
 | Feature | What it does |
 | --- | --- |
-| **Parts** | Uno, LED and RGB LED, resistor, pushbutton, rotary and slide potentiometers, photoresistor, NTC temperature sensor, analog joystick, tilt switch, PIR, flame and sound sensors, buzzer, relay, 7-segment display and LED bar; half and full breadboards |
+| **Parts** | Uno, LED and RGB LED, resistor, pushbutton, rotary and slide potentiometers, photoresistor, NTC temperature sensor, analog joystick, tilt switch, PIR, flame and sound sensors, buzzer, relay, 1- and 4-digit 7-segment display and LED bar; half and full breadboards |
 | **Canvas** | Drag, rotate, snap; orthogonal wiring; multi-select; undo/redo; copy/paste |
 | **Simulation** | `avr-gcc` + `simavr`; LEDs and RGB LEDs at simulated current and PWM brightness, live buttons, analogue sensors (a divider, a LDR module with a thresholded output, an NTC, a two-axis joystick), digital sensors (tilt, PIR, flame and sound), buzzer audio, relay visuals, 7-segment and LED-bar outputs, modelled bounce |
 | **Editor** | CodeMirror + Arduino API completions; serial monitor docked beside the circuit |
