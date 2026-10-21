@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Buzzer & relay",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "buzzer1",
+      "type": "wokwi-buzzer",
+      "left": 400,
+      "top": 100,
+      "attrs": {}
+    },
+    {
+      "id": "relay1",
+      "type": "wokwi-ks2e-m-dc5",
+      "left": 520,
+      "top": 100,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    ["uno:8", "buzzer1:1"],
+    ["buzzer1:2", "uno:GND.2"],
+    ["uno:7", "relay1:COIL1"],
+    ["relay1:COIL2", "uno:GND.2"]
+  ],
+  "sketch": "// Buzzer & relay \u2014 two outputs that switch together.\n//\n// The buzzer shows its signal when pin 8 is high, and the relay's coil is\n// energized when pin 7 is high. The relay contacts are not wired in this\n// preset; the badge beside the relay shows the coil state.\n\nvoid setup() {\n  pinMode(7, OUTPUT);\n  pinMode(8, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(7, HIGH);\n  digitalWrite(8, HIGH);\n  delay(300);\n  digitalWrite(7, LOW);\n  digitalWrite(8, LOW);\n  delay(400);\n}\n"
+}

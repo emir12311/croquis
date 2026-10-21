@@ -280,6 +280,7 @@
   let ledStates = $derived(sim.ledStates)
   let ledBrightness = $derived(sim.ledBrightness)
   let rgbLeds = $derived(sim.rgbLeds)
+  let outputs = $derived(sim.outputs)
   /** What's wrong with a part — the strip says it in words, the canvas badges it. */
   let warnings = $derived(sim.warnings)
   let pressedButtons = $derived(sim.pressedButtons)
@@ -299,6 +300,7 @@
     ledStates,
     ledBrightness,
     rgbLeds,
+    outputs,
     pressedButtons,
     sensorStates,
     warnings,
@@ -1058,6 +1060,12 @@
         { name: 'ledPower', value: !!state?.powered },
         { name: 'ledSignal', value: !!state?.active },
       ]
+    }
+    if (inst.kind === 'buzzer') {
+      return [{ name: 'hasSignal', value: !!outputs[inst.id]?.active }]
+    }
+    if (inst.kind === 'seven-segment' || inst.kind === 'led-bar-graph') {
+      return [{ name: 'values', value: outputs[inst.id]?.values ?? [] }]
     }
     return null
   }

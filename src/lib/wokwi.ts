@@ -21,6 +21,10 @@ import '@wokwi/elements/dist/esm/tilt-switch-element'
 import '@wokwi/elements/dist/esm/pir-motion-sensor-element'
 import '@wokwi/elements/dist/esm/flame-sensor-element'
 import '@wokwi/elements/dist/esm/small-sound-sensor-element'
+import '@wokwi/elements/dist/esm/buzzer-element'
+import '@wokwi/elements/dist/esm/ks2e-m-dc5-element'
+import '@wokwi/elements/dist/esm/7segment-element'
+import '@wokwi/elements/dist/esm/led-bar-graph-element'
 
 /**
  * Feed a stylesheet into an element's own shadow root, once, after it connects.

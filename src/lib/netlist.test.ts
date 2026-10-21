@@ -32,6 +32,10 @@ const sound = (value = '0'): EvalPart => ({
   kind: 'sound-sensor',
   attrs: { noise: value },
 })
+const buzzer = (): EvalPart => ({ id: 'buzzer', kind: 'buzzer' })
+const relay = (): EvalPart => ({ id: 'relay', kind: 'relay' })
+const sevenSegment = (): EvalPart => ({ id: 'seg', kind: 'seven-segment' })
+const ledBar = (): EvalPart => ({ id: 'bar', kind: 'led-bar-graph' })
 
 /**
  * Pin references are built one end at a time on purpose. The obvious
@@ -271,6 +275,49 @@ describe('digital sensor modules', () => {
       {},
     )
     expect(out.warnings.tilt).toMatch(/VCC.*5V.*GND/i)
+  })
+})
+
+describe('output parts', () => {
+  it('turns a buzzer on across its two terminals', () => {
+    const wires = [
+      wire(at('uno', '13'), at('buzzer', '1')),
+      wire(at('buzzer', '2'), at('uno', 'GND.2')),
+    ]
+    expect(evaluateCircuit([uno, buzzer()], wires, {}, { B5: true }).outputs.buzzer.active).toBe(true)
+    expect(evaluateCircuit([uno, buzzer()], wires, {}, {}).outputs.buzzer.active).toBe(false)
+  })
+
+  it('energizes a relay coil the same way', () => {
+    const wires = [
+      wire(at('uno', '13'), at('relay', 'COIL1')),
+      wire(at('relay', 'COIL2'), at('uno', 'GND.2')),
+    ]
+    expect(evaluateCircuit([uno, relay()], wires, {}, { B5: true }).outputs.relay.active).toBe(true)
+  })
+
+  it('lights seven-segment segments only when their common is low', () => {
+    const wires = [
+      wire(at('uno', '2'), at('seg', 'A')),
+      wire(at('uno', '3'), at('seg', 'B')),
+      wire(at('seg', 'COM'), at('uno', 'GND.2')),
+    ]
+    const out = evaluateCircuit([uno, sevenSegment()], wires, {}, { D2: true, D3: true })
+    expect(out.outputs.seg.values).toEqual([1, 1, 0, 0, 0, 0, 0, 0])
+    const floating = evaluateCircuit([uno, sevenSegment()], wires, {}, { D2: true, D3: true })
+    expect(floating.outputs.seg.active).toBe(true)
+  })
+
+  it('maps each LED bar pair independently', () => {
+    const wires = [
+      wire(at('uno', '2'), at('bar', 'A1')),
+      wire(at('bar', 'C1'), at('uno', 'GND.2')),
+      wire(at('uno', '3'), at('bar', 'A2')),
+      wire(at('bar', 'C2'), at('uno', 'GND.2')),
+    ]
+    const out = evaluateCircuit([uno, ledBar()], wires, {}, { D2: true })
+    expect(out.outputs.bar.values[0]).toBe(1)
+    expect(out.outputs.bar.values[1]).toBe(0)
   })
 })
 

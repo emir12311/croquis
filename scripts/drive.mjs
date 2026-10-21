@@ -338,7 +338,23 @@ check('the Fade preset loads with a PWM LED', async (app) => {
   assert(await app.ev(`!!document.querySelector('wokwi-led')`), 'the LED is on the canvas')
 })
 
+check('the output presets load', async (app) => {
+  const cases = [
+    ['Seven segment', 2, 'wokwi-7segment'],
+    ['LED bar', 2, 'wokwi-led-bar-graph'],
+    ['Buzzer & relay', 3, 'wokwi-buzzer'],
+  ]
+  for (const [title, parts, tag] of cases) {
+    await app.goto(`http://localhost:${DEV_PORT}`)
+    await app.loadPreset(title)
+    assert((await app.ev(`document.querySelectorAll('.instance').length`)) === parts, `${title} gives ${parts} parts`)
+    assert(await app.ev(`!!document.querySelector('${tag}')`), `${tag} is on the canvas`)
+  }
+})
+
 check('Ctrl+A selects everything', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Blink')
   await app.ev(`document.querySelector('.panel__body--canvas').focus()`)
   await app.key('a', { code: 'KeyA', vk: 65, modifiers: 2 })
   await sleep(250)

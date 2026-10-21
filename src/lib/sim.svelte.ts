@@ -12,6 +12,7 @@ import {
   type EvalPart,
   type EvalWire,
   type LedState,
+  type OutputState,
   type RgbState,
   type SensorState,
 } from './netlist'
@@ -61,6 +62,8 @@ export class Sim {
   ledBrightness = $state<Record<string, number>>({})
   /** Per-channel brightness of each RGB LED, 0..1. */
   rgbLeds = $state<Record<string, RgbState>>({})
+  /** Buzzer/relay/display/bar state by part id. */
+  outputs = $state<Record<string, OutputState>>({})
   /** What is wrong with each part, for the canvas badge and the strip. */
   warnings = $state<Record<string, string>>({})
   /** Voltages the circuit puts on the chip's ADC inputs, in millivolts. */
@@ -95,6 +98,7 @@ export class Sim {
     this.pinTimings = {}
     this.ledBrightness = {}
     this.rgbLeds = {}
+    this.outputs = {}
     // A fresh run never inherits a held button.
     this.pressedButtons = {}
     this.sensors = {}
@@ -128,6 +132,7 @@ export class Sim {
     this.pinTimings = {}
     this.ledBrightness = {}
     this.rgbLeds = {}
+    this.outputs = {}
     this.pressedButtons = {}
     this.sensors = {}
   }
@@ -145,6 +150,7 @@ export class Sim {
     this.pinTimings = {}
     this.ledBrightness = {}
     this.rgbLeds = {}
+    this.outputs = {}
     this.pressedButtons = {}
     this.sensors = {}
     this.analogs = []
@@ -189,6 +195,7 @@ export class Sim {
     this.ledStates = result.leds
     this.ledBrightness = result.ledBrightness
     this.rgbLeds = result.rgbLeds
+    this.outputs = result.outputs
     this.warnings = result.warnings
     this.analogs = result.analogs
     this.sensors = result.sensors

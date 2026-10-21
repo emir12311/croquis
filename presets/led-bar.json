@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "LED bar",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "bar1",
+      "type": "wokwi-led-bar-graph",
+      "left": 430,
+      "top": 90,
+      "attrs": {
+        "color": "red"
+      }
+    }
+  ],
+  "connections": [
+    ["uno:2", "bar1:A1"],
+    ["uno:3", "bar1:A2"],
+    ["uno:4", "bar1:A3"],
+    ["uno:5", "bar1:A4"],
+    ["uno:6", "bar1:A5"],
+    ["bar1:C1", "uno:GND.2"],
+    ["bar1:C2", "uno:GND.2"],
+    ["bar1:C3", "uno:GND.2"],
+    ["bar1:C4", "uno:GND.2"],
+    ["bar1:C5", "uno:GND.2"]
+  ],
+  "sketch": "// LED bar \u2014 five LEDs in one package.\n//\n// Each anode is a digital pin and the matching cathode goes to GND. The\n// sketch fills the bar one LED at a time, then empties it.\n\nvoid setup() {\n  for (int pin = 2; pin <= 6; pin++) pinMode(pin, OUTPUT);\n}\n\nvoid loop() {\n  for (int pin = 2; pin <= 6; pin++) {\n    digitalWrite(pin, HIGH);\n    delay(150);\n  }\n  for (int pin = 2; pin <= 6; pin++) {\n    digitalWrite(pin, LOW);\n    delay(150);\n  }\n}\n"
+}
