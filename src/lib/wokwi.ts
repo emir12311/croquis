@@ -24,7 +24,22 @@ import '@wokwi/elements/dist/esm/small-sound-sensor-element'
 import '@wokwi/elements/dist/esm/buzzer-element'
 import '@wokwi/elements/dist/esm/ks2e-m-dc5-element'
 import '@wokwi/elements/dist/esm/7segment-element'
+import { SevenSegmentElement } from '@wokwi/elements/dist/esm/7segment-element'
 import '@wokwi/elements/dist/esm/led-bar-graph-element'
+/** A distinct tag keeps the four-digit display's pin set available before the
+ * first measurement; the catalogue's `digits` attribute is applied too late for
+ * the pins to be measured in the same pass. */
+if (!customElements.get('wokwi-7segment-4')) {
+  class SevenSegment4Element extends SevenSegmentElement {
+    constructor() {
+      super()
+      this.digits = 4
+    }
+  }
+  customElements.define('wokwi-7segment-4', SevenSegment4Element)
+}
+
+
 
 /**
  * Feed a stylesheet into an element's own shadow root, once, after it connects.
