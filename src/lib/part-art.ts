@@ -59,7 +59,28 @@ export function shadowSvgMarkup(host: HTMLElement): string | null {
       st.textContent = style
       clone.insertBefore(st, clone.firstChild)
     }
-    markup = new XMLSerializer().serializeToString(clone)
+    if (svgs.length > 1) {
+      // More than one SVG means the element lays the body out inside a wrapper
+      // (the buzzer puts a hidden music note above the body). The pinInfo
+      // coordinates are for the whole host box, so keep that box and place the
+      // chosen SVG where layout put it; otherwise the drawing sits above its pins.
+      const hostRect = host.getBoundingClientRect()
+      const svgRect = svg.getBoundingClientRect()
+      clone.setAttribute('x', String(svgRect.left - hostRect.left))
+      clone.setAttribute('y', String(svgRect.top - hostRect.top))
+      clone.setAttribute('width', String(svgRect.width))
+      clone.setAttribute('height', String(svgRect.height))
+      const outer = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      outer.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+      outer.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+      outer.setAttribute('width', String(width))
+      outer.setAttribute('height', String(height))
+      outer.setAttribute('viewBox', `0 0 ${width} ${height}`)
+      outer.appendChild(clone)
+      markup = new XMLSerializer().serializeToString(outer)
+    } else {
+      markup = new XMLSerializer().serializeToString(clone)
+    }
   } else {
     markup =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
