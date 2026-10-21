@@ -77,7 +77,7 @@ export function buildDiagram(input: {
 }): DiagramFile {
   const parts: DiagramPart[] = input.parts.map((inst) => ({
     id: inst.id,
-    type: partByKind(inst.kind).tag,
+    type: partByKind(inst.kind).diagramType ?? partByKind(inst.kind).tag,
     left: Math.round(inst.x),
     top: Math.round(inst.y),
     attrs: { ...inst.attrs },

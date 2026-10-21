@@ -256,7 +256,7 @@ describe('Sim.solve', () => {
     const sim = new Sim(backend)
     const segParts: EvalPart[] = [
       { id: 'uno', kind: 'uno' },
-      { id: 'seg', kind: 'seven-segment', attrs: { digits: '4' } },
+      { id: 'seg', kind: 'seven-segment-4', attrs: { digits: '4' } },
     ]
     const wiresFor = (segment: string, common: string, pin: string): EvalWire[] => [
       { a: { instanceId: 'uno', pin }, b: { instanceId: 'seg', pin: segment } },

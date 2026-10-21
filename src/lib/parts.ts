@@ -33,6 +33,7 @@ export type PartKind =
   | 'buzzer'
   | 'relay'
   | 'seven-segment'
+  | 'seven-segment-4'
   | 'led-bar-graph'
   | 'breadboard'
   | 'breadboard-full'
@@ -126,6 +127,12 @@ export interface PartDef {
   label: string
   /** The registered custom-element tag that draws this on the canvas. */
   tag: string
+  /**
+   * The `type` to write into a diagram when it is not the element tag. The
+   * 4-digit display uses the same Wokwi element as the 1-digit one, but needs a
+   * distinct type so loading it back picks the right catalogue entry.
+   */
+  diagramType?: string
   /** Default attributes applied to the element (e.g. an LED's colour). */
   attrs: Record<string, string>
   /** Hand-drawn 24px line icon — the palette's fallback, not its normal look. */
@@ -374,21 +381,17 @@ export const PARTS: PartDef[] = [
     label: '7-segment display',
     tag: 'wokwi-7segment',
     attrs: { digits: '1' },
-    fields: [
-      {
-        name: 'digits',
-        label: 'Digits',
-        control: {
-          kind: 'select',
-          options: [
-            { value: '1', label: '1 digit' },
-            { value: '4', label: '4 digits' },
-          ],
-        },
-      },
-    ],
     live: true,
     icon: '<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M8 8h8M8 12h8M8 16h8M8 8v4M16 8v4M8 12v4M16 12v4"/>',
+  },
+  {
+    kind: 'seven-segment-4',
+    label: '4-digit display',
+    tag: 'wokwi-7segment',
+    diagramType: 'wokwi-7segment-4',
+    attrs: { digits: '4' },
+    live: true,
+    icon: '<rect x="2" y="5" width="20" height="14" rx="1"/><path d="M4 9h3M9 9h3M14 9h3M19 9h1M4 13h3M9 13h3M14 13h3M19 13h1M4 17h3M9 17h3M14 17h3M19 17h1"/>',
   },
   {
     kind: 'led-bar-graph',
@@ -433,7 +436,13 @@ export const PARTS: PartDef[] = [
 ]
 
 const BY_KIND = new Map<PartKind, PartDef>(PARTS.map((p) => [p.kind, p]))
-const BY_TAG = new Map<string, PartDef>(PARTS.map((p) => [p.tag, p]))
+const BY_TAG = new Map<string, PartDef>()
+for (const part of PARTS) {
+  // The 4-digit display shares the element tag with the 1-digit one; the plain
+  // tag must keep resolving to the 1-digit kind, with the alias doing the rest.
+  if (!BY_TAG.has(part.tag)) BY_TAG.set(part.tag, part)
+  if (part.diagramType) BY_TAG.set(part.diagramType, part)
+}
 
 export function partByKind(kind: PartKind): PartDef {
   const def = BY_KIND.get(kind)

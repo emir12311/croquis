@@ -13,7 +13,7 @@
     },
     {
       "id": "seg1",
-      "type": "wokwi-7segment",
+      "type": "wokwi-7segment-4",
       "left": 420,
       "top": 120,
       "attrs": {

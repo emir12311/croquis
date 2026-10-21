@@ -778,17 +778,30 @@ export function evaluateCircuit(
       continue
     }
     if (part.kind === 'seven-segment') {
-      // One-digit modules use COM.1/COM.2/COM; the multiplexed modules select a
-      // digit by pulling one of DIG1..DIG4 low and share the segment pins.
-      const digits = Math.min(4, Math.max(1, Number(part.attrs?.digits) || 1))
-      const commons =
-        digits === 1
-          ? ['COM.1', 'COM.2', 'COM']
-          : ['DIG1', 'DIG2', 'DIG3', 'DIG4'].slice(0, digits)
+      // One-digit modules use COM.1/COM.2/COM.
+      const commons = ['COM.1', 'COM.2', 'COM']
+      let lit = false
+      for (const common of commons) {
+        if (lowNets.has(uf.find(`${part.id}:${common}`))) {
+          lit = true
+          break
+        }
+      }
+      outputs[part.id] = {
+        active: lit,
+        digit: 0,
+        values: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'].map((pin) =>
+          lit && highNets.has(uf.find(`${part.id}:${pin}`)) ? 1 : 0,
+        ),
+      }
+      continue
+    }
+    if (part.kind === 'seven-segment-4') {
+      // The multiplexed module selects a digit by pulling one DIG common low.
       let digit = 0
       let lit = false
-      for (let i = 0; i < commons.length; i++) {
-        if (lowNets.has(uf.find(`${part.id}:${commons[i]}`))) {
+      for (let i = 0; i < 4; i++) {
+        if (lowNets.has(uf.find(`${part.id}:DIG${i + 1}`))) {
           digit = i
           lit = true
           break
