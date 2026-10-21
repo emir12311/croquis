@@ -195,10 +195,24 @@ export class App {
     const file = await this.ev(`(() => { const b = [...document.querySelectorAll('.menubar__btn')].find(e => e.textContent.trim() === 'File'); const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
     await this.click(file.x, file.y)
     await sleep(350)
-    const item = await this.ev(`(() => { const b = [...document.querySelectorAll('.menu__item')].find(e => e.textContent.trim() === ${JSON.stringify(label)}); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
-    if (!item) throw new Error(`no preset called ${label}`)
-    await this.click(item.x, item.y)
-    await sleep(900)
+    // Presets are behind a disclosure; open it before looking for the tab.
+    const presets = await this.ev(`(() => { const b = [...document.querySelectorAll('.menu__item')].find(e => e.textContent.trim().startsWith('Presets')); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+    if (!presets) throw new Error('no Presets item')
+    await this.click(presets.x, presets.y)
+    await sleep(150)
+    for (const group of ['Basics', 'Sensors', 'Outputs']) {
+      const tab = await this.ev(`(() => { const b = [...document.querySelectorAll('.menu__tab')].find(e => e.textContent.trim() === ${JSON.stringify(group)}); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+      if (!tab) continue
+      await this.click(tab.x, tab.y)
+      await sleep(100)
+      const item = await this.ev(`(() => { const b = [...document.querySelectorAll('.menu__item')].find(e => e.textContent.trim() === ${JSON.stringify(label)}); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+      if (item) {
+        await this.click(item.x, item.y)
+        await sleep(900)
+        return
+      }
+    }
+    throw new Error(`no preset called ${label}`)
   }
 
   /** The screen-space centre of a palette tile. */
