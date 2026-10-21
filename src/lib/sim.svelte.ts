@@ -74,6 +74,9 @@ export class Sim {
   private lastDrives = new Map<string, boolean>()
   /** The last voltage sent per ADC channel, for the same reason. */
   private lastAnalogs = new Map<number, number>()
+  /** Bytes waiting for the next UI flush; serial arrives one byte per event. */
+  private serialBuffer = ''
+  private serialFlush: ReturnType<typeof setTimeout> | null = null
   private backend: SimBackend
 
   constructor(backend: SimBackend) {
@@ -83,6 +86,7 @@ export class Sim {
   /** Compile and run. Returns false when the build or the start failed. */
   async run(sketch: string, bounce: boolean): Promise<boolean> {
     this.buildError = ''
+    this.clearSerialBuffer()
     this.serial = ''
     this.pin13 = false
     // A stopped chip drives nothing — clear the levels it last reported, or an
@@ -111,6 +115,8 @@ export class Sim {
   }
 
   async stop() {
+    // Show bytes already received before tearing the run down.
+    this.flushSerial()
     try {
       await this.backend.stop()
     } catch {
@@ -134,6 +140,7 @@ export class Sim {
 
   /** Forget everything a stopped circuit should not keep. */
   reset() {
+    this.clearSerialBuffer()
     this.avrPins = {}
     this.pinTimings = {}
     this.ledBrightness = {}
@@ -239,16 +246,43 @@ export class Sim {
       .then((u) => alive && unlisten.push(u))
     this.backend
       .onSerial((byte) => {
-        // Append, then trim only when over the cap. Slicing on every byte is O(n²) —
-        // at 115200 baud that rebuilds a 20 000-character string a thousand times a
-        // second, which is enough to stutter the UI.
-        this.serial += String.fromCharCode(byte)
-        if (this.serial.length > SERIAL_LIMIT) this.serial = this.serial.slice(-SERIAL_LIMIT)
+        // Serial arrives one byte per event, but the UI does not need a reactive
+        // update per byte: a 20 Hz print loop is ~1,400 renders a second. Collect
+        // bytes and flush once per frame; the monitor and auto-scroll follow that.
+        this.serialBuffer += String.fromCharCode(byte)
+        if (this.serialFlush === null) {
+          this.serialFlush = setTimeout(() => {
+            this.serialFlush = null
+            this.flushSerial()
+          }, 16)
+        }
       })
       .then((u) => alive && unlisten.push(u))
     return () => {
       alive = false
       unlisten.forEach((u) => u())
+      this.clearSerialBuffer()
     }
+  }
+
+  /** Move buffered serial bytes into the reactive string, at most once a frame. */
+  private flushSerial() {
+    if (this.serialFlush !== null) {
+      clearTimeout(this.serialFlush)
+      this.serialFlush = null
+    }
+    if (!this.serialBuffer) return
+    const next = this.serial + this.serialBuffer
+    this.serialBuffer = ''
+    this.serial = next.length > SERIAL_LIMIT ? next.slice(-SERIAL_LIMIT) : next
+  }
+
+  /** Drop bytes from a run that is being replaced, and cancel the pending flush. */
+  private clearSerialBuffer() {
+    if (this.serialFlush !== null) {
+      clearTimeout(this.serialFlush)
+      this.serialFlush = null
+    }
+    this.serialBuffer = ''
   }
 }

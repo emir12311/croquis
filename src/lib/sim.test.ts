@@ -279,6 +279,9 @@ describe('Sim.attach', () => {
     expect(sim.pin13).toBe(true)
     expect(sim.avrPins).toEqual({ B5: true, D2: false })
     expect(sim.pinTimings).toEqual({ B5: { duty: 0.25, highMicros: 500, periodMicros: 2000 } })
+    // Serial is batched for the UI, so it appears on the next flush.
+    expect(sim.serial).toBe('')
+    await new Promise((r) => setTimeout(r, 25))
     expect(sim.serial).toBe('Hi')
 
     stop()
