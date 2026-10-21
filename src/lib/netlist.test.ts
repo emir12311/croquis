@@ -300,7 +300,7 @@ describe('output parts', () => {
     const wires = [
       wire(at('uno', '2'), at('seg', 'A')),
       wire(at('uno', '3'), at('seg', 'B')),
-      wire(at('seg', 'COM'), at('uno', 'GND.2')),
+      wire(at('seg', 'COM.1'), at('uno', 'GND.2')),
     ]
     const out = evaluateCircuit([uno, sevenSegment()], wires, {}, { D2: true, D3: true })
     expect(out.outputs.seg.values).toEqual([1, 1, 0, 0, 0, 0, 0, 0])

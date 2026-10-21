@@ -37,8 +37,15 @@ export function shadowSvgMarkup(host: HTMLElement): string | null {
   ].join('\n')
 
   // Prefer the element's own <svg>; some wrap it in HTML (the LED's
-  // `.led-container`), which can't be serialised into an <svg>.
-  const svg = root.querySelector('svg')
+  // `.led-container`), which can't be serialised into an <svg>. Some elements
+  // carry a small hidden decoration SVG before the real body (the buzzer's music
+  // note), so take the largest one rather than the first.
+  const svgs = Array.from(root.querySelectorAll('svg'))
+  const svg = svgs.sort((a, b) => {
+    const ar = a.getBoundingClientRect()
+    const br = b.getBoundingClientRect()
+    return br.width * br.height - ar.width * ar.height
+  })[0]
   // Element connected but Lit hasn't drawn into it yet — snapshotting now would
   // cache a blank drawing for good, so say "not ready" and let the caller retry.
   if (!svg && !root.children.length) return null
