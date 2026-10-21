@@ -30,7 +30,7 @@ There are fifteen circuits to start from — **Blink**, **Button**, **Potentiome
 | --- | --- |
 | **Parts** | Uno, LED and RGB LED, resistor, pushbutton, rotary and slide potentiometers, photoresistor, NTC temperature sensor, analog joystick, tilt switch, PIR, flame and sound sensors, buzzer, relay, 7-segment display, 4-digit display and LED bar; half and full breadboards |
 | **Canvas** | Drag, rotate, snap; orthogonal wiring; multi-select; undo/redo; copy/paste |
-| **Simulation** | `avr-gcc` + `simavr`; LEDs and RGB LEDs at simulated current and PWM brightness, live buttons, analogue sensors (a divider, a LDR module with a thresholded output, an NTC, a two-axis joystick), digital sensors (tilt, PIR, flame and sound), buzzer audio, relay visuals, 7-segment and LED-bar outputs, modelled bounce |
+| **Simulation** | `avr-gcc` + `simavr`; LEDs and RGB LEDs at simulated current and PWM brightness, live buttons, analogue sensors (a divider, a LDR module with a thresholded output, an NTC, a two-axis joystick), digital sensors (tilt, PIR, flame and sound), buzzer audio, relay contacts, 7-segment (1/4-digit) and LED-bar outputs, modelled bounce |
 | **Editor** | CodeMirror + Arduino API completions; serial monitor docked beside the circuit |
 | **Files** | Wokwi's `diagram.json` import and export, sketch included |
 
@@ -174,7 +174,7 @@ That's basically it.
 
 ## What it doesn't do yet
 
-* **A handful of components.** An Uno, LEDs including RGB, a resistor, a pushbutton, a rotary or slide potentiometer, a photoresistor, an NTC temperature sensor, an analog joystick, tilt/PIR/flame/sound sensors, a buzzer, a relay, a 7-segment display and an LED bar, breadboards. No servo or LCD yet.
+* **A handful of components.** An Uno, LEDs including RGB, a resistor, a pushbutton, a rotary or slide potentiometer, a photoresistor, an NTC temperature sensor, an analog joystick, tilt/PIR/flame/sound sensors, a buzzer, a relay, 7-segment and 4-digit displays and an LED bar, breadboards. No servo or LCD yet.
 * **One board.** A second Uno gets its own circuit but shares the single sketch.
 * **A small electrical model, not a circuit solver.** A resistor does something real and a missing one is reported, and the potentiometer is a fixed divider between its rails. There are no arbitrary parallel networks.
 * **Wokwi files open with one caveat:** a wire using Wokwi's `*` route separator draws a different path here, to the same pins.
