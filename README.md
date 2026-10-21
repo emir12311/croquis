@@ -30,7 +30,7 @@ There are fourteen circuits to start from — **Blink**, **Button**, **Potentiom
 | --- | --- |
 | **Parts** | Uno, LED and RGB LED, resistor, pushbutton, rotary and slide potentiometers, photoresistor, NTC temperature sensor, analog joystick, tilt switch, PIR, flame and sound sensors, buzzer, relay, 7-segment display and LED bar; half and full breadboards |
 | **Canvas** | Drag, rotate, snap; orthogonal wiring; multi-select; undo/redo; copy/paste |
-| **Simulation** | `avr-gcc` + `simavr`; LEDs and RGB LEDs at simulated current and PWM brightness, live buttons, analogue sensors (a divider, a LDR module with a thresholded output, an NTC, a two-axis joystick), digital sensors (tilt, PIR, flame and sound), buzzer/relay visuals, 7-segment and LED-bar outputs, modelled bounce |
+| **Simulation** | `avr-gcc` + `simavr`; LEDs and RGB LEDs at simulated current and PWM brightness, live buttons, analogue sensors (a divider, a LDR module with a thresholded output, an NTC, a two-axis joystick), digital sensors (tilt, PIR, flame and sound), buzzer audio, relay visuals, 7-segment and LED-bar outputs, modelled bounce |
 | **Editor** | CodeMirror + Arduino API completions; serial monitor docked beside the circuit |
 | **Files** | Wokwi's `diagram.json` import and export, sketch included |
 

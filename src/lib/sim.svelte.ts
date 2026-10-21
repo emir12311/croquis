@@ -187,11 +187,13 @@ export class Sim {
     // instead of seeing whichever edge happened to arrive last.
     const pins = { ...this.avrPins }
     const duty: Record<string, number> = {}
+    const frequency: Record<string, number> = {}
     for (const [key, timing] of Object.entries(this.pinTimings)) {
       pins[key] = timing.duty > 0
       duty[key] = timing.duty
+      if (timing.periodMicros > 0) frequency[key] = 1_000_000 / timing.periodMicros
     }
-    const result = evaluateCircuit(parts, wires, this.pressedButtons, pins, duty)
+    const result = evaluateCircuit(parts, wires, this.pressedButtons, pins, duty, frequency)
     this.ledStates = result.leds
     this.ledBrightness = result.ledBrightness
     this.rgbLeds = result.rgbLeds
