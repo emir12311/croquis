@@ -31,6 +31,7 @@
   import { Sim, type SimBackend } from './lib/sim.svelte'
   import { Input } from './lib/input.svelte'
   import { parseCompileErrors, isSketchFile, type CompileError } from './lib/compile-errors'
+  import { isAtBottom } from './lib/serial-scroll'
   import { invoke } from '@tauri-apps/api/core'
   import { documentDir } from '@tauri-apps/api/path'
   import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -185,6 +186,9 @@
   let jumpSeq = 0
   let serialInput = $state('')
   let serialNewline = $state(true)
+  let serialOut = $state<HTMLPreElement | null>(null)
+  /** Whether new serial output should keep the view pinned to the bottom. */
+  let serialFollow = $state(true)
 
   function sendSerial() {
     if (!serialInput) return
@@ -245,6 +249,20 @@
   }
   let showSerial = $state(false)
   let pin13 = $derived(sim.pin13)
+
+  // Follow new serial output only while the user is at the bottom. Scrolling up
+  // turns following off until they scroll back down or reopen the monitor.
+  $effect(() => {
+    void serial
+    void showSerial
+    if (!showSerial || !serialFollow || !serialOut) return
+    serialOut.scrollTop = serialOut.scrollHeight
+  })
+
+  function toggleSerial() {
+    showSerial = !showSerial
+    if (showSerial) serialFollow = true
+  }
 
   /**
    * Whether a pressed switch chatters the way a real contact does. Off by default:
@@ -1402,7 +1420,7 @@
             {/each}
           </div>
         {/if}
-        <button class="icon-btn" title="Toggle the serial monitor" aria-label="Toggle the serial monitor" onclick={() => (showSerial = !showSerial)}>
+        <button class="icon-btn" title="Toggle the serial monitor" aria-label="Toggle the serial monitor" onclick={toggleSerial}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M4 6h16M4 10h16M4 14h10" />
           </svg>
@@ -1771,7 +1789,12 @@
               <pre class="serial__out serial__out--error">{buildError}</pre>
             {/if}
           {:else}
-            <pre class="serial__out">{serial || (running ? '' : 'No output.')}</pre>
+            <pre
+              class="serial__out"
+              bind:this={serialOut}
+              onscroll={(e) =>
+                (serialFollow = isAtBottom(e.currentTarget as HTMLElement))}
+            >{serial || (running ? '' : 'No output.')}</pre>
           {/if}
           <form
             class="serial__send"
