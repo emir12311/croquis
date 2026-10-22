@@ -607,6 +607,10 @@ impl Drop for Simulator {
 /// A pin that toggles slower than this is not a PWM output; it is a digital line.
 /// At 16 MHz, 800k cycles is 50 ms (the slowest beginner PWM is a 20 ms servo frame).
 const PWM_MAX_PERIOD: u64 = 800_000;
+/// A pin that toggles faster than this is carrying data, not a PWM output: at
+/// 16 MHz, 100 µs is 10 kHz, well above `analogWrite`'s 490/980 Hz and well
+/// below a `shiftOut` clock.
+const PWM_MIN_PERIOD: u64 = F_CPU as u64 / 10_000;
 /// How many complete periods before a pin is trusted as PWM rather than a
 /// button's brief chatter.
 const PWM_MIN_PERIODS: u32 = 4;
@@ -629,9 +633,9 @@ unsafe extern "C" fn pin_notify(_irq: *mut ffi::avr_irq_t, value: u32, param: *m
     if let Ok(mut timing) = ctx.timing.lock() {
         timing.edge(now, high);
         pwm = timing.periods() >= PWM_MIN_PERIODS
-            && timing
-                .timing()
-                .is_some_and(|timing| timing.period_cycles <= PWM_MAX_PERIOD);
+            && timing.timing().is_some_and(|timing| {
+                timing.period_cycles >= PWM_MIN_PERIOD && timing.period_cycles <= PWM_MAX_PERIOD
+            });
     }
     // Once a pin is clearly PWM, its per-edge Pin event is noise: the UI gets a
     // duty every 20 ms instead. A digital edge after the meter resets still gets
@@ -872,9 +876,10 @@ fn sim_main(
                                 if timing.periods() < PWM_MIN_PERIODS {
                                     None
                                 } else {
-                                    timing
-                                        .timing()
-                                        .filter(|timing| timing.period_cycles <= PWM_MAX_PERIOD)
+                                    timing.timing().filter(|timing| {
+                                        timing.period_cycles >= PWM_MIN_PERIOD
+                                            && timing.period_cycles <= PWM_MAX_PERIOD
+                                    })
                                 }
                             } else {
                                 None
@@ -1417,6 +1422,67 @@ void loop() {
         assert!(
             (5500..=6100).contains(&reading),
             "100 cm should echo for about 5800 µs, got {reading} µs"
+        );
+    }
+
+    /// A shiftOut burst clocks eight bits in a few microseconds. The pin meter
+    /// must not mistake that for PWM and swallow the edges: the UI needs every
+    /// one to feed the shift register.
+    #[test]
+    fn a_shift_clock_reaches_the_ui_as_each_edge() {
+        let dir = std::env::temp_dir().join("croquis-shift-clock-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+const int DS = 2;
+const int SHCP = 3;
+const int STCP = 4;
+
+void setup() {
+  pinMode(DS, OUTPUT);
+  pinMode(SHCP, OUTPUT);
+  pinMode(STCP, OUTPUT);
+}
+void loop() {
+  digitalWrite(STCP, LOW);
+  shiftOut(DS, SHCP, MSBFIRST, 0xA5);
+  digitalWrite(STCP, HIGH);
+  delay(100);
+}
+"#;
+        let fw = compile(sketch, &dir).expect("sketch should compile");
+
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut rises = 0usize;
+        loop {
+            rises = {
+                let seen = events.lock().unwrap();
+                let mut was_high = false;
+                let mut rises = 0usize;
+                for event in seen.iter() {
+                    if let SimEvent::Pin { port: b'D', pin: 3, high } = event {
+                        if *high && !was_high {
+                            rises += 1;
+                        }
+                        was_high = *high;
+                    }
+                }
+                rises
+            };
+            if rises >= 8 || Instant::now() > deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        sim.stop();
+        assert!(
+            rises >= 8,
+            "all eight shiftOut clock edges should reach the UI, got {rises}"
         );
     }
 }
