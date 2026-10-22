@@ -133,6 +133,8 @@ export interface OutputState {
   values: number[]
   /** A buzzer's tone, in Hz. Absent on non-audio outputs. */
   frequency?: number
+  /** A servo's horn angle in degrees 0–180. Absent while it holds its position. */
+  angle?: number
   /** For a multiplexed display, which digit this sample belongs to. */
   digit?: number
 }
@@ -164,6 +166,11 @@ export interface CircuitEval {
 // current) and that a missing one shows up the way it does on a bench.
 /** The Uno runs at 5V, and an AVR output pin has a few tens of ohms of its own. */
 const SUPPLY_V = 5
+
+/** The pulse widths a hobby servo reads as 0° and 180°, in microseconds — the
+ * same ends the classic Servo library signals with. */
+const SERVO_MIN_PULSE_US = 544
+const SERVO_MAX_PULSE_US = 2400
 const PIN_OHMS = 25
 /** Typical forward voltages, so an LED's colour means something electrically. */
 const LED_FORWARD_V: Record<string, number> = {
@@ -318,6 +325,7 @@ export function evaluateCircuit(
   avr: Record<string, boolean>,
   pinDuty: Record<string, number> = {},
   pinFrequency: Record<string, number> = {},
+  pinPulse: Record<string, number> = {},
 ): CircuitEval {
   const kindById = new Map(parts.map((p) => [p.id, p.kind]))
   const key = (ref: PinRef) => {
@@ -377,6 +385,7 @@ export function evaluateCircuit(
   const mcuPinOf = new Map<string, { port: string; pin: number }>()
   const dutyByRoot = new Map<string, number>()
   const frequencyByRoot = new Map<string, number>()
+  const pulseByRoot = new Map<string, number>()
 
   function collectRails() {
     vcc.clear()
@@ -386,6 +395,7 @@ export function evaluateCircuit(
     mcuPinOf.clear()
     dutyByRoot.clear()
     frequencyByRoot.clear()
+    pulseByRoot.clear()
     for (const part of parts) {
       if (part.kind !== 'uno') continue
       for (const pin of Object.keys(UNO_DIGITAL)) {
@@ -403,6 +413,13 @@ export function evaluateCircuit(
           if (Number.isFinite(frequency) && frequency > 0) {
             frequencyByRoot.set(root, frequency)
           }
+        }
+        // A servo pulse is read by width, not duty: highMicros says how long the
+        // last HIGH stretch was, so it holds regardless of the level right now.
+        const key = `${info.port}${info.pin}`
+        const pulseUs = pinPulse[key]
+        if (Number.isFinite(pulseUs) && pulseUs > 0) {
+          pulseByRoot.set(root, pulseUs)
         }
         mcuPinOf.set(root + `/${info.port}${info.pin}`, { port: info.port, pin: info.pin })
         if (pin.startsWith('A') || pin === '5V') continue
@@ -763,6 +780,32 @@ export function evaluateCircuit(
   // A buzzer or relay coil is on when its two terminals span high and low.
   // The display and bar are direct pin mappings; the common leg must be low.
   for (const part of parts) {
+    if (part.kind === 'servo') {
+      const plus = uf.find(`${part.id}:V+`)
+      const minus = uf.find(`${part.id}:GND`)
+      const signal = uf.find(`${part.id}:PWM`)
+      if (!netHigh(plus) || !netLow(minus)) {
+        if (reachesPin(part, 'PWM')) {
+          warnings[part.id] = 'Its V+ pin needs 5V and its GND pin needs GND.'
+        }
+        outputs[part.id] = { active: false, values: [] }
+        continue
+      }
+      // The horn angle is the pulse width, mapped over the classic 544–2400 µs
+      // the Servo library signals at. No pulse and the horn holds where it was:
+      // a servo without signal keeps its position, so `angle` is left absent
+      // and the caller supplies the remembered value.
+      const widthUs = pulseByRoot.get(signal)
+      if (widthUs === undefined) {
+        outputs[part.id] = { active: false, values: [] }
+        continue
+      }
+      const span = SERVO_MAX_PULSE_US - SERVO_MIN_PULSE_US
+      const linear = ((widthUs - SERVO_MIN_PULSE_US) * 180) / span
+      const angle = Math.round(Math.min(180, Math.max(0, linear)))
+      outputs[part.id] = { active: true, values: [], angle }
+      continue
+    }
     if (part.kind === 'buzzer' || part.kind === 'relay') {
       const a = uf.find(`${part.id}:${part.kind === 'buzzer' ? '1' : 'COIL1'}`)
       const b = uf.find(`${part.id}:${part.kind === 'buzzer' ? '2' : 'COIL2'}`)

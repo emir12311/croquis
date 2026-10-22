@@ -1081,6 +1081,9 @@
     if (inst.kind === 'buzzer') {
       return [{ name: 'hasSignal', value: !!outputs[inst.id]?.active }]
     }
+    if (inst.kind === 'servo') {
+      return [{ name: 'angle', value: outputs[inst.id]?.angle ?? 0 }]
+    }
     if (
       inst.kind === 'seven-segment' ||
       inst.kind === 'seven-segment-4' ||

@@ -82,6 +82,8 @@ export class Sim {
   private serialFlush: ReturnType<typeof setTimeout> | null = null
   /** Per-digit segment memory for multiplexed displays, by part id. */
   private segmentMemory = new Map<string, number[]>()
+  /** The last angle each servo was driven to, so a horn holds without a pulse. */
+  private servoAngles = new Map<string, number>()
   private backend: SimBackend
 
   constructor(backend: SimBackend) {
@@ -137,6 +139,7 @@ export class Sim {
     this.rgbLeds = {}
     this.outputs = {}
     this.segmentMemory.clear()
+    this.servoAngles.clear()
     this.pressedButtons = {}
     this.sensors = {}
   }
@@ -156,6 +159,7 @@ export class Sim {
     this.rgbLeds = {}
     this.outputs = {}
     this.segmentMemory.clear()
+    this.servoAngles.clear()
     this.pressedButtons = {}
     this.sensors = {}
     this.analogs = []
@@ -193,12 +197,15 @@ export class Sim {
     const pins = { ...this.avrPins }
     const duty: Record<string, number> = {}
     const frequency: Record<string, number> = {}
+    const pulse: Record<string, number> = {}
     for (const [key, timing] of Object.entries(this.pinTimings)) {
       pins[key] = timing.duty > 0
       duty[key] = timing.duty
       if (timing.periodMicros > 0) frequency[key] = 1_000_000 / timing.periodMicros
+      // A servo's horn angle comes from the width of the last HIGH stretch.
+      if (timing.highMicros > 0) pulse[key] = timing.highMicros
     }
-    const result = evaluateCircuit(parts, wires, this.pressedButtons, pins, duty, frequency)
+    const result = evaluateCircuit(parts, wires, this.pressedButtons, pins, duty, frequency, pulse)
     const outputs = { ...result.outputs }
     // A multiplexed display is sampled one digit at a time. Keep the last lit
     // segments for every digit so the next scan does not erase the others.
@@ -213,6 +220,18 @@ export class Sim {
       }
       this.segmentMemory.set(part.id, memory)
       outputs[part.id] = { ...state, values: [...memory] }
+    }
+    // A servo without signal holds where it was, like the real thing: the
+    // netlist leaves `angle` absent then, and the remembered value fills in.
+    for (const part of parts) {
+      if (part.kind !== 'servo') continue
+      const state = outputs[part.id]
+      if (!state) continue
+      if (typeof state.angle === 'number') {
+        this.servoAngles.set(part.id, state.angle)
+      } else if (this.servoAngles.has(part.id)) {
+        outputs[part.id] = { ...state, angle: this.servoAngles.get(part.id) }
+      }
     }
     this.ledStates = result.leds
     this.ledBrightness = result.ledBrightness

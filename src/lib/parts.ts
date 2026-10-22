@@ -32,6 +32,7 @@ export type PartKind =
   | 'sound-sensor'
   | 'buzzer'
   | 'relay'
+  | 'servo'
   | 'seven-segment'
   | 'seven-segment-4'
   | 'led-bar-graph'
@@ -375,6 +376,14 @@ export const PARTS: PartDef[] = [
     tag: 'wokwi-ks2e-m-dc5',
     attrs: {},
     icon: '<rect x="3" y="7" width="18" height="10" rx="1"/><path d="M7 7V5M17 7V5M7 17v2M17 17v2M9 12h6"/>',
+  },
+  {
+    kind: 'servo',
+    label: 'Servo',
+    tag: 'wokwi-servo',
+    attrs: {},
+    live: true,
+    icon: '<rect x="5" y="10" width="14" height="7" rx="1"/><path d="M12 10V7M12 7a2 2 0 1 0 2-2 2 2 0 0 0-2 2"/><path d="M9 17v2M15 17v2"/>',
   },
   {
     kind: 'seven-segment',
