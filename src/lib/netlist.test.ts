@@ -832,3 +832,59 @@ describe('an NTC module reads higher the hotter it is', () => {
     expect(out.warnings.t1).toMatch(/GND/i)
   })
 })
+
+describe('a servo turns by pulse width', () => {
+  const servo = (): EvalPart => ({ id: 'horn', kind: 'servo' })
+  /** The harness drives pin 13 (port B, bit 5); a servo pulses that pin. */
+  const runWithPulse = (pulse: Record<string, number>) =>
+    evaluateCircuit(
+      [uno, servo()],
+      [
+        wire(at('uno', '5V'), at('horn', 'V+')),
+        wire(at('horn', 'GND'), at('uno', 'GND.2')),
+        wire(at('uno', '13'), at('horn', 'PWM')),
+      ],
+      {},
+      { B5: true },
+      {},
+      {},
+      pulse,
+    )
+
+  const angle = (pulse: number) => runWithPulse({ B5: pulse }).outputs.horn.angle
+
+  it('maps the classic 544–2400 µs widths onto degrees', () => {
+    expect(angle(544)).toBe(0)
+    expect(angle(1472)).toBe(90)
+    expect(angle(2400)).toBe(180)
+  })
+
+  it('clamps a width past either end of the range', () => {
+    expect(angle(100)).toBe(0)
+    expect(angle(3000)).toBe(180)
+  })
+
+  it('holds position when the pulse stops: no angle, but no reset', () => {
+    const out = runWithPulse({})
+    expect(out.outputs.horn.active).toBe(false)
+    expect(out.outputs.horn.angle).toBeUndefined()
+  })
+
+  it('wants power before it wants signal, and only then warns', () => {
+    const unwired = evaluateCircuit([uno, servo()], [], {}, {})
+    expect(unwired.warnings.horn).toBeUndefined()
+
+    const noisy = evaluateCircuit(
+      [uno, servo()],
+      [wire(at('uno', '13'), at('horn', 'PWM'))],
+      {},
+      {},
+      {},
+      {},
+      { B5: 1472 },
+    )
+    expect(noisy.warnings.horn).toMatch(/V\+.*5V.*GND/)
+    expect(noisy.outputs.horn.active).toBe(false)
+  })
+})
+

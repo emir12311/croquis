@@ -371,11 +371,14 @@ export class CanvasSurface {
         ? output?.active
           ? '1'
           : '0'
-        : inst.kind === 'seven-segment' ||
-            inst.kind === 'seven-segment-4' ||
-            inst.kind === 'led-bar-graph'
-          ? (output?.values.join('') ?? '')
-          : ''
+        : inst.kind === 'servo'
+          ? // The horn turns with the angle; a whole signalled position is a sprite.
+            String(output?.angle ?? '')
+          : inst.kind === 'seven-segment' ||
+              inst.kind === 'seven-segment-4' ||
+              inst.kind === 'led-bar-graph'
+            ? (output?.values.join('') ?? '')
+            : ''
     return `${this.baseKey(inst)}|${chip}${bright}${down}${sensor}${rgb}${outputKey}`
   }
 

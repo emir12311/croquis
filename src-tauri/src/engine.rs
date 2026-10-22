@@ -103,6 +103,28 @@ fn core_dir() -> PathBuf {
     toolchain().join("ArduinoCore-avr-1.8.6")
 }
 
+fn library_root() -> PathBuf {
+    // The same lookup order as the toolchain: shipped first (beside the binary,
+    // or in ../lib/<product>/ for the deb and rpm), development second. The
+    // NOTICE.md file marks a real library root rather than an empty folder.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidates = [
+                dir.join("libraries"),
+                dir.join("../lib/Croquis/libraries"),
+                dir.join("../lib/croquis/libraries"),
+            ];
+            for candidate in candidates {
+                if candidate.join("NOTICE.md").exists() {
+                    return candidate;
+                }
+            }
+        }
+    }
+    workspace_root().join("libraries")
+}
+
+
 // ---- compiling ------------------------------------------------------------
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -127,9 +149,18 @@ pub fn compile(sketch: &str, workdir: &Path) -> Result<Firmware, String> {
     std::fs::create_dir_all(&objdir).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
 
+    // The bundled libraries the sketch includes, before `base` is built: each
+    // one contributes an include path that every later command must carry.
+    let libs = included_libraries(sketch);
+    let mut lib_includes = String::new();
+    for lib in &libs {
+        lib_includes.push_str(" -I");
+        lib_includes.push_str(&lib.display().to_string());
+    }
+
     let base = format!(
         "-mmcu={mcu} -DF_CPU={f}L -DARDUINO=10819 -DARDUINO_AVR_UNO -DARDUINO_ARCH_AVR \
-         -Os -ffunction-sections -fdata-sections -I{} -I{}",
+         -Os -ffunction-sections -fdata-sections{lib_includes} -I{} -I{}",
         coresrc.display(),
         variant.display(),
         mcu = MCU,
@@ -157,6 +188,35 @@ pub fn compile(sketch: &str, workdir: &Path) -> Result<Firmware, String> {
         ],
     )?;
 
+    // Each included library's sources, compiled and linked after the core
+    // objects like the Arduino IDE does with its libs. The objects live in a
+    // subdirectory of the cache: compile_core sweeps every top-level *object
+    // in the cache into the link, and a library object must not be in that
+    // sweep — sketches without the library would carry it too, and included
+    // ones would link it twice.
+    let lib_cache = cache.join("lib-objects");
+    std::fs::create_dir_all(&lib_cache).map_err(|e| e.to_string())?;
+    let mut lib_objs: Vec<PathBuf> = Vec::new();
+    for lib in &libs {
+        let name = lib
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("library")
+            .to_string();
+        let mut sources: Vec<PathBuf> = match std::fs::read_dir(lib) {
+            Ok(entries) => entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("cpp"))
+                .collect(),
+            Err(e) => return Err(format!("{}: {e}", lib.display())),
+        };
+        sources.sort();
+        for source in &sources {
+            lib_objs.push(compile_lib_source(&bin, &base, &name, source, &lib_cache)?);
+        }
+    }
+
     // Link, then convert to Intel HEX.
     let elf = workdir.join("sketch.elf");
     let hex = workdir.join("sketch.hex");
@@ -165,6 +225,9 @@ pub fn compile(sketch: &str, workdir: &Path) -> Result<Firmware, String> {
     link.push("-o".into());
     link.push(elf.to_string_lossy().into());
     for o in &core_objs {
+        link.push(o.to_string_lossy().into());
+    }
+    for o in &lib_objs {
         link.push(o.to_string_lossy().into());
     }
     link.push(sketch_obj.to_string_lossy().into());
@@ -197,6 +260,66 @@ pub fn compile(sketch: &str, workdir: &Path) -> Result<Firmware, String> {
         elf: elf.to_string_lossy().into(),
     })
 }
+
+/// The bundled libraries this sketch includes: `#include <Name.h>` (or the
+/// local-name form) matches a folder named `Name` under the library root
+/// holding a header of the same name — the same resolution rule the Arduino
+/// IDE applies. Library order is irrelevant to the result but a sorted list
+/// makes a repeat compile deterministic.
+fn included_libraries(sketch: &str) -> Vec<PathBuf> {
+    let root = library_root();
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let referenced =
+            sketch.contains(&format!("<{name}.h>")) || sketch.contains(&format!("\"{name}.h\""));
+        if referenced && dir.is_dir() && dir.join(format!("{name}.h")).exists() {
+            out.push(dir);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Compile one bundled-library source into the object cache. Library sources
+/// change no more often than the code shipping them, so an object is reused
+/// until its source has a newer mtime — the same freshness rule a makefile
+/// would apply.
+fn compile_lib_source(
+    bin: &Path,
+    base: &str,
+    name: &str,
+    source: &Path,
+    cache: &Path,
+) -> Result<PathBuf, String> {
+    let stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("source");
+    let obj = cache.join(format!("lib-{name}-{stem}.o"));
+    let source_time = std::fs::metadata(source).and_then(|m| m.modified()).ok();
+    let object_time = std::fs::metadata(&obj).and_then(|m| m.modified()).ok();
+    let fresh = matches!((source_time, object_time), (Some(s), Some(o)) if o >= s);
+    if !fresh {
+        // Write beside the target and rename: another process must never see
+        // a half-written object, the reason the core objects compile this way.
+        let tmp = obj.with_extension(format!("tmp-{}", std::process::id()));
+        run_flags(
+            &bin.join("avr-g++"),
+            base,
+            &["-c", source.to_str().unwrap(), "-o", tmp.to_str().unwrap()],
+        )?;
+        std::fs::rename(&tmp, &obj).map_err(|e| e.to_string())?;
+    }
+    Ok(obj)
+}
+
 
 /// Can this process create files in `dir`?
 fn writable(dir: &Path) -> bool {
@@ -1067,6 +1190,57 @@ void loop() {
         assert!(
             (200..=300).contains(&duty),
             "analogWrite(6, 64) should be about 25% duty, got {duty} per mille"
+        );
+    }
+
+    /// The bundled-library path end to end: `#include <Servo.h>` resolves
+    /// against `libraries/`, the library is compiled and linked, and the
+    /// pulse it puts on pin 9 for 90° is visible to the UI — the same
+    /// 544–2400 µs widths the classic Servo library produces.
+    #[test]
+    fn a_bundled_library_compiles_and_drives_a_servo_pulse() {
+        let dir = std::env::temp_dir().join("croquis-servo-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+#include <Servo.h>
+
+Servo servo;
+
+void setup() {
+  servo.attach(9);
+  servo.write(90);
+}
+void loop() {}
+"#;
+        let fw = compile(sketch, &dir).expect("sketch with a bundled library should compile");
+
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+        thread::sleep(Duration::from_millis(1200));
+        sim.stop();
+
+        let ev = events.lock().unwrap();
+        let timing = ev
+            .iter()
+            .find_map(|e| match e {
+                SimEvent::Timing { port: b'B', pin: 1, high_micros, period_micros, .. } => {
+                    Some((*high_micros, *period_micros))
+                }
+                _ => None,
+            })
+            .expect("no servo pulse timing reached the UI for pin 9 (PB1)");
+        let (high_micros, period_micros) = timing;
+        assert!(
+            (1400..=1550).contains(&high_micros),
+            "write(90) should pulse about 1472 µs on pin 9, got {high_micros} µs"
+        );
+        assert!(
+            (19000..=21000).contains(&period_micros),
+            "the servo frame should be about 20 ms, got {period_micros} µs"
         );
     }
 }

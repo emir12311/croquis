@@ -63,6 +63,7 @@ simavr steps; the rest are in [the README](README.md#build-from-source).
 | `src/lib/wokwi.ts` | the `@wokwi/elements` we import, and element fixes such as the slide pot's missing styles |
 | `src/lib/arduino-api.ts` | the editor's Arduino completions |
 | `src/lib/presets.ts` + `presets/*.json` | the shipped circuits |
+| `libraries/` | the bundled Arduino libraries compiled offline with a sketch; provenance in `NOTICE.md` |
 | `src-tauri/src/engine.rs` | compiling sketches, and the simavr bridge |
 | `src-tauri/src/lib.rs` | the Tauri commands |
 | `src/lib/*.test.ts` | a test file per module, next to it |
@@ -98,7 +99,8 @@ catalogue.
   `scripts/setup-toolchain.sh` builds it (step 4), including `yield.c.o` — which stands in for
   `hooks.c`, a source this toolchain refuses — and `wiring_pulse.S`, which `delay()` needs.
   `scripts/build-toolchain-dist.sh` ships it read-only, so an object missing here is one the app
-  cannot compile at run time.
+  cannot compile at run time. Bundled-library objects live in its `lib-objects/` subdirectory,
+  because the cache sweep in `compile_core()` links everything at the top level.
 
 ## Before you say it works
 

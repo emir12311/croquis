@@ -397,6 +397,13 @@ check('the RGB preset loads with three channels', async (app) => {
   assert(await app.ev(`!!document.querySelector('wokwi-rgb-led')`), 'the RGB LED is on the canvas')
 })
 
+check('the servo preset loads with a horn', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Servo')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 2, 'Servo gives two parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-servo')`), 'the servo is on the canvas')
+})
+
 check('the joystick preset loads, drags, snaps back and clicks', async (app) => {
   await app.goto(`http://localhost:${DEV_PORT}`)
   await app.loadPreset('Joystick')

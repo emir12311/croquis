@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Servo",
+  "parts": [
+    { "id": "uno", "type": "wokwi-arduino-uno", "left": 40, "top": 100, "attrs": {} },
+    { "id": "horn", "type": "wokwi-servo", "left": 460, "top": 120, "attrs": {} }
+  ],
+  "connections": [
+    ["uno:5V", "horn:V+"],
+    ["horn:GND", "uno:GND.1"],
+    ["uno:9", "horn:PWM"]
+  ],
+  "sketch": "// Servo — turning a horn without a Timer surgery story.\n//\n// The bundled Servo library puts a 544-2400 microsecond pulse on pin 9,\n// once every 20 ms. write() speaks in degrees: the horn swings 0 to 180\n// and back, twenty steps a second.\n\n#include <Servo.h>\n\nServo horn;\n\nvoid setup() {\n  horn.attach(9);\n}\n\nvoid loop() {\n  for (int angle = 0; angle <= 180; angle += 20) {\n    horn.write(angle);\n    delay(200);\n  }\n  for (int angle = 180; angle >= 0; angle -= 20) {\n    horn.write(angle);\n    delay(200);\n  }\n}\n"
+}
