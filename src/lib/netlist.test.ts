@@ -888,3 +888,57 @@ describe('a servo turns by pulse width', () => {
   })
 })
 
+describe('an ultrasonic sensor answers a trigger with an echo', () => {
+  const sonar = (distance = '100'): EvalPart => ({
+    id: 'sonar',
+    kind: 'hc-sr04',
+    attrs: { distance },
+  })
+  const powered = [
+    wire(at('uno', '5V'), at('sonar', 'VCC')),
+    wire(at('uno', 'GND.2'), at('sonar', 'GND')),
+  ]
+  const signals = [
+    wire(at('uno', '7'), at('sonar', 'TRIG')),
+    wire(at('sonar', 'ECHO'), at('uno', '8')),
+  ]
+  /** The echo width at a distance, with the sensor wired and powered. */
+  const width = (distance: string) =>
+    run([sonar(distance)], [...powered, ...signals]).echoes[0]?.widthUs
+
+  it('reports the trigger and echo pins and times the echo by the distance', () => {
+    const out = run([sonar()], [...powered, ...signals])
+    expect(out.echoes).toEqual([
+      {
+        trigger: { port: 'D', pin: 7 },
+        echo: { port: 'B', pin: 0 },
+        delayUs: 600,
+        widthUs: 5800,
+      },
+    ])
+    expect(out.warnings.sonar).toBeUndefined()
+  })
+
+  it('clamps the distance to what the sensor can see', () => {
+    expect(width('1')).toBe(116) // 2 cm, the shortest echo pulseIn can see
+    expect(width('1000')).toBe(23200) // 400 cm
+  })
+
+  it('says both signal pins need the board', () => {
+    const out = run([sonar()], [...powered, wire(at('uno', '7'), at('sonar', 'TRIG'))])
+    expect(out.echoes).toEqual([])
+    expect(out.warnings.sonar).toMatch(/TRIG and ECHO/)
+  })
+
+  it('answers nothing while it is unpowered, and says which rails it wants', () => {
+    const out = run([sonar()], [...signals])
+    expect(out.echoes).toEqual([])
+    expect(out.warnings.sonar).toMatch(/VCC.*5V.*GND/)
+  })
+
+  it('is quiet with no wires at all', () => {
+    const out = run([sonar()], [])
+    expect(out.echoes).toEqual([])
+    expect(out.warnings.sonar).toBeUndefined()
+  })
+})
