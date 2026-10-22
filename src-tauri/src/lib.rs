@@ -211,46 +211,68 @@ fn serial_input(text: String, state: State<SimState>) {
     }
 }
 
-/// NVIDIA proprietary driver workaround.
+/// Which GPU stack WebKit is running on, for the DMA-BUF decision.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Gpu {
+    Nvidia,
+    Intel,
+    Amd,
+    Unknown,
+}
+
+/// Which GPU the loaded kernel modules belong to. Split from the filesystem so the
+/// hybrid-graphics and fallback cases can be tested.
+#[cfg(target_os = "linux")]
+fn gpu_from(is_module: impl Fn(&str) -> bool) -> Gpu {
+    if is_module("nvidia") {
+        Gpu::Nvidia
+    } else if is_module("i915") || is_module("xe") {
+        Gpu::Intel
+    } else if is_module("amdgpu") {
+        Gpu::Amd
+    } else {
+        Gpu::Unknown
+    }
+}
+
+/// The GPU driver module the kernel loaded, if it is one we can identify.
+#[cfg(target_os = "linux")]
+fn linux_gpu() -> Gpu {
+    gpu_from(|name| std::path::Path::new("/sys/module").join(name).exists())
+}
+
+/// The Linux WebKit environment, as a decision that can be tested.
 ///
-/// WebKitGTK's GPU path is broken on the NVIDIA proprietary driver: blank
-/// windows, `Failed to create GBM buffer`, or `Error 71 (Protocol error)
-/// dispatching to Wayland display`. The recommended fixes differ by display
-/// server:
+/// WebKitGTK's DMA-BUF renderer is the crashy path on the NVIDIA proprietary
+/// driver (blank windows, `Failed to create GBM buffer`, Wayland protocol
+/// errors) and on machines where no vendor driver can be identified — a live USB
+/// booted, drew once and died. There, fall back to WebKit's non-DMA-BUF renderer.
 ///
-///   - Wayland: disable NVIDIA explicit sync. This keeps WebKit's accelerated
-///     path, so rendering stays smooth. (We also force the DMA-BUF renderer
-///     back on, since some distros ship a patch that disables it for NVIDIA.)
-///   - X11: fall back to the non-DMA-BUF renderer (slower, but it draws).
-///
-/// Every value is only set when the user hasn't set it themselves, so they can
-/// always override.
+/// Intel and AMD are not the broken path, and disabling DMA-BUF there forces a
+/// software fallback that makes panning and simulation visibly slow. Let those
+/// machines use the accelerated renderer. A user anywhere can still force either
+/// choice by setting `WEBKIT_DISABLE_DMABUF_RENDERER` themselves; every value
+/// here is only set when they have not.
 ///
 /// See: <https://v2.tauri.app/develop/debug/linux-graphics/>
 #[cfg(target_os = "linux")]
-/// Which environment WebKit needs on this machine, as a decision that can be tested.
-///
-/// The DMA-BUF renderer is the part that crashes. On the NVIDIA proprietary driver it is
-/// the known-bad path; on a plain machine with no vendor driver it segfaults too — a live
-/// USB was the first place that showed up, because there is no /sys/module/nvidia there, no
-/// workaround was applied at all, and the window booted, drew once and died.
-///
-/// So DMA-BUF is off everywhere, and a user whose machine handles it can set
-/// WEBKIT_DISABLE_DMABUF_RENDERER=0 to get the faster path back.
-fn webview_env(nvidia: bool, wayland: bool) -> Vec<(&'static str, &'static str)> {
-    let mut env = vec![("WEBKIT_DISABLE_DMABUF_RENDERER", "1")];
-    if nvidia && wayland {
-        // Keeps GPU acceleration on the proprietary driver, where it works once explicit
-        // sync is out of the way.
+fn webview_env(gpu: Gpu, wayland: bool) -> Vec<(&'static str, &'static str)> {
+    let mut env = Vec::new();
+    if matches!(gpu, Gpu::Nvidia | Gpu::Unknown) {
+        env.push(("WEBKIT_DISABLE_DMABUF_RENDERER", "1"));
+    }
+    if gpu == Gpu::Nvidia && wayland {
+        // WebKit's accelerated path works on NVIDIA Wayland once explicit sync
+        // is out of the way.
         env.push(("__NV_DISABLE_EXPLICIT_SYNC", "1"));
     }
     env
 }
 
 fn prepare_linux_webview() {
-    let nvidia = std::path::Path::new("/sys/module/nvidia").exists();
     let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-    for (key, value) in webview_env(nvidia, wayland) {
+    for (key, value) in webview_env(linux_gpu(), wayland) {
         set_env_default(key, value);
     }
 }
@@ -318,33 +340,53 @@ mod tests {
 #[cfg(not(target_os = "linux"))]
 fn prepare_linux_webview() {}
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod webview_env_tests {
-    use super::webview_env;
+    use super::{gpu_from, webview_env, Gpu};
 
     fn keys<'a>(env: &'a [(&'a str, &'a str)]) -> Vec<&'a str> {
         env.iter().map(|(key, _)| *key).collect()
     }
 
     #[test]
-    fn dma_buf_is_disabled_on_every_machine() {
-        // The crash on a live USB was WebKitGTK's DMA-BUF renderer, on a machine with no
-        // vendor driver at all — so this cannot be conditional on finding one.
-        for (nvidia, wayland) in [(false, false), (false, true), (true, false), (true, true)] {
-            assert!(
-                webview_env(nvidia, wayland).contains(&("WEBKIT_DISABLE_DMABUF_RENDERER", "1")),
-                "DMA-BUF not disabled for nvidia={nvidia} wayland={wayland}"
-            );
+    fn dma_buf_falls_back_only_where_it_is_known_to_crash() {
+        assert!(webview_env(Gpu::Nvidia, false).contains(&("WEBKIT_DISABLE_DMABUF_RENDERER", "1")));
+        assert!(webview_env(Gpu::Nvidia, true).contains(&("WEBKIT_DISABLE_DMABUF_RENDERER", "1")));
+        // The live-USB crash had no vendor driver to identify.
+        assert!(webview_env(Gpu::Unknown, false).contains(&("WEBKIT_DISABLE_DMABUF_RENDERER", "1")));
+        assert!(webview_env(Gpu::Unknown, true).contains(&("WEBKIT_DISABLE_DMABUF_RENDERER", "1")));
+        // Intel and AMD keep the accelerated renderer.
+        for gpu in [Gpu::Intel, Gpu::Amd] {
+            for wayland in [false, true] {
+                assert!(
+                    !webview_env(gpu, wayland)
+                        .iter()
+                        .any(|(key, _)| *key == "WEBKIT_DISABLE_DMABUF_RENDERER"),
+                    "DMA-BUF disabled for {gpu:?} wayland={wayland}"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn the_gpu_is_identified_from_its_driver_module() {
+        assert_eq!(gpu_from(|m| m == "i915"), Gpu::Intel);
+        assert_eq!(gpu_from(|m| m == "xe"), Gpu::Intel);
+        assert_eq!(gpu_from(|m| m == "amdgpu"), Gpu::Amd);
+        assert_eq!(gpu_from(|_| false), Gpu::Unknown);
+        // A hybrid laptop with the proprietary driver present takes the safe path.
+        assert_eq!(gpu_from(|m| m == "nvidia" || m == "i915"), Gpu::Nvidia);
     }
 
     #[test]
     fn nvidia_on_wayland_is_the_only_case_with_an_extra() {
         assert_eq!(
-            keys(&webview_env(true, true)),
+            keys(&webview_env(Gpu::Nvidia, true)),
             ["WEBKIT_DISABLE_DMABUF_RENDERER", "__NV_DISABLE_EXPLICIT_SYNC"]
         );
-        assert_eq!(keys(&webview_env(true, false)), ["WEBKIT_DISABLE_DMABUF_RENDERER"]);
-        assert_eq!(keys(&webview_env(false, true)), ["WEBKIT_DISABLE_DMABUF_RENDERER"]);
+        assert_eq!(keys(&webview_env(Gpu::Nvidia, false)), ["WEBKIT_DISABLE_DMABUF_RENDERER"]);
+        assert!(keys(&webview_env(Gpu::Intel, true)).is_empty());
+        assert!(keys(&webview_env(Gpu::Amd, false)).is_empty());
+        assert_eq!(keys(&webview_env(Gpu::Unknown, true)), ["WEBKIT_DISABLE_DMABUF_RENDERER"]);
     }
 }

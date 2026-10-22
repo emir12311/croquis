@@ -94,9 +94,11 @@ catalogue.
 - **The circuit is drawn on a `<canvas>`.** Each part's DOM is invisible and exists only for
   hit-testing; the visible pixels are rasterised sprites. So reading the DOM tells you about
   *interaction*, not about what a part looks like.
-- **WebKitGTK on the NVIDIA proprietary driver needs help** — `src-tauri/src/lib.rs` applies the fix
-  automatically. A running CSS *animation* makes WebKitGTK drop to low-resolution tiles globally and
-  blur everything, which is why the caret blink is disabled and overlays do not animate.
+- **WebKitGTK needs the right renderer** — `src-tauri/src/lib.rs` disables DMA-BUF only on the
+  NVIDIA proprietary driver and on unknown/no-driver machines. Intel and AMD keep the accelerated
+  path; forcing the fallback there makes panning and simulation crawl. A running CSS *animation*
+  makes WebKitGTK drop to low-resolution tiles globally and blur everything, which is why the caret
+  blink is disabled and overlays do not animate.
 - **`.toolchain/core-cache`** holds precompiled core objects and is what keeps compiles fast.
   `scripts/setup-toolchain.sh` builds it (step 4), including `yield.c.o` — which stands in for
   `hooks.c`, a source this toolchain refuses — and `wiring_pulse.S`, which `delay()` needs.
