@@ -174,7 +174,7 @@ That's basically it.
 
 ## What it doesn't do yet
 
-* **A handful of components.** An Uno, LEDs including RGB, a resistor, a pushbutton, a rotary or slide potentiometer, a photoresistor, an NTC temperature sensor, an analog joystick, tilt/PIR/flame/sound sensors, a buzzer, a relay, a servo driven by the bundled offline `Servo` library (pins 9 and 10), 7-segment and 4-digit displays and an LED bar, breadboards. No LCD yet.
+* **A handful of components.** An Uno, LEDs including RGB, a resistor, a pushbutton, a rotary or slide potentiometer, a photoresistor, an NTC temperature sensor, an analog joystick, tilt/PIR/flame/sound sensors, an HC-SR04 ultrasonic distance sensor, a buzzer, a relay, a servo driven by the bundled offline `Servo` library (pins 9 and 10), 7-segment and 4-digit displays and an LED bar, breadboards. No LCD yet.
 * **One board.** A second Uno gets its own circuit but shares the single sketch.
 * **A small electrical model, not a circuit solver.** A resistor does something real and a missing one is reported, and the potentiometer is a fixed divider between its rails. There are no arbitrary parallel networks.
 * **Wokwi files open with one caveat:** a wire using Wokwi's `*` route separator draws a different path here, to the same pins.

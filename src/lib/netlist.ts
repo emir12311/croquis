@@ -139,6 +139,21 @@ export interface OutputState {
   digit?: number
 }
 
+/**
+ * An ultrasonic sensor's answer, waiting to be sent: the sketch triggers the
+ * sensor on one pin, and the sensor answers with a pulse on another.
+ */
+export interface EchoResponse {
+  /** The board pin the sketch sends the trigger from. */
+  trigger: { port: string; pin: number }
+  /** The board pin the echo comes back on. */
+  echo: { port: string; pin: number }
+  /** How long after the trigger the echo starts, in microseconds. */
+  delayUs: number
+  /** How long the echo lasts, in microseconds — this is the distance. */
+  widthUs: number
+}
+
 export interface CircuitEval {
   /** LED instance id → how hard it's driven. */
   leds: Record<string, LedState>
@@ -159,6 +174,8 @@ export interface CircuitEval {
   analogs: { channel: number; millivolts: number }[]
   /** Sensor modules that have an on/off output, by part id. */
   sensors: Record<string, SensorState>
+  /** Ultrasonic sensors waiting to answer a trigger, one per part. */
+  echoes: EchoResponse[]
 }
 
 // A small, honest model rather than a real circuit solver: enough that a
@@ -171,6 +188,18 @@ const SUPPLY_V = 5
  * same ends the classic Servo library signals with. */
 const SERVO_MIN_PULSE_US = 544
 const SERVO_MAX_PULSE_US = 2400
+
+/** An ultrasonic sensor's flight time: sound covers a centimetre there and back
+ * in 58 µs, which is what a sketch divides by to get centimetres. */
+const HC_SR04_US_PER_CM = 58
+/** How long the sensor takes to answer a trigger, in microseconds. */
+const HC_SR04_ECHO_DELAY_US = 600
+/** The distance a sensor starts out at, in centimetres. */
+const HC_SR04_DEFAULT_CM = 100
+/** Below this the echo is too short for `pulseIn` to see, in centimetres. */
+const HC_SR04_MIN_CM = 2
+/** The furthest a sensor of this kind can see, in centimetres. */
+const HC_SR04_MAX_CM = 400
 const PIN_OHMS = 25
 /** Typical forward voltages, so an LED's colour means something electrically. */
 const LED_FORWARD_V: Record<string, number> = {
@@ -510,6 +539,15 @@ export function evaluateCircuit(
   const netHigh = (root: string) => vcc.has(root) || mcuHigh.has(root)
   const netLow = (root: string) => gnd.has(root) || mcuLow.has(root)
 
+  /** The board pin a net reaches, if any. A net can touch several pins; the
+   * first is the one a part like an ultrasonic sensor talks to. */
+  const mcuPinOn = (root: string): { port: string; pin: number } | null => {
+    for (const [label, pins] of mcuPinOf) {
+      if (label.startsWith(root + '/')) return pins
+    }
+    return null
+  }
+
   const highNets = new Set([...vcc, ...mcuHigh])
   const lowNets = new Set([...gnd, ...mcuLow])
 
@@ -520,6 +558,7 @@ export function evaluateCircuit(
   const rgbLeds: Record<string, RgbState> = {}
   const outputs: Record<string, OutputState> = {}
   const warnings: Record<string, string> = {}
+  const echoes: EchoResponse[] = []
   for (const part of parts) {
     if (part.kind !== 'led') continue
     const a = uf.find(`${part.id}:A`)
@@ -679,6 +718,43 @@ export function evaluateCircuit(
         analogs.push({ channel, millivolts: Math.round(SUPPLY_V * 1000 * fraction) })
       }
     }
+  }
+
+  // An ultrasonic sensor answers a trigger with an echo. The sketch sends the
+  // trigger on one pin and reads the answer on another, so the two nets have to
+  // reach the board: without both, the sensor has nobody to talk to.
+  for (const part of parts) {
+    if (part.kind !== 'hc-sr04') continue
+    const highSide = uf.find(`${part.id}:VCC`)
+    const lowSide = uf.find(`${part.id}:GND`)
+    const triggerRoot = uf.find(`${part.id}:TRIG`)
+    const echoRoot = uf.find(`${part.id}:ECHO`)
+    const triggerPin = mcuPinOn(triggerRoot)
+    const echoPin = mcuPinOn(echoRoot)
+    if (!netHigh(highSide) || !netLow(lowSide)) {
+      if (triggerPin || echoPin) {
+        warnings[part.id] = 'Its VCC pin needs 5V and its GND pin needs GND.'
+      }
+      continue
+    }
+    if (!triggerPin || !echoPin) {
+      if (triggerPin || echoPin) {
+        warnings[part.id] = 'Its TRIG and ECHO pins both need a pin on the board.'
+      }
+      continue
+    }
+    // The echo is as long as the sound took to come back: 58 µs per centimetre,
+    // there and back. The distance is what the sketch then reads.
+    const distance = Math.min(
+      HC_SR04_MAX_CM,
+      Math.max(HC_SR04_MIN_CM, Number(part.attrs?.distance ?? HC_SR04_DEFAULT_CM) || 0),
+    )
+    echoes.push({
+      trigger: triggerPin,
+      echo: echoPin,
+      delayUs: HC_SR04_ECHO_DELAY_US,
+      widthUs: Math.round(distance * HC_SR04_US_PER_CM),
+    })
   }
 
   // Digital-only modules: their OUT is the whole reading. Powered, they drive
@@ -871,5 +947,5 @@ export function evaluateCircuit(
     }
   }
 
-  return { leds, ledBrightness, rgbLeds, drives, warnings, analogs, sensors, outputs }
+  return { leds, ledBrightness, rgbLeds, drives, warnings, analogs, sensors, outputs, echoes }
 }

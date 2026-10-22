@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Ultrasonic",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 40,
+      "top": 100,
+      "attrs": {}
+    },
+    {
+      "id": "sonar",
+      "type": "wokwi-hc-sr04",
+      "left": 420,
+      "top": 140,
+      "attrs": {
+        "distance": "100"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "uno:5V",
+      "sonar:VCC"
+    ],
+    [
+      "sonar:GND",
+      "uno:GND.1"
+    ],
+    [
+      "uno:7",
+      "sonar:TRIG"
+    ],
+    [
+      "sonar:ECHO",
+      "uno:8"
+    ]
+  ],
+  "sketch": "// Ultrasonic — a tape measure made of sound.\n//\n// TRIG gets a 10 microsecond pulse; the sensor sends a chirp and raises ECHO\n// for as long as the sound takes to come back. pulseIn() measures that on the\n// sketch's own clock, and 58 microseconds is one centimetre there and back.\n// Move the Distance slider in the properties strip and watch the reading.\n\nconst int TRIG = 7;\nconst int ECHO = 8;\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(TRIG, OUTPUT);\n  pinMode(ECHO, INPUT);\n}\n\nvoid loop() {\n  digitalWrite(TRIG, HIGH);\n  delayMicroseconds(10);\n  digitalWrite(TRIG, LOW);\n  long echo = pulseIn(ECHO, HIGH, 30000);\n  Serial.print(echo / 58);\n  Serial.println(\" cm\");\n  delay(200);\n}\n"
+}

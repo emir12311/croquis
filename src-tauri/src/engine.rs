@@ -498,8 +498,19 @@ pub struct Simulator {
     analog: Sender<(u8, u16)>,
     /// Bytes to feed into the simulated UART's receive side.
     serial: Sender<u8>,
+    /// Input pulses scheduled in simulated time (`pulse()`).
+    pulses: Sender<PulseReq>,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
+}
+
+/// A timed input pulse, in simulated microseconds.
+#[derive(Clone, Copy)]
+struct PulseReq {
+    port: u8,
+    pin: u8,
+    delay_us: u64,
+    width_us: u64,
 }
 
 impl Simulator {
@@ -510,6 +521,7 @@ impl Simulator {
         let (tx, rx) = mpsc::channel();
         let (analog_tx, analog_rx) = mpsc::channel();
         let (serial_tx, serial_rx) = mpsc::channel();
+        let (pulse_tx, pulse_rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
         let elf = elf.to_path_buf();
@@ -520,6 +532,7 @@ impl Simulator {
                 rx,
                 analog_rx,
                 serial_rx,
+                pulse_rx,
                 stop_thread,
                 emit,
                 &ready_tx,
@@ -533,6 +546,7 @@ impl Simulator {
                 input: tx,
                 analog: analog_tx,
                 serial: serial_tx,
+                pulses: pulse_tx,
                 stop,
                 handle: Some(handle),
             }),
@@ -544,6 +558,24 @@ impl Simulator {
     /// Drive an input pin — a pressed button, a held line, etc.
     pub fn set_pin(&self, port: u8, pin: u8, high: bool) {
         let _ = self.input.send((port, pin, high));
+    }
+
+    /**
+     * An input pulse timed in simulated microseconds: the pin rises
+     * `delay_us` after this call *in simulated time*, stays high for
+     * `width_us` more, then drops, however fast the host machine runs.
+     *
+     * This is how an HC-SR04 answers `pulseIn()`: the sketch measures the
+     * echo's width with its own clock, so the reply has to be scheduled on
+     * that clock, not on the wall clock.
+     */
+    pub fn pulse(&self, port: u8, pin: u8, delay_us: u64, width_us: u64) {
+        let _ = self.pulses.send(PulseReq {
+            port,
+            pin,
+            delay_us,
+            width_us,
+        });
     }
 
     /// Hold a voltage on an ADC channel — a potentiometer's wiper, in millivolts.
@@ -625,6 +657,7 @@ fn sim_main(
     input: Receiver<(u8, u8, bool)>,
     analog: Receiver<(u8, u16)>,
     serial: Receiver<u8>,
+    pulses: Receiver<PulseReq>,
     stop: Arc<AtomicBool>,
     emit: Emit,
     ready: &Sender<Result<(), String>>,
@@ -716,6 +749,19 @@ fn sim_main(
         const TIMING_TICK: u64 = F_CPU as u64 / 50;
         // A pin that stops toggling is no longer PWM; stop repeating its timing.
         const TIMING_STALE: u64 = F_CPU as u64 / 10;
+        // Sixteen cycles per simulated microsecond at 16 MHz — how `pulse()`'s
+        // timing in microseconds becomes deadlines in cycles.
+        const CYCLES_PER_MICROSECOND: u64 = F_CPU as u64 / 1_000_000;
+        /// An input pulse waiting for its moment in simulated time. `raised`
+        /// distinguishes "before the rising edge" from "within the pulse", so
+        /// the falling edge is not raised twice.
+        struct Echo {
+            port: u8,
+            pin: u8,
+            high_at: u64,
+            low_at: u64,
+            raised: bool,
+        }
         struct Bounce {
             port: u8,
             pin: u8,
@@ -724,6 +770,7 @@ fn sim_main(
             next: u64,
         }
         let mut bounces: Vec<Bounce> = Vec::new();
+        let mut echoes: Vec<Echo> = Vec::new();
         let mut next_timing = sim_shim_cycle(avr) + TIMING_TICK;
 
         loop {
@@ -759,6 +806,21 @@ fn sim_main(
                     ffi::avr_raise_irq(uart_in, byte as u32);
                 }
             }
+            // Scheduled pulses queue up on the sketch's own clock: a request made
+            // in real time lands in simulated microseconds, so `pulseIn()` on the
+            // far side measures the width we were given, host speed notwithstanding.
+            while let Ok(req) = pulses.try_recv() {
+                // Keep only the newest request per pin.
+                echoes.retain(|e| !(e.port == req.port && e.pin == req.pin));
+                let now = sim_shim_cycle(avr);
+                echoes.push(Echo {
+                    port: req.port,
+                    pin: req.pin,
+                    high_at: now + req.delay_us * CYCLES_PER_MICROSECOND,
+                    low_at: now + (req.delay_us + req.width_us) * CYCLES_PER_MICROSECOND,
+                    raised: false,
+                });
+            }
             let state = ffi::avr_run(avr);
             // Settle the contacts that are still chattering.
             if !bounces.is_empty() {
@@ -773,6 +835,22 @@ fn sim_main(
                     }
                     if b.flips == 0 {
                         raise_pin(avr, b.port, b.pin, b.target);
+                        return false;
+                    }
+                    true
+                });
+            }
+            // Fire the scheduled pulses whose moment has come, and retire the
+            // ones whose width has passed.
+            if !echoes.is_empty() {
+                let now = sim_shim_cycle(avr);
+                echoes.retain_mut(|e| {
+                    if !e.raised && now >= e.high_at {
+                        raise_pin(avr, e.port, e.pin, true);
+                        e.raised = true;
+                    }
+                    if now >= e.low_at {
+                        raise_pin(avr, e.port, e.pin, false);
                         return false;
                     }
                     true
@@ -1241,6 +1319,104 @@ void loop() {}
         assert!(
             (19000..=21000).contains(&period_micros),
             "the servo frame should be about 20 ms, got {period_micros} µs"
+        );
+    }
+
+    /// An HC-SR04 answers `pulseIn()` on the sketch's own clock. The sketch
+    /// triggers pin 7 (PD7) and measures pin 8 (PB0); the test plays the
+    /// sensor: it watches the TRIG line's edges and, on each falling edge,
+    /// schedules the echo — 100 cm is 58 µs of flight per centimetre, so a
+    /// 5.8 ms pulse. If the echo were scheduled by wall clock, a busy host
+    /// would lose or stretch it; scheduling by simulated time only makes the
+    /// width itself the thing that matters.
+    #[test]
+    fn an_echo_answers_pulsein_in_simulated_time() {
+        let dir = std::env::temp_dir().join("croquis-echo-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+const int TRIG = 7;
+const int ECHO = 8;
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
+}
+void loop() {
+  digitalWrite(TRIG, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG, LOW);
+  long us = pulseIn(ECHO, HIGH, 50000UL);
+  Serial.print("us=");
+  Serial.println(us);
+  delay(50);
+}
+"#;
+        let fw = compile(sketch, &dir).expect("sketch should compile");
+
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+        // The sensor's half of the conversation: every falling TRIG edge gets
+        // an echo 600 µs later, 5800 µs wide.
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut last_falls = 0;
+        loop {
+            let (falls, serial) = {
+                let seen = events.lock().unwrap();
+                let mut was_high = false;
+                let mut falls = 0usize;
+                let mut text = String::new();
+                for event in seen.iter() {
+                    if let SimEvent::Pin { port: b'D', pin: 7, high } = event {
+                        if !*high && was_high {
+                            falls += 1;
+                        }
+                        was_high = *high;
+                    } else if let SimEvent::Serial(b) = event {
+                        text.push(*(b) as char);
+                    }
+                }
+                (falls, text)
+            };
+            if falls > last_falls {
+                sim.pulse(b'B', 0, 600, 5800);
+                last_falls = falls;
+            }
+            // The reading arrives a byte at a time — the UART is 9600 baud — so
+            // wait for a whole line, not for the prefix.
+            if serial.contains("us=") && serial[serial.find("us=").unwrap()..].contains('\n') {
+                break;
+            }
+            if Instant::now() > deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        sim.stop();
+
+        let ev = events.lock().unwrap();
+        let serial: String = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Serial(b) => Some(*b as char),
+                _ => None,
+            })
+            .collect();
+        let reading = serial
+            .split("us=")
+            .nth(1)
+            .and_then(|rest| rest.split('\n').next())
+            .and_then(|line| line.trim().parse::<u64>().ok())
+            .expect("the sketch should print us=…");
+        assert!(
+            (5500..=6100).contains(&reading),
+            "100 cm should echo for about 5800 µs, got {reading} µs"
         );
     }
 }

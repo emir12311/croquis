@@ -159,6 +159,9 @@
     setInput: async (port, pin, high) => {
       await invoke('set_input', { port, pin, high })
     },
+    pulseInput: async (port, pin, delayMicros, widthMicros) => {
+      await invoke('pulse_input', { port, pin, delayUs: delayMicros, widthUs: widthMicros })
+    },
     setAnalog: async (channel, millivolts) => {
       await invoke('set_analog', { channel, millivolts })
     },
