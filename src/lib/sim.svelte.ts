@@ -23,6 +23,8 @@ export interface SimBackend {
   start(elf: string, bounce: boolean): Promise<void>
   stop(): Promise<void>
   setInput(port: number, pin: number, high: boolean): Promise<void>
+  /** An input pulse timed in simulated microseconds — an ultrasonic echo. */
+  pulseInput(port: number, pin: number, delayMicros: number, widthMicros: number): Promise<void>
   /** Hold a voltage on an ADC channel, in millivolts (0–5000). */
   setAnalog(channel: number, millivolts: number): Promise<void>
   /** Feed text into the sketch's Serial input. */
@@ -84,6 +86,14 @@ export class Sim {
   private segmentMemory = new Map<string, number[]>()
   /** The last angle each servo was driven to, so a horn holds without a pulse. */
   private servoAngles = new Map<string, number>()
+  /**
+   * Board pins a sketch triggers, and where each trigger's echo comes back.
+   * Keyed by the trigger pin (`B2`, the same key the pin events use).
+   */
+  private echoTriggers = new Map<
+    string,
+    { echoPort: number; echoPin: number; delayUs: number; widthUs: number }
+  >()
   private backend: SimBackend
 
   constructor(backend: SimBackend) {
@@ -160,6 +170,7 @@ export class Sim {
     this.outputs = {}
     this.segmentMemory.clear()
     this.servoAngles.clear()
+    this.echoTriggers.clear()
     this.pressedButtons = {}
     this.sensors = {}
     this.analogs = []
@@ -240,6 +251,17 @@ export class Sim {
     this.warnings = result.warnings
     this.analogs = result.analogs
     this.sensors = result.sensors
+    // Triggers the sketch will pull: remember where each echo should come back.
+    // The map is rebuilt every solve, so re-wiring takes effect immediately.
+    this.echoTriggers.clear()
+    for (const echo of result.echoes) {
+      this.echoTriggers.set(`${echo.trigger.port}${echo.trigger.pin}`, {
+        echoPort: echo.echo.port.charCodeAt(0),
+        echoPin: echo.echo.pin,
+        delayUs: echo.delayUs,
+        widthUs: echo.widthUs,
+      })
+    }
     if (!this.backend.isDesktop() || !this.running) {
       this.lastDrives.clear()
       this.lastAnalogs.clear()
@@ -281,6 +303,16 @@ export class Sim {
         }
         this.avrPins[key] = high
         if (port === 66 && pin === 5) this.pin13 = high
+        // A trigger pulse ends on the falling edge: that is the moment the
+        // sensor answers, with an echo timed on the sketch's own clock.
+        if (!high) {
+          const trigger = this.echoTriggers.get(key)
+          if (trigger) {
+            this.backend
+              .pulseInput(trigger.echoPort, trigger.echoPin, trigger.delayUs, trigger.widthUs)
+              .catch((err) => console.error('pulse_input failed', err))
+          }
+        }
       })
       .then((u) => alive && unlisten.push(u))
     this.backend

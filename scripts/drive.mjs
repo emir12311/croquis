@@ -404,6 +404,13 @@ check('the servo preset loads with a horn', async (app) => {
   assert(await app.ev(`!!document.querySelector('wokwi-servo')`), 'the servo is on the canvas')
 })
 
+check('the ultrasonic preset loads with a sensor', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Ultrasonic')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 2, 'Ultrasonic gives two parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-hc-sr04')`), 'the sensor is on the canvas')
+})
+
 check('the joystick preset loads, drags, snaps back and clicks', async (app) => {
   await app.goto(`http://localhost:${DEV_PORT}`)
   await app.loadPreset('Joystick')

@@ -30,6 +30,7 @@ export type PartKind =
   | 'pir-motion-sensor'
   | 'flame-sensor'
   | 'sound-sensor'
+  | 'hc-sr04'
   | 'buzzer'
   | 'relay'
   | 'servo'
@@ -361,6 +362,24 @@ export const PARTS: PartDef[] = [
     fields: [{ name: 'noise', label: 'Noise', control: { kind: 'range', min: 0, max: 100, step: 1 } }],
     live: true,
     icon: '<path d="M4 10v4h3l4 4V6l-4 4H4z"/><path d="M15 9c1 1 1 5 0 6M18 7c2 2 2 8 0 10"/>',
+  },
+  {
+    kind: 'hc-sr04',
+    label: 'Ultrasonic sensor',
+    tag: 'wokwi-hc-sr04',
+    // The distance to the object the sensor is pointed at, in centimetres: the
+    // echo is as long as the sound took to get there and back. The real module
+    // is specified from about 2 cm to 4 m.
+    attrs: { distance: '100' },
+    fields: [
+      {
+        name: 'distance',
+        label: 'Distance (cm)',
+        control: { kind: 'range', min: 2, max: 400, step: 1 },
+      },
+    ],
+    live: true,
+    icon: '<rect x="2" y="7" width="20" height="3" rx="1"/><circle cx="8" cy="14" r="3.5"/><circle cx="16" cy="14" r="3.5"/>',
   },
   {
     kind: 'buzzer',

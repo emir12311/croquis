@@ -41,6 +41,7 @@ const GROUPS: Record<string, PresetGroup> = {
   thermometer: 'Sensors',
   joystick: 'Sensors',
   'digital-sensors': 'Sensors',
+  ultrasonic: 'Sensors',
   rgb: 'Outputs',
   'seven-segment': 'Outputs',
   'four-digit': 'Outputs',

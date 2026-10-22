@@ -8,6 +8,7 @@ class FakeBackend implements SimBackend {
   started: { elf: string; bounce: boolean }[] = []
   stopped = 0
   inputs: [number, number, boolean][] = []
+  pulses: [number, number, number, number][] = []
   analogs: [number, number][] = []
   serialWrites: string[] = []
   failCompile = ''
@@ -33,6 +34,9 @@ class FakeBackend implements SimBackend {
   }
   async setInput(port: number, pin: number, high: boolean) {
     this.inputs.push([port, pin, high])
+  }
+  async pulseInput(port: number, pin: number, delayMicros: number, widthMicros: number) {
+    this.pulses.push([port, pin, delayMicros, widthMicros])
   }
   async setAnalog(channel: number, millivolts: number) {
     this.analogs.push([channel, millivolts])
@@ -309,6 +313,33 @@ describe('Sim.attach', () => {
 
     stop()
     expect(backend.unsubscribed).toBe(3)
+  })
+
+  it('answers a trigger falling edge with an echo pulse, and not a rising one', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    const stop = sim.attach()
+    await Promise.resolve()
+
+    const sonarParts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'sonar', kind: 'hc-sr04', attrs: { distance: '100' } },
+    ]
+    const sonarWires: EvalWire[] = [
+      { a: { instanceId: 'uno', pin: '5V' }, b: { instanceId: 'sonar', pin: 'VCC' } },
+      { a: { instanceId: 'sonar', pin: 'GND' }, b: { instanceId: 'uno', pin: 'GND.2' } },
+      { a: { instanceId: 'uno', pin: '7' }, b: { instanceId: 'sonar', pin: 'TRIG' } },
+      { a: { instanceId: 'sonar', pin: 'ECHO' }, b: { instanceId: 'uno', pin: '8' } },
+    ]
+    sim.solve(sonarParts, sonarWires)
+
+    // The sketch raises TRIG first; the sensor answers when it falls.
+    backend.pinCb?.(68, 7, true)
+    expect(backend.pulses).toEqual([])
+    backend.pinCb?.(68, 7, false)
+    expect(backend.pulses).toEqual([[66, 0, 600, 5800]]) // echo pin 8 = port B, bit 0
+
+    stop()
   })
 
   it('clears a PWM timing when a pin event says it is digital again', async () => {

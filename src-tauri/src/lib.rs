@@ -31,6 +31,7 @@ pub fn run() {
             start_sim,
             stop_sim,
             set_input,
+            pulse_input,
             set_analog,
             serial_input
         ])
@@ -175,6 +176,17 @@ fn set_input(port: u8, pin: u8, high: bool, state: State<SimState>) {
     if let Ok(slot) = state.0.lock() {
         if let Some(sim) = slot.as_ref() {
             sim.set_pin(port, pin, high);
+        }
+    }
+}
+
+/// An input pulse timed in simulated microseconds — an HC-SR04's echo, which
+/// `pulseIn()` measures with the sketch's own clock.
+#[tauri::command]
+fn pulse_input(port: u8, pin: u8, delay_us: u64, width_us: u64, state: State<SimState>) {
+    if let Ok(slot) = state.0.lock() {
+        if let Some(sim) = slot.as_ref() {
+            sim.pulse(port, pin, delay_us, width_us);
         }
     }
 }
