@@ -11,6 +11,13 @@ import { isBreadboard, partByKind, type PartKind } from './parts'
  */
 
 import { BREADBOARD_PITCH } from './breadboard'
+import {
+  emptyShiftState,
+  stepShiftRegister,
+  type ShiftRegisterState,
+  type ShiftRegisterWiring,
+  type ShiftSignal,
+} from './shift-register'
 
 export type PinRef = { instanceId: string; pin: string }
 
@@ -176,6 +183,10 @@ export interface CircuitEval {
   sensors: Record<string, SensorState>
   /** Ultrasonic sensors waiting to answer a trigger, one per part. */
   echoes: EchoResponse[]
+  /** Shift-register state after this solve, by part id. */
+  shiftRegisters: Record<string, ShiftRegisterState>
+  /** How each shift register's inputs are wired, by part id. */
+  shiftWiring: Record<string, ShiftRegisterWiring>
 }
 
 // A small, honest model rather than a real circuit solver: enough that a
@@ -355,6 +366,7 @@ export function evaluateCircuit(
   pinDuty: Record<string, number> = {},
   pinFrequency: Record<string, number> = {},
   pinPulse: Record<string, number> = {},
+  previousShiftRegisters: Record<string, ShiftRegisterState> = {},
 ): CircuitEval {
   const kindById = new Map(parts.map((p) => [p.id, p.kind]))
   const key = (ref: PinRef) => {
@@ -411,6 +423,8 @@ export function evaluateCircuit(
   const gnd = new Set<string>()
   const mcuHigh = new Set<string>()
   const mcuLow = new Set<string>()
+  const partHigh = new Set<string>()
+  const partLow = new Set<string>()
   const mcuPinOf = new Map<string, { port: string; pin: number }>()
   const dutyByRoot = new Map<string, number>()
   const frequencyByRoot = new Map<string, number>()
@@ -536,8 +550,9 @@ export function evaluateCircuit(
     return reachTo(from, targets)?.ohms ?? null
   }
 
-  const netHigh = (root: string) => vcc.has(root) || mcuHigh.has(root)
-  const netLow = (root: string) => gnd.has(root) || mcuLow.has(root)
+  const netHigh = (root: string) =>
+    vcc.has(root) || mcuHigh.has(root) || partHigh.has(root)
+  const netLow = (root: string) => gnd.has(root) || mcuLow.has(root) || partLow.has(root)
 
   /** The board pin a net reaches, if any. A net can touch several pins; the
    * first is the one a part like an ultrasonic sensor talks to. */
@@ -548,8 +563,99 @@ export function evaluateCircuit(
     return null
   }
 
-  const highNets = new Set([...vcc, ...mcuHigh])
-  const lowNets = new Set([...gnd, ...mcuLow])
+  /** Does this pin's net reach an MCU pin at all (so a complaint is worth making)? */
+  const reachesPin = (part: EvalPart, pin: string): boolean => {
+    const root = uf.find(`${part.id}:${pin}`)
+    for (const label of mcuPinOf.keys()) if (label.startsWith(root + '/')) return true
+    return false
+  }
+
+  const warnings: Record<string, string> = {}
+  const drives: CircuitEval['drives'] = []
+
+  // A 74HC595 is a source, not a load: it drives Q0…Q7 and Q7S from the bits it
+  // has been clocked. The shift state persists across solves, so the caller hands
+  // back the previous state and gets the next one.
+  const SHIFT_SIGNALS: { signal: ShiftSignal; pin: string }[] = [
+    { signal: 'ds', pin: 'DS' },
+    { signal: 'shcp', pin: 'SHCP' },
+    { signal: 'stcp', pin: 'STCP' },
+    { signal: 'mr', pin: 'MR' },
+    { signal: 'oe', pin: 'OE' },
+  ]
+  const SHIFT_OUTPUTS = ['Q0', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7'] as const
+  const touchesWire = (partId: string) =>
+    wires.some((w) => w.a.instanceId === partId || w.b.instanceId === partId)
+  const shiftWiring: CircuitEval['shiftWiring'] = {}
+  const nextShiftRegisters: CircuitEval['shiftRegisters'] = {}
+  for (const part of parts) {
+    if (part.kind !== '74hc595') continue
+    const powered = netHigh(uf.find(`${part.id}:VCC`)) && netLow(uf.find(`${part.id}:GND`))
+    const pins: Partial<Record<ShiftSignal, string>> = {}
+    const levels: Record<ShiftSignal, boolean> = {
+      ds: false,
+      shcp: false,
+      stcp: false,
+      mr: false,
+      oe: false,
+    }
+    let floating = false
+    for (const { signal, pin } of SHIFT_SIGNALS) {
+      const root = uf.find(`${part.id}:${pin}`)
+      const boardPin = mcuPinOn(root)
+      if (boardPin) {
+        pins[signal] = `${boardPin.port}${boardPin.pin}`
+      } else if (netHigh(root)) {
+        levels[signal] = true
+      } else if (netLow(root)) {
+        levels[signal] = false
+      } else {
+        // A floating MR or OE is undefined on the real chip. OE defaults to
+        // disabled and MR to held-clear, so nothing happens silently.
+        if (signal === 'mr' || signal === 'oe') {
+          floating = true
+          levels[signal] = signal === 'oe'
+        }
+      }
+    }
+    const wiring: ShiftRegisterWiring = { powered, pins, levels }
+    shiftWiring[part.id] = wiring
+    const state = stepShiftRegister(
+      previousShiftRegisters[part.id] ?? emptyShiftState(),
+      wiring,
+      avr,
+    )
+    nextShiftRegisters[part.id] = state
+
+    const connected = Object.keys(pins).length > 0 || touchesWire(part.id)
+    if (!powered) {
+      if (connected) warnings[part.id] = 'Its VCC pin needs 5V and its GND pin needs GND.'
+      continue
+    }
+    if (floating && connected) warnings[part.id] = 'Tie MR to 5V and OE to GND.'
+
+    // OE low enables the parallel outputs; Q7S is the last shift stage and is
+    // not gated by OE, which is what lets chips chain.
+    if (!state.levels.oe) {
+      for (let i = 0; i < SHIFT_OUTPUTS.length; i++) {
+        const root = uf.find(`${part.id}:${SHIFT_OUTPUTS[i]}`)
+        const high = ((state.latch >> i) & 1) === 1
+        ;(high ? partHigh : partLow).add(root)
+        for (const [label, boardPin] of mcuPinOf) {
+          if (label.startsWith(root + '/')) drives.push({ ...boardPin, high })
+        }
+      }
+    }
+    const q7sRoot = uf.find(`${part.id}:Q7S`)
+    const q7sHigh = ((state.shift >> 7) & 1) === 1
+    ;(q7sHigh ? partHigh : partLow).add(q7sRoot)
+    for (const [label, boardPin] of mcuPinOf) {
+      if (label.startsWith(q7sRoot + '/')) drives.push({ ...boardPin, high: q7sHigh })
+    }
+  }
+
+  const highNets = new Set([...vcc, ...mcuHigh, ...partHigh])
+  const lowNets = new Set([...gnd, ...mcuLow, ...partLow])
 
   // LEDs: how much current actually flows. A resistor in series sets it, so this
   // is where a resistor stops being decoration — and where a missing one shows.
@@ -557,7 +663,6 @@ export function evaluateCircuit(
   const ledBrightness: Record<string, number> = {}
   const rgbLeds: Record<string, RgbState> = {}
   const outputs: Record<string, OutputState> = {}
-  const warnings: Record<string, string> = {}
   const echoes: EchoResponse[] = []
   for (const part of parts) {
     if (part.kind !== 'led') continue
@@ -651,12 +756,6 @@ export function evaluateCircuit(
       list.push(channel)
       analogChannels.set(root, list)
     }
-  }
-  /** Does this pin's net reach an MCU pin at all (so a complaint is worth making)? */
-  const reachesPin = (part: EvalPart, pin: string): boolean => {
-    const root = uf.find(`${part.id}:${pin}`)
-    for (const label of mcuPinOf.keys()) if (label.startsWith(root + '/')) return true
-    return false
   }
   for (const def of ANALOG_SOURCES) {
     for (const part of parts) {
@@ -779,7 +878,6 @@ export function evaluateCircuit(
   // Released, it's an open circuit, so the pin's level is whatever else holds it:
   // a pull-down resistor means low, otherwise the sketch's pull-up means high.
   // (simavr has no "release", so we drive the level it would settle at.)
-  const drives: CircuitEval['drives'] = []
   for (const part of parts) {
     if (part.kind !== 'pushbutton') continue
     const roots: Record<string, string> = { '1': uf.find(`${part.id}:1`), '2': uf.find(`${part.id}:2`) }
@@ -947,5 +1045,17 @@ export function evaluateCircuit(
     }
   }
 
-  return { leds, ledBrightness, rgbLeds, drives, warnings, analogs, sensors, outputs, echoes }
+  return {
+    leds,
+    ledBrightness,
+    rgbLeds,
+    drives,
+    warnings,
+    analogs,
+    sensors,
+    outputs,
+    echoes,
+    shiftRegisters: nextShiftRegisters,
+    shiftWiring,
+  }
 }

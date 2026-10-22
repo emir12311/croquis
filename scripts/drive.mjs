@@ -411,6 +411,14 @@ check('the ultrasonic preset loads with a sensor', async (app) => {
   assert(await app.ev(`!!document.querySelector('wokwi-hc-sr04')`), 'the sensor is on the canvas')
 })
 
+check('the shift register preset loads with a chip and bar', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Shift register')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 3, 'Shift register gives three parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-74hc595')`), 'the 74HC595 is on the canvas')
+  assert(await app.ev(`!!document.querySelector('wokwi-led-bar-graph')`), 'the LED bar is on the canvas')
+})
+
 check('the joystick preset loads, drags, snaps back and clicks', async (app) => {
   await app.goto(`http://localhost:${DEV_PORT}`)
   await app.loadPreset('Joystick')
