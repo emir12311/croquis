@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Shift register",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 40,
+      "top": 100,
+      "attrs": {}
+    },
+    {
+      "id": "hc",
+      "type": "wokwi-74hc595",
+      "left": 400,
+      "top": 120,
+      "attrs": {}
+    },
+    {
+      "id": "bar",
+      "type": "wokwi-led-bar-graph",
+      "left": 620,
+      "top": 180,
+      "attrs": {
+        "color": "red"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "uno:5V",
+      "hc:VCC"
+    ],
+    [
+      "hc:GND",
+      "uno:GND.1"
+    ],
+    [
+      "uno:2",
+      "hc:DS"
+    ],
+    [
+      "uno:3",
+      "hc:SHCP"
+    ],
+    [
+      "uno:4",
+      "hc:STCP"
+    ],
+    [
+      "uno:5V",
+      "hc:MR"
+    ],
+    [
+      "hc:OE",
+      "uno:GND.1"
+    ],
+    [
+      "hc:Q0",
+      "bar:A1"
+    ],
+    [
+      "hc:Q1",
+      "bar:A2"
+    ],
+    [
+      "hc:Q2",
+      "bar:A3"
+    ],
+    [
+      "hc:Q3",
+      "bar:A4"
+    ],
+    [
+      "hc:Q4",
+      "bar:A5"
+    ],
+    [
+      "hc:Q5",
+      "bar:A6"
+    ],
+    [
+      "hc:Q6",
+      "bar:A7"
+    ],
+    [
+      "hc:Q7",
+      "bar:A8"
+    ],
+    [
+      "bar:C1",
+      "uno:GND.2"
+    ],
+    [
+      "bar:C2",
+      "uno:GND.2"
+    ],
+    [
+      "bar:C3",
+      "uno:GND.2"
+    ],
+    [
+      "bar:C4",
+      "uno:GND.2"
+    ],
+    [
+      "bar:C5",
+      "uno:GND.2"
+    ],
+    [
+      "bar:C6",
+      "uno:GND.2"
+    ],
+    [
+      "bar:C7",
+      "uno:GND.2"
+    ],
+    [
+      "bar:C8",
+      "uno:GND.2"
+    ]
+  ],
+  "sketch": "// Shift register — eight outputs from three pins.\n//\n// The 74HC595 takes a bit in on DS at each SHCP rise, then copies the eight\n// bits to its outputs when STCP rises. MR tied high and OE tied low keep it\n// running; shiftOut() does the bit-banging, and the bar shows the pattern.\n\nconst int DS = 2;\nconst int SHCP = 3;\nconst int STCP = 4;\n\nbyte pattern = 1;\n\nvoid setup() {\n  pinMode(DS, OUTPUT);\n  pinMode(SHCP, OUTPUT);\n  pinMode(STCP, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(STCP, LOW);\n  shiftOut(DS, SHCP, MSBFIRST, pattern);\n  digitalWrite(STCP, HIGH);\n  delay(150);\n  pattern = (pattern << 1) | (pattern >> 7);\n}\n"
+}

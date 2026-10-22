@@ -16,6 +16,12 @@ import {
   type RgbState,
   type SensorState,
 } from './netlist'
+import {
+  emptyShiftState,
+  stepShiftRegister,
+  type ShiftRegisterState,
+  type ShiftRegisterWiring,
+} from './shift-register'
 
 export interface SimBackend {
   isDesktop(): boolean
@@ -94,6 +100,10 @@ export class Sim {
     string,
     { echoPort: number; echoPin: number; delayUs: number; widthUs: number }
   >()
+  /** The 74HC595 shift registers' remembered bits, by part id. */
+  private shiftRegisters: Record<string, ShiftRegisterState> = {}
+  /** How each shift register's inputs are wired, rebuilt on every solve. */
+  private shiftWiring: Record<string, ShiftRegisterWiring> = {}
   private backend: SimBackend
 
   constructor(backend: SimBackend) {
@@ -114,6 +124,7 @@ export class Sim {
     this.rgbLeds = {}
     this.outputs = {}
     this.segmentMemory.clear()
+    this.shiftRegisters = {}
     // A fresh run never inherits a held button.
     this.pressedButtons = {}
     this.sensors = {}
@@ -150,6 +161,7 @@ export class Sim {
     this.outputs = {}
     this.segmentMemory.clear()
     this.servoAngles.clear()
+    this.shiftRegisters = {}
     this.pressedButtons = {}
     this.sensors = {}
   }
@@ -171,6 +183,8 @@ export class Sim {
     this.segmentMemory.clear()
     this.servoAngles.clear()
     this.echoTriggers.clear()
+    this.shiftRegisters = {}
+    this.shiftWiring = {}
     this.pressedButtons = {}
     this.sensors = {}
     this.analogs = []
@@ -216,7 +230,16 @@ export class Sim {
       // A servo's horn angle comes from the width of the last HIGH stretch.
       if (timing.highMicros > 0) pulse[key] = timing.highMicros
     }
-    const result = evaluateCircuit(parts, wires, this.pressedButtons, pins, duty, frequency, pulse)
+    const result = evaluateCircuit(
+      parts,
+      wires,
+      this.pressedButtons,
+      pins,
+      duty,
+      frequency,
+      pulse,
+      this.shiftRegisters,
+    )
     const outputs = { ...result.outputs }
     // A multiplexed display is sampled one digit at a time. Keep the last lit
     // segments for every digit so the next scan does not erase the others.
@@ -251,6 +274,8 @@ export class Sim {
     this.warnings = result.warnings
     this.analogs = result.analogs
     this.sensors = result.sensors
+    this.shiftRegisters = result.shiftRegisters
+    this.shiftWiring = result.shiftWiring
     // Triggers the sketch will pull: remember where each echo should come back.
     // The map is rebuilt every solve, so re-wiring takes effect immediately.
     this.echoTriggers.clear()
@@ -302,6 +327,16 @@ export class Sim {
           this.pinTimings = next
         }
         this.avrPins[key] = high
+        // A shiftOut burst is several clock edges in a few microseconds, so the
+        // register is stepped per edge here rather than once per rendered frame.
+        for (const [partId, wiring] of Object.entries(this.shiftWiring)) {
+          if (!Object.values(wiring.pins).includes(key)) continue
+          this.shiftRegisters[partId] = stepShiftRegister(
+            this.shiftRegisters[partId] ?? emptyShiftState(),
+            wiring,
+            this.avrPins,
+          )
+        }
         if (port === 66 && pin === 5) this.pin13 = high
         // A trigger pulse ends on the falling edge: that is the moment the
         // sensor answers, with an echo timed on the sketch's own clock.

@@ -48,6 +48,7 @@ const GROUPS: Record<string, PresetGroup> = {
   'led-bar': 'Outputs',
   'buzzer-relay': 'Outputs',
   servo: 'Outputs',
+  'shift-register': 'Outputs',
 }
 
 /** "button-serial" → "Button serial", for a file carrying no title of its own. */

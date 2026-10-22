@@ -288,6 +288,47 @@ describe('Sim.solve', () => {
     expect(sim.ledStates).toEqual({})
     expect(sim.warnings).toEqual({})
   })
+
+  it('steps a 74HC595 on every clock edge, not once per solve', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    const stop = sim.attach()
+    await Promise.resolve()
+
+    const shiftParts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'hc', kind: '74hc595' },
+    ]
+    const shiftWires: EvalWire[] = [
+      { a: { instanceId: 'uno', pin: '5V' }, b: { instanceId: 'hc', pin: 'VCC' } },
+      { a: { instanceId: 'hc', pin: 'GND' }, b: { instanceId: 'uno', pin: 'GND.2' } },
+      { a: { instanceId: 'uno', pin: '2' }, b: { instanceId: 'hc', pin: 'DS' } },
+      { a: { instanceId: 'uno', pin: '3' }, b: { instanceId: 'hc', pin: 'SHCP' } },
+      { a: { instanceId: 'uno', pin: '4' }, b: { instanceId: 'hc', pin: 'STCP' } },
+      { a: { instanceId: 'uno', pin: '5' }, b: { instanceId: 'hc', pin: 'MR' } },
+      { a: { instanceId: 'uno', pin: '6' }, b: { instanceId: 'hc', pin: 'OE' } },
+      { a: { instanceId: 'hc', pin: 'Q0' }, b: { instanceId: 'uno', pin: '7' } },
+    ]
+    await sim.run('void setup(){}', false)
+    sim.avrPins = { D5: true, D6: false }
+    sim.solve(shiftParts, shiftWires)
+    expect(backend.inputs.at(-1)).toEqual([68, 7, false])
+
+    // 0x01 MSBFIRST: seven zeros, then a one in Q0. Each edge is its own
+    // callback; a single solve at the end must still see all eight.
+    for (let bit = 7; bit >= 0; bit--) {
+      backend.pinCb?.(68, 2, ((0x01 >> bit) & 1) === 1)
+      backend.pinCb?.(68, 3, true)
+      backend.pinCb?.(68, 3, false)
+    }
+    backend.pinCb?.(68, 4, true)
+    sim.solve(shiftParts, shiftWires)
+    expect(backend.inputs.at(-1)).toEqual([68, 7, true])
+
+    sim.solve(shiftParts, shiftWires)
+    expect(backend.inputs.at(-1)).toEqual([68, 7, true])
+    stop()
+  })
 })
 
 describe('Sim.attach', () => {

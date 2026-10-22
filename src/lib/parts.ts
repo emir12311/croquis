@@ -34,6 +34,7 @@ export type PartKind =
   | 'buzzer'
   | 'relay'
   | 'servo'
+  | '74hc595'
   | 'seven-segment'
   | 'seven-segment-4'
   | 'led-bar-graph'
@@ -403,6 +404,13 @@ export const PARTS: PartDef[] = [
     attrs: {},
     live: true,
     icon: '<rect x="5" y="10" width="14" height="7" rx="1"/><path d="M12 10V7M12 7a2 2 0 1 0 2-2 2 2 0 0 0-2 2"/><path d="M9 17v2M15 17v2"/>',
+  },
+  {
+    kind: '74hc595',
+    label: '74HC595 shift register',
+    tag: 'wokwi-74hc595',
+    attrs: {},
+    icon: '<rect x="4" y="7" width="16" height="10" rx="0.5"/><path d="M6 7V4M9 7V4M12 7V4M15 7V4M18 7V4M6 17v3M9 17v3M12 17v3M15 17v3M18 17v3"/><text x="12" y="13.5" text-anchor="middle" font-size="4.5" fill="currentColor" stroke="none">595</text>',
   },
   {
     kind: 'seven-segment',

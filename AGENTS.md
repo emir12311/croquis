@@ -61,6 +61,8 @@ simavr steps; the rest are in [the README](README.md#build-from-source).
 | `src/lib/buzzer-audio.ts` | the WebAudio voice for driven buzzers |
 | `src/lib/serial-scroll.ts` | whether the serial monitor should follow new output |
 | `src/lib/wokwi.ts` | the `@wokwi/elements` we import, and element fixes such as the slide pot's missing styles |
+| `src/lib/hc595-element.ts` | the hand-drawn 74HC595 DIP-16 — `@wokwi/elements` has no logic parts |
+| `src/lib/shift-register.ts` | the 74HC595's pure shift/latch state machine |
 | `src/lib/arduino-api.ts` | the editor's Arduino completions |
 | `src/lib/presets.ts` + `presets/*.json` | the shipped circuits |
 | `libraries/` | the bundled Arduino libraries compiled offline with a sketch; provenance in `NOTICE.md` |

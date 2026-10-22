@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { BREADBOARDS } from './breadboard'
 import { evaluateCircuit, ledStep, type EvalPart, type EvalWire } from './netlist'
+import type { ShiftRegisterState } from './shift-register'
 
 const uno: EvalPart = { id: 'uno', kind: 'uno' }
 const led = (color = 'red'): EvalPart => ({ id: 'led', kind: 'led', attrs: { color } })
@@ -940,5 +941,143 @@ describe('an ultrasonic sensor answers a trigger with an echo', () => {
     const out = run([sonar()], [])
     expect(out.echoes).toEqual([])
     expect(out.warnings.sonar).toBeUndefined()
+  })
+})
+
+describe('a 74HC595 shifts bits in and latches them out', () => {
+  const hc = (): EvalPart => ({ id: 'hc', kind: '74hc595' })
+  const bar = (): EvalPart => ({ id: 'bar', kind: 'led-bar-graph' })
+  const baseWires = [
+    wire(at('uno', '5V'), at('hc', 'VCC')),
+    wire(at('hc', 'GND'), at('uno', 'GND.2')),
+    wire(at('uno', '2'), at('hc', 'DS')),
+    wire(at('uno', '3'), at('hc', 'SHCP')),
+    wire(at('uno', '4'), at('hc', 'STCP')),
+    wire(at('uno', '5'), at('hc', 'MR')),
+    wire(at('uno', '6'), at('hc', 'OE')),
+  ]
+  const barWires = Array.from({ length: 8 }, (_, i) => [
+    wire(at('hc', `Q${i}`), at('bar', `A${i + 1}`)),
+    wire(at('bar', `C${i + 1}`), at('uno', 'GND.2')),
+  ]).flat()
+
+  const harness = (extra: EvalWire[] = [], wires = [...baseWires, ...barWires]) => {
+    let avr: Record<string, boolean> = { D2: false, D3: false, D4: false, D5: true, D6: false }
+    let state: Record<string, ShiftRegisterState> = {}
+    const settle = (levels: Record<string, boolean> = {}) => {
+      avr = { ...avr, ...levels }
+      const out = evaluateCircuit([uno, hc(), bar()], [...wires, ...extra], {}, avr, {}, {}, {}, state)
+      state = out.shiftRegisters
+      return out
+    }
+    const clockIn = (value: number) => {
+      for (let bit = 7; bit >= 0; bit--) {
+        settle({ D2: ((value >> bit) & 1) === 1 })
+        settle({ D3: true })
+        settle({ D3: false })
+      }
+    }
+    const latch = () => {
+      settle({ D4: true })
+      return settle({ D4: false })
+    }
+    return { settle, clockIn, latch }
+  }
+
+  const lit = (out: ReturnType<ReturnType<typeof harness>['settle']>) =>
+    out.outputs.bar.values.slice(0, 8)
+
+  it('moves MSBFIRST into Q7…Q0 and shows it only after the latch', () => {
+    const h = harness()
+    h.clockIn(0xaa)
+    const before = h.settle()
+    expect(before.shiftRegisters.hc.shift).toBe(0xaa)
+    expect(before.shiftRegisters.hc.latch).toBe(0)
+    expect(lit(before)).toEqual([0, 0, 0, 0, 0, 0, 0, 0])
+
+    const after = h.latch()
+    expect(after.shiftRegisters.hc.latch).toBe(0xaa)
+    expect(lit(after)).toEqual([0, 1, 0, 1, 0, 1, 0, 1])
+  })
+
+  it('clears the shift register with MR but leaves the latched outputs alone', () => {
+    const h = harness()
+    h.clockIn(0xaa)
+    h.latch()
+    const cleared = h.settle({ D5: false })
+    expect(cleared.shiftRegisters.hc.shift).toBe(0)
+    expect(cleared.shiftRegisters.hc.latch).toBe(0xaa)
+    expect(lit(cleared)).toEqual([0, 1, 0, 1, 0, 1, 0, 1])
+
+    h.settle({ D5: true })
+    h.clockIn(0x0f)
+    const held = h.settle()
+    expect(held.shiftRegisters.hc.latch).toBe(0xaa)
+    expect(lit(held)).toEqual([0, 1, 0, 1, 0, 1, 0, 1])
+
+    const latched = h.latch()
+    expect(latched.shiftRegisters.hc.latch).toBe(0x0f)
+    expect(lit(latched)).toEqual([1, 1, 1, 1, 0, 0, 0, 0])
+  })
+
+  it('tri-states the outputs while OE is high, keeping the latch', () => {
+    const h = harness()
+    h.clockIn(0xaa)
+    h.latch()
+    const disabled = h.settle({ D6: true })
+    expect(lit(disabled)).toEqual([0, 0, 0, 0, 0, 0, 0, 0])
+    expect(disabled.shiftRegisters.hc.latch).toBe(0xaa)
+
+    const enabled = h.settle({ D6: false })
+    expect(lit(enabled)).toEqual([0, 1, 0, 1, 0, 1, 0, 1])
+  })
+
+  it('drives a board pin from an output bit', () => {
+    const h = harness([wire(at('hc', 'Q0'), at('uno', '7'))])
+    h.clockIn(0x01)
+    const out = h.latch()
+    expect(out.drives).toContainEqual({ port: 'D', pin: 7, high: true })
+
+    h.clockIn(0x00)
+    const low = h.latch()
+    expect(low.drives).toContainEqual({ port: 'D', pin: 7, high: false })
+  })
+
+  it('runs with MR tied high and OE tied low, as the preset does', () => {
+    const h = harness([], [
+      wire(at('uno', '5V'), at('hc', 'VCC')),
+      wire(at('hc', 'GND'), at('uno', 'GND.2')),
+      wire(at('uno', '2'), at('hc', 'DS')),
+      wire(at('uno', '3'), at('hc', 'SHCP')),
+      wire(at('uno', '4'), at('hc', 'STCP')),
+      wire(at('uno', '5V'), at('hc', 'MR')),
+      wire(at('hc', 'OE'), at('uno', 'GND.2')),
+      ...barWires,
+    ])
+    h.clockIn(0x01)
+    const out = h.latch()
+    expect(lit(out)).toEqual([1, 0, 0, 0, 0, 0, 0, 0])
+    expect(out.warnings.hc).toBeUndefined()
+  })
+
+  it('wants power, and wants its unused control pins tied', () => {
+    const unpowered = evaluateCircuit(
+      [uno, hc()],
+      [wire(at('uno', '2'), at('hc', 'DS'))],
+      {},
+      {},
+    )
+    expect(unpowered.warnings.hc).toMatch(/VCC.*5V.*GND/i)
+
+    const floating = evaluateCircuit(
+      [uno, hc()],
+      [wire(at('uno', '5V'), at('hc', 'VCC')), wire(at('hc', 'GND'), at('uno', 'GND.2'))],
+      {},
+      {},
+    )
+    expect(floating.warnings.hc).toMatch(/MR.*5V.*OE.*GND/i)
+
+    const shelf = evaluateCircuit([uno, hc()], [], {}, {})
+    expect(shelf.warnings.hc).toBeUndefined()
   })
 })
