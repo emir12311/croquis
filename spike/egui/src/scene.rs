@@ -7,7 +7,7 @@ use std::path::Path;
 use eframe::egui::{Color32, Pos2, Vec2};
 use serde::Deserialize;
 
-use croquis_core::catalogue::{parse_kind, part_by_kind, CATALOGUE};
+use croquis_core::catalogue::{parse_kind, part_by_kind, PartKind, CATALOGUE};
 use croquis_core::diagram::parse_diagram;
 use croquis_core::document::PinRef as CorePinRef;
 use croquis_core::netlist::{evaluate_circuit, EvalPart, EvalWire, LedState};
@@ -249,4 +249,47 @@ pub fn led_state_svg(svg: &str, color: &str, brightness: f64, on: bool) -> Strin
             1,
         );
     format!("{}{}{}", &svg[..start], patched, &svg[end..])
+}
+
+/// The sketch text from the Blink preset.
+pub fn blink_sketch() -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let Ok(text) = fs::read_to_string(root.join("presets/blink.json")) else {
+        return String::new();
+    };
+    parse_diagram(&text, &CATALOGUE)
+        .ok()
+        .and_then(|diagram| diagram.sketch)
+        .unwrap_or_default()
+}
+
+/// Create a new instance of a catalogue part for the palette.
+pub fn part_from_kind(kind: PartKind, center: Pos2, id: String) -> Option<Part> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let text = fs::read_to_string(root.join("assets/wokwi/manifest.json")).ok()?;
+    let manifest = serde_json::from_str::<Manifest>(&text).ok()?;
+    let def = manifest
+        .parts
+        .iter()
+        .find(|part| part.kind == kind.as_str())?;
+    let svg = fs::read_to_string(root.join("assets/wokwi").join(&def.svg)).ok()?;
+    let meta = part_by_kind(kind);
+    Some(Part {
+        id,
+        kind: kind.as_str().to_string(),
+        name: meta.label.to_string(),
+        center,
+        size: Vec2::new(def.width, def.height),
+        color: Color32::from_rgb(70, 100, 130),
+        pins: def
+            .pins
+            .iter()
+            .map(|pin| Pin {
+                name: pin.name.clone(),
+                offset: Vec2::new(pin.x - def.width / 2.0, pin.y - def.height / 2.0),
+            })
+            .collect(),
+        attrs: meta.attrs.clone(),
+        svg,
+    })
 }
