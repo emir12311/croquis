@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Sim, type SimBackend } from './sim.svelte'
-import type { EvalPart, EvalWire } from './netlist'
+import { unoPin, type EvalPart, type EvalWire } from './netlist'
 
 class FakeBackend implements SimBackend {
   desktop = true
@@ -326,6 +326,51 @@ describe('Sim.solve', () => {
     stop()
   })
 
+  it('answers a DHT read with the humidity it was just given', async () => {
+    // Changing only the humidity slider must reach the wire: the sensor is
+    // re-solved with both values, and the next transaction encodes the new one.
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    const stop = sim.attach()
+    await Promise.resolve()
+    await sim.run('void setup(){}', false)
+
+    const dhtParts = (humidity: string): EvalPart[] => [
+      { id: 'uno', kind: 'uno' },
+      { id: 'dht', kind: 'dht22', attrs: { temperature: '25', humidity } },
+    ]
+    const dhtWires: EvalWire[] = [
+      { a: { instanceId: 'uno', pin: '5V' }, b: { instanceId: 'dht', pin: 'VCC' } },
+      { a: { instanceId: 'dht', pin: 'GND' }, b: { instanceId: 'uno', pin: 'GND.2' } },
+      { a: { instanceId: 'uno', pin: '2' }, b: { instanceId: 'dht', pin: 'SDA' } },
+    ]
+    const startRead = () => {
+      backend.pinCb?.(68, 2, false)
+      backend.pinCb?.(68, 2, true)
+    }
+
+    sim.solve(dhtParts('50'), dhtWires)
+    startRead()
+    expect(backend.scripts).toHaveLength(1)
+
+    // Step past the one-second guard that stops the response's own edges from
+    // starting another read, without making the test wait for it.
+    const realNow = Date.now
+    Date.now = () => realNow() + 2000
+    try {
+      sim.solve(dhtParts('80'), dhtWires)
+      startRead()
+    } finally {
+      Date.now = realNow
+    }
+
+    expect(backend.scripts).toHaveLength(2)
+    const humid50 = backend.scripts[0]![3]
+    const humid80 = backend.scripts[1]![3]
+    expect(humid80).not.toEqual(humid50)
+    stop()
+  })
+
   it('sends a NEC frame to every wired IR receiver', async () => {
     const backend = new FakeBackend()
     const sim = new Sim(backend)
@@ -438,6 +483,94 @@ describe('Sim.solve', () => {
     stop()
   })
 
+  it('does not latch a phantom nibble from the startup pin levels', async () => {
+    // The simulator announces each pin's level when it starts. That lone `low` on
+    // the enable line is not a clock pulse: latching it shifts every later byte by
+    // half a byte, which showed up as a couple of stray glyphs in wrong cells.
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    const stop = sim.attach()
+    await Promise.resolve()
+    await sim.run('void setup(){}', false)
+
+    const parts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'lcd', kind: 'lcd1602' },
+    ]
+    const w = (pin: string, lcdPin: string): EvalWire => ({
+      a: { instanceId: 'lcd', pin: lcdPin },
+      b: { instanceId: 'uno', pin },
+    })
+    const wires: EvalWire[] = [
+      w('GND.1', 'VSS'),
+      w('5V', 'VDD'),
+      w('GND.1', 'V0'),
+      w('12', 'RS'),
+      w('GND.1', 'RW'),
+      w('11', 'E'),
+      w('5', 'D4'),
+      w('4', 'D5'),
+      w('3', 'D6'),
+      w('2', 'D7'),
+      w('5V', 'A'),
+      w('GND.1', 'K'),
+    ]
+    sim.solve(parts, wires)
+
+    const levels = new Map<string, boolean>()
+    const drive = (pin: string, high: boolean) => {
+      if ((levels.get(pin) ?? false) === high) return
+      levels.set(pin, high)
+      const info = unoPin(pin)
+      if (!info || info.kind !== 'mcu') throw new Error(`${pin} is not a chip pin`)
+      backend.pinCb?.(info.port.charCodeAt(0), info.pin, high)
+    }
+    const dataPins = ['5', '4', '3', '2']
+    const nibble = (value: number) => {
+      for (let i = 0; i < 4; i++) drive(dataPins[i]!, ((value >> i) & 1) === 1)
+      drive('11', true)
+      drive('11', false)
+    }
+    const send = (value: number, data: boolean) => {
+      drive('12', data)
+      nibble(value >> 4)
+      nibble(value & 0x0f)
+    }
+
+    // The startup announcement, exactly as simavr sends it: every pin low. It has
+    // to bypass `drive`, whose job is to drop unchanged levels.
+    for (const pin of ['12', '11', '5', '4', '3', '2']) {
+      levels.set(pin, false)
+      const info = unoPin(pin)
+      if (!info || info.kind !== 'mcu') throw new Error(`${pin} is not a chip pin`)
+      backend.pinCb?.(info.port.charCodeAt(0), info.pin, false)
+    }
+
+    for (const cmd of [0x33, 0x32, 0x28, 0x0c, 0x06, 0x01]) send(cmd, false)
+    for (const ch of 'Hi') send(ch.charCodeAt(0), true)
+
+    sim.solve(parts, wires)
+    const values = sim.outputs.lcd!.values
+    expect(String.fromCharCode(...values.slice(0, 2))).toBe('Hi')
+    stop()
+  })
+
+  it('keeps a tapped key closed long enough for one scan', () => {
+    // A click arrives as press and release in the same task, so a solve that runs
+    // afterwards would never see the key. The release is held back briefly.
+    vi.useFakeTimers()
+    try {
+      const sim = new Sim(new FakeBackend())
+      sim.pressKey('pad', 1, 2)
+      sim.releaseKey('pad', 1, 2)
+      expect(sim.keypadKeys.pad).toEqual({ row: 1, column: 2 })
+      vi.advanceTimersByTime(600)
+      expect(sim.keypadKeys.pad).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('drives a keypad column through the matrix while a key is held', async () => {
     const backend = new FakeBackend()
     const sim = new Sim(backend)
@@ -463,9 +596,87 @@ describe('Sim.solve', () => {
     sim.solve(padParts, padWires)
     expect(backend.inputs).toContainEqual([68, 5, false])
 
-    sim.releaseKey('pad')
+    // Pressing and releasing in the same task is a tap, and a tap's release is
+    // held back so a scan of the matrix can still find the key — otherwise a
+    // click is over before the sketch looks. The column therefore stays low
+    // until the hold expires.
+    vi.useFakeTimers()
+    try {
+      sim.releaseKey('pad')
+      sim.solve(padParts, padWires)
+      expect(backend.inputs).toContainEqual([68, 5, false])
+      vi.advanceTimersByTime(600)
+    } finally {
+      vi.useRealTimers()
+    }
     sim.solve(padParts, padWires)
     expect(backend.inputs).toContainEqual([68, 5, true])
+  })
+
+  it('shows the text a LiquidCrystal sketch prints', async () => {
+    // Replays the exact byte stream `LiquidCrystal` produces for the shipped LCD
+    // preset: begin(), two prints, and a setCursor between them.
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    const stop = sim.attach()
+    await Promise.resolve()
+    await sim.run('void setup(){}', false)
+
+    const parts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'lcd', kind: 'lcd1602' },
+    ]
+    const w = (pin: string, lcdPin: string): EvalWire => ({
+      a: { instanceId: 'lcd', pin: lcdPin },
+      b: { instanceId: 'uno', pin },
+    })
+    const wires: EvalWire[] = [
+      w('GND.1', 'VSS'),
+      w('5V', 'VDD'),
+      w('GND.1', 'V0'),
+      w('12', 'RS'),
+      w('GND.1', 'RW'),
+      w('11', 'E'),
+      w('5', 'D4'),
+      w('4', 'D5'),
+      w('3', 'D6'),
+      w('2', 'D7'),
+      w('5V', 'A'),
+      w('GND.1', 'K'),
+    ]
+    sim.solve(parts, wires)
+
+    // simavr reports transitions only, so the replay drives levels, not events.
+    const levels = new Map<string, boolean>()
+    const drive = (pin: string, high: boolean) => {
+      if ((levels.get(pin) ?? false) === high) return
+      levels.set(pin, high)
+      const info = unoPin(pin)
+      if (!info || info.kind !== 'mcu') throw new Error(`${pin} is not a chip pin`)
+      backend.pinCb?.(info.port.charCodeAt(0), info.pin, high)
+    }
+    const dataPins = ['5', '4', '3', '2'] // D4..D7
+    const nibble = (value: number) => {
+      for (let i = 0; i < 4; i++) drive(dataPins[i]!, ((value >> i) & 1) === 1)
+      drive('11', true)
+      drive('11', false) // the falling edge latches the nibble
+    }
+    const send = (value: number, data: boolean) => {
+      drive('12', data)
+      nibble(value >> 4)
+      nibble(value & 0x0f)
+    }
+
+    for (const cmd of [0x33, 0x32, 0x28, 0x0c, 0x06, 0x01]) send(cmd, false)
+    for (const ch of 'Hello, Croquis!') send(ch.charCodeAt(0), true)
+    send(0x80 | 0x40, false)
+    for (const ch of 'LCD 1602 ready') send(ch.charCodeAt(0), true)
+
+    sim.solve(parts, wires)
+    const values = sim.outputs.lcd!.values
+    expect(String.fromCharCode(...values.slice(0, 16))).toBe('Hello, Croquis! ')
+    expect(String.fromCharCode(...values.slice(16, 32))).toBe('LCD 1602 ready  ')
+    stop()
   })
 
   it('steps a 74HC595 on every clock edge, not once per solve', async () => {

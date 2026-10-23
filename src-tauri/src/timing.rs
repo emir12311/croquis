@@ -50,6 +50,10 @@ pub struct PinTiming {
     /// Completed rising-to-rising periods. A real PWM pin needs several before it
     /// is trusted; switch chatter must not be mistaken for PWM.
     periods: u32,
+    /// How many of the latest periods were within an eighth of the one before.
+    /// A PWM output holds its period to the cycle; a line carrying data takes
+    /// whatever period the payload gives it.
+    steady: u32,
 }
 
 /// Ignore transitions closer than this to the previous one. simavr emits
@@ -85,6 +89,24 @@ impl PinTiming {
             if let Some(previous_rise) = self.rise {
                 let period = cycle.saturating_sub(previous_rise);
                 if period > 0 {
+                    // How still the period has been. This is what separates
+                    // `analogWrite` from a data line that happens to toggle inside
+                    // the PWM frequency window: an LCD writing a character, or a
+                    // shift register clocking a byte.
+                    //
+                    // It scores rather than resets, because a PWM pin is allowed
+                    // the odd rough period: `analogWrite` landing mid-cycle, or a
+                    // compare-edge glitch, would otherwise un-classify a pin that
+                    // is plainly PWM — and the UI would fall back to reading the
+                    // raw level, which is what makes a fading LED jump to full
+                    // brightness. A data line is rough most of the time, so its
+                    // score drains to nothing anyway.
+                    let near = |a: u64, b: u64| a.abs_diff(b) <= b / 8;
+                    self.steady = if self.period_cycles > 0 && near(period, self.period_cycles) {
+                        self.steady.saturating_add(1).min(64)
+                    } else {
+                        self.steady.saturating_sub(2)
+                    };
                     self.period_cycles = period;
                     self.periods = self.periods.saturating_add(1);
                 }
@@ -123,6 +145,12 @@ impl PinTiming {
     /// steady PWM stream rather than one noisy pair of edges.
     pub fn periods(&self) -> u32 {
         self.periods
+    }
+
+    /// Consecutive periods that were all but identical. A pin is only trusted as
+    /// PWM once this is high enough.
+    pub fn steady(&self) -> u32 {
+        self.steady
     }
 }
 
