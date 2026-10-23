@@ -3,6 +3,7 @@ name = "croquis-egui-spike"
 version = "0.1.0"
 edition = "2021"
 publish = false
+default-run = "croquis-egui-spike"
 
 [dependencies]
 # Glow keeps the spike small and matches the kind of backend a native Linux app
