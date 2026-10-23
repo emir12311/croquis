@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use croquis_core::netlist::LedState;
 use croquis_core::route::{expand_path, Point as CorePoint};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 
@@ -74,6 +75,7 @@ struct Spike {
     dragging: Option<usize>,
     hovered_pin: Option<PinRef>,
     textures: HashMap<String, egui::TextureHandle>,
+    led_states: HashMap<String, LedState>,
 }
 
 impl Default for Spike {
@@ -88,6 +90,7 @@ impl Default for Spike {
             dragging: None,
             hovered_pin: None,
             textures: HashMap::new(),
+            led_states: scene::evaluate_blink(),
         }
     }
 }
@@ -250,6 +253,9 @@ impl eframe::App for Spike {
                     self.hovered_pin
                         .filter(|(part_index, _)| *part_index == index),
                     self.textures.get(&part.kind),
+                    self.led_states
+                        .get(&part.id)
+                        .is_some_and(|state| *state == LedState::Lit),
                 );
             }
 
@@ -337,6 +343,7 @@ fn draw_part(
     selected: bool,
     hovered_pin: Option<PinRef>,
     texture: Option<&egui::TextureHandle>,
+    lit: bool,
 ) {
     let min = camera.world_to_screen(rect, part.bounds().min);
     let max = camera.world_to_screen(rect, part.bounds().max);
@@ -350,6 +357,13 @@ fn draw_part(
         );
     } else {
         painter.rect_filled(screen, 4.0, part.color);
+    }
+    if lit && part.kind == "led" {
+        painter.circle_filled(
+            screen.center(),
+            screen.width().min(screen.height()) * 0.28,
+            Color32::from_rgba_unmultiplied(255, 120, 80, 90),
+        );
     }
     let border = if selected {
         Color32::from_rgb(217, 164, 65)
@@ -442,5 +456,11 @@ mod tests {
             let visible = image.pixels.iter().filter(|pixel| pixel.a() > 0).count();
             assert!(visible > 100, "{} has visible pixels", part.kind);
         }
+    }
+
+    #[test]
+    fn blink_netlist_lights_its_led() {
+        let leds = scene::evaluate_blink();
+        assert_eq!(leds.get("led1"), Some(&LedState::Lit));
     }
 }
