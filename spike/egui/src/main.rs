@@ -371,27 +371,28 @@ fn draw_part(
     );
 
     for (index, pin) in part.pins.iter().enumerate() {
-        let p = camera.world_to_screen(rect, part.pin_world(index));
         let hovered = hovered_pin.is_some_and(|(_, pin_index)| pin_index == index);
-        let side = if hovered { 14.0 } else { 9.0 };
-        painter.rect_filled(
-            Rect::from_center_size(p, Vec2::splat(side)),
-            0.0,
-            if hovered {
-                Color32::from_rgb(217, 164, 65)
-            } else {
-                Color32::from_rgb(108, 203, 123)
-            },
-        );
-        if hovered {
-            painter.text(
-                p + Vec2::new(8.0, -8.0),
-                Align2::LEFT_BOTTOM,
-                &pin.name,
-                FontId::monospace(11.0),
-                Color32::WHITE,
-            );
+        // Match the app: no markers at rest, and only the hovered pin gets a
+        // fixed-size amber square (screen space, not zoomed).
+        if !hovered {
+            continue;
         }
+        let p = camera.world_to_screen(rect, part.pin_world(index));
+        let square = Rect::from_center_size(p, Vec2::splat(10.0));
+        painter.rect_filled(square, 0.0, Color32::from_rgb(217, 164, 65));
+        painter.rect_stroke(
+            square,
+            0.0,
+            Stroke::new(1.0, Color32::from_rgb(26, 26, 28)),
+            egui::StrokeKind::Inside,
+        );
+        painter.text(
+            p + Vec2::new(8.0, -8.0),
+            Align2::LEFT_BOTTOM,
+            &pin.name,
+            FontId::monospace(11.0),
+            Color32::WHITE,
+        );
     }
 }
 
