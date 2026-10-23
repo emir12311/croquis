@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use croquis_lib::engine::{self, SimEvent};
+use croquis_sim::engine::{self, SimEvent};
 use eframe::egui;
 use rodio::Source;
 

@@ -61,12 +61,13 @@ const SUPPLY_MV: u32 = 5000;
 // ---- paths ----------------------------------------------------------------
 
 fn workspace_root() -> PathBuf {
-    // Baked at build time (the repo root, i.e. `src-tauri/..`). Development builds
-    // resolve `.toolchain/` from here; an installed build is found by `toolchain()`
-    // beside the binary or in `../lib/<product>/toolchain`.
+    // Baked at build time (the repo root: `crates/croquis-sim/../..`). Development
+    // builds resolve `.toolchain/` from here; an installed build is found by
+    // `toolchain()` beside the binary or in `../lib/<product>/toolchain`.
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("src-tauri has a parent")
+        .and_then(Path::parent)
+        .expect("crates/croquis-sim has a repo root")
         .to_path_buf()
 }
 fn toolchain() -> PathBuf {
@@ -1131,10 +1132,10 @@ void loop() {{
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
-        let presets = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+        let presets = workspace_root().join("presets");
         let mut checked = 0;
         let mut names: Vec<String> = std::fs::read_dir(&presets)
-            .expect("presets/ should sit next to src-tauri/")
+            .expect("presets/ should sit at the repository root")
             .map(|e| e.unwrap().path())
             .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
             .map(|p| p.to_string_lossy().into_owned())

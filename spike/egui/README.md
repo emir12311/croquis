@@ -55,15 +55,14 @@ Proves:
 - a native generated-tone audio path through `rodio`;
 - a release binary can be built without a webview.
 
-The engine is still a path dependency on `src-tauri`; moving it into its own
-crate is Phase 1. A display run, an installed deb/rpm/AppImage and audio-device
-behaviour still need measurement. This spike does not yet load or render a real
-diagram — it exercises the host boundary around the engine.
+The engine now comes from the standalone `croquis-sim` crate; the host no longer
+depends on `src-tauri`. A display run, an installed deb/rpm/AppImage and
+audio-device behaviour still need measurement. This spike does not yet load or
+render a real diagram — it exercises the host boundary around the engine.
 
-Measured release build on the development machine:
+Measured release build on the development machine after the extraction:
 
-- `spike/egui/target/release/host` is 15 MB;
-- the release build took 4m42s from the spike's first release compile;
-- because the engine is still a path dependency, the binary links the Tauri
-  stack (GTK/WebKit) even though the UI is egui. Extraction into `croquis-sim`
-  is therefore required before the size/lightweight claim can be evaluated.
+- `spike/egui/target/release/host` is 14 MB;
+- the release build took 1m45s;
+- `ldd` contains no WebKit, GTK or Tauri libraries; the remaining system link is
+  ALSA for audio. The lightweight claim can now be measured against this base.
