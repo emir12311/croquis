@@ -346,7 +346,7 @@ fn draw_part(
         painter.image(
             texture.id(),
             screen,
-            Rect::from_min_size(Pos2::ZERO, texture.size_vec2()),
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             Color32::WHITE,
         );
     }
@@ -444,8 +444,10 @@ mod tests {
             assert!(!part.pins.is_empty(), "{} has pins", part.kind);
             let image = art::rasterize(&part.svg, part.size.x as u32, part.size.y as u32)
                 .unwrap_or_else(|| panic!("{} rasterises", part.kind));
+            let visible = image.pixels.iter().filter(|pixel| pixel.a() > 0).count();
+            eprintln!("{} {}x{} visible={visible}", part.kind, image.size[0], image.size[1]);
             assert!(
-                image.pixels.iter().any(|pixel| pixel.a() > 0),
+                visible > 100,
                 "{} has visible pixels",
                 part.kind
             );
