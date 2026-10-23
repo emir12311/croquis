@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "LCD 1602",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 40,
+      "top": 100,
+      "attrs": {}
+    },
+    {
+      "id": "lcd",
+      "type": "wokwi-lcd1602",
+      "left": 400,
+      "top": 60,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    ["lcd:VSS", "uno:GND.1"],
+    ["lcd:VDD", "uno:5V"],
+    ["lcd:V0", "uno:GND.1"],
+    ["lcd:RS", "uno:12"],
+    ["lcd:RW", "uno:GND.1"],
+    ["lcd:E", "uno:11"],
+    ["lcd:D4", "uno:5"],
+    ["lcd:D5", "uno:4"],
+    ["lcd:D6", "uno:3"],
+    ["lcd:D7", "uno:2"],
+    ["lcd:A", "uno:5V"],
+    ["lcd:K", "uno:GND.1"]
+  ],
+  "sketch": "// LCD 1602 — text on a parallel display.\n//\n// The bundled LiquidCrystal library writes RS/E/D4-D7 four bits at a time;\n// the display decodes the HD44780 commands and keeps the two lines.\n\n#include <LiquidCrystal.h>\n\nLiquidCrystal lcd(12, 11, 5, 4, 3, 2);\n\nvoid setup() {\n  lcd.begin(16, 2);\n  lcd.print(\"Hello, Croquis!\");\n  lcd.setCursor(0, 1);\n  lcd.print(\"LCD 1602 ready\");\n}\n\nvoid loop() {\n}\n"
+}

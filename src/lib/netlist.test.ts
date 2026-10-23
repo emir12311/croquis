@@ -33,6 +33,11 @@ const sound = (value = '0'): EvalPart => ({
   kind: 'sound-sensor',
   attrs: { noise: value },
 })
+const gas = (value = '0'): EvalPart => ({
+  id: 'gas',
+  kind: 'gas-sensor',
+  attrs: { gas: value },
+})
 const buzzer = (): EvalPart => ({ id: 'buzzer', kind: 'buzzer' })
 const relay = (): EvalPart => ({ id: 'relay', kind: 'relay' })
 const sevenSegment = (): EvalPart => ({ id: 'seg', kind: 'seven-segment' })
@@ -271,6 +276,19 @@ describe('digital sensor modules', () => {
     const out = evaluateCircuit([uno, sound('60')], wires, {}, {})
     expect(out.analogs.find((a) => a.channel === 1)?.millivolts).toBe(3000)
     expect(out.drives).toEqual([{ port: 'D', pin: 4, high: true }])
+  })
+
+  it('does the same for the gas sensor', () => {
+    const wires = [
+      wire(at('gas', 'VCC'), at('uno', '5V')),
+      wire(at('gas', 'GND'), at('uno', 'GND.2')),
+      wire(at('gas', 'AOUT'), at('uno', 'A2')),
+      wire(at('gas', 'DOUT'), at('uno', '5')),
+    ]
+    const out = evaluateCircuit([uno, gas('70')], wires, {}, {})
+    expect(out.analogs.find((a) => a.channel === 2)?.millivolts).toBe(3500)
+    expect(out.drives).toEqual([{ port: 'D', pin: 5, high: true }])
+    expect(out.sensors.gas).toEqual({ powered: true, active: true })
   })
 
   it('warns when a digital sensor is wired but not powered', () => {
@@ -1079,5 +1097,200 @@ describe('a 74HC595 shifts bits in and latches them out', () => {
 
     const shelf = evaluateCircuit([uno, hc()], [], {}, {})
     expect(shelf.warnings.hc).toBeUndefined()
+  })
+})
+
+describe('a membrane keypad is a scanned matrix', () => {
+  const pad: EvalPart = { id: 'pad', kind: 'membrane-keypad' }
+  const wires: EvalWire[] = [
+    wire(at('uno', '9'), at('pad', 'R1')),
+    wire(at('uno', '8'), at('pad', 'R2')),
+    wire(at('uno', '7'), at('pad', 'R3')),
+    wire(at('uno', '6'), at('pad', 'R4')),
+    wire(at('uno', '5'), at('pad', 'C1')),
+    wire(at('uno', '4'), at('pad', 'C2')),
+    wire(at('uno', '3'), at('pad', 'C3')),
+    wire(at('uno', '2'), at('pad', 'C4')),
+  ]
+  const run = (
+    avr: Record<string, boolean>,
+    key: { row: number; column: number } | null,
+  ) =>
+    evaluateCircuit(
+      [uno, pad],
+      wires,
+      {},
+      avr,
+      {},
+      {},
+      {},
+      {},
+      { pad: key },
+    )
+
+  it('pulls the selected column low only while its row is scanned', () => {
+    const low = run({ B1: false }, { row: 0, column: 0 })
+    expect(low.drives).toContainEqual({ port: 'D', pin: 5, high: false })
+    expect(low.drives).toContainEqual({ port: 'D', pin: 4, high: true })
+
+    const otherRow = run({ B1: true }, { row: 0, column: 0 })
+    expect(otherRow.drives).toContainEqual({ port: 'D', pin: 5, high: true })
+  })
+
+  it('leaves every column pulled high when no key is down', () => {
+    const out = run({ B1: false }, null)
+    for (const pin of [5, 4, 3, 2]) {
+      expect(out.drives).toContainEqual({ port: 'D', pin, high: true })
+    }
+  })
+})
+
+describe('a stepper motor exposes its four coils to the board', () => {
+  const motor = (steps = '200'): EvalPart => ({
+    id: 'motor',
+    kind: 'stepper-motor',
+    attrs: { steps },
+  })
+  const coils = [
+    wire(at('uno', '8'), at('motor', 'A-')),
+    wire(at('uno', '9'), at('motor', 'A+')),
+    wire(at('uno', '10'), at('motor', 'B+')),
+    wire(at('uno', '11'), at('motor', 'B-')),
+  ]
+
+  it('maps A-, A+, B+, B- to their board pins and computes the step size', () => {
+    const out = evaluateCircuit([uno, motor()], coils, {}, {})
+    expect(out.stepperWiring.motor).toEqual({
+      pins: ['B0', 'B1', 'B2', 'B3'],
+      stepAngle: 1.8,
+    })
+  })
+
+  it('warns when only some coils reach the board', () => {
+    const out = evaluateCircuit([uno, motor()], coils.slice(0, 2), {}, {})
+    expect(out.stepperWiring.motor).toBeUndefined()
+    expect(out.warnings.motor).toMatch(/four coil pins/i)
+  })
+
+  it('is quiet when it has no wires at all', () => {
+    const out = evaluateCircuit([uno, motor()], [], {}, {})
+    expect(out.stepperWiring.motor).toBeUndefined()
+    expect(out.warnings.motor).toBeUndefined()
+  })
+})
+
+describe('an LCD1602 exposes its control pins to the board', () => {
+  const lcd = (): EvalPart => ({ id: 'lcd', kind: 'lcd1602' })
+  const wires = [
+    wire(at('lcd', 'VSS'), at('uno', 'GND.2')),
+    wire(at('lcd', 'VDD'), at('uno', '5V')),
+    wire(at('lcd', 'RS'), at('uno', '12')),
+    wire(at('lcd', 'E'), at('uno', '11')),
+    wire(at('lcd', 'D4'), at('uno', '5')),
+    wire(at('lcd', 'D5'), at('uno', '4')),
+    wire(at('lcd', 'D6'), at('uno', '3')),
+    wire(at('lcd', 'D7'), at('uno', '2')),
+  ]
+
+  it('maps RS, E and the four data pins', () => {
+    const out = evaluateCircuit([uno, lcd()], wires, {}, {})
+    expect(out.lcdWiring.lcd).toEqual({
+      powered: true,
+      pins: { rs: 'B4', e: 'B3', d4: 'D5', d5: 'D4', d6: 'D3', d7: 'D2' },
+    })
+  })
+
+  it('warns when a data pin is not on the board', () => {
+    const out = evaluateCircuit([uno, lcd()], wires.filter((w) => w.a.pin !== 'D7' && w.b.pin !== 'D7'), {}, {})
+    expect(out.lcdWiring.lcd).toBeUndefined()
+    expect(out.warnings.lcd).toMatch(/RS, E and D4/i)
+  })
+
+  it('wants both rails', () => {
+    const out = evaluateCircuit([uno, lcd()], wires.filter((w) => w.b.pin !== '5V'), {}, {})
+    expect(out.lcdWiring.lcd).toBeUndefined()
+    expect(out.warnings.lcd).toMatch(/VDD.*5V.*VSS.*GND/i)
+  })
+})
+
+describe('a DHT22 exposes its one-wire line to the board', () => {
+  const dht = (temperature = '25', humidity = '50'): EvalPart => ({
+    id: 'dht',
+    kind: 'dht22',
+    attrs: { temperature, humidity },
+  })
+  const wires = [
+    wire(at('uno', '5V'), at('dht', 'VCC')),
+    wire(at('dht', 'GND'), at('uno', 'GND.2')),
+    wire(at('uno', '2'), at('dht', 'SDA')),
+  ]
+
+  it('reports the board pin and the configured values, clamped honestly', () => {
+    expect(evaluateCircuit([uno, dht()], wires, {}, {}).dhtSensors.dht).toEqual({
+      pin: 'D2',
+      temperature: 25,
+      humidity: 50,
+    })
+    expect(evaluateCircuit([uno, dht('100', '-5')], wires, {}, {}).dhtSensors.dht).toEqual({
+      pin: 'D2',
+      temperature: 80,
+      humidity: 0,
+    })
+  })
+
+  it('wants power and a board pin', () => {
+    const unpowered = evaluateCircuit(
+      [uno, dht()],
+      [wire(at('uno', '2'), at('dht', 'SDA'))],
+      {},
+      {},
+    )
+    expect(unpowered.dhtSensors.dht).toBeUndefined()
+    expect(unpowered.warnings.dht).toMatch(/VCC.*5V.*GND/i)
+
+    const floating = evaluateCircuit(
+      [uno, dht()],
+      [wire(at('uno', '5V'), at('dht', 'VCC')), wire(at('dht', 'GND'), at('uno', 'GND.2'))],
+      {},
+      {},
+    )
+    expect(floating.dhtSensors.dht).toBeUndefined()
+    expect(floating.warnings.dht).toMatch(/SDA/i)
+  })
+})
+
+describe('an IR receiver exposes its demodulated DAT line', () => {
+  const ir = (): EvalPart => ({ id: 'ir', kind: 'ir-receiver' })
+  const wires = [
+    wire(at('ir', 'VCC'), at('uno', '5V')),
+    wire(at('ir', 'GND'), at('uno', 'GND.2')),
+    wire(at('uno', '2'), at('ir', 'DAT')),
+  ]
+
+  it('reports the board pin', () => {
+    expect(evaluateCircuit([uno, ir()], wires, {}, {}).irReceivers.ir).toEqual({ pin: 'D2' })
+  })
+
+  it('wants power and a DAT pin, but is quiet on the shelf', () => {
+    const unpowered = evaluateCircuit(
+      [uno, ir()],
+      [wire(at('uno', '2'), at('ir', 'DAT'))],
+      {},
+      {},
+    )
+    expect(unpowered.irReceivers.ir).toBeUndefined()
+    expect(unpowered.warnings.ir).toMatch(/VCC.*5V.*GND/i)
+
+    const floating = evaluateCircuit(
+      [uno, ir()],
+      [wire(at('uno', '5V'), at('ir', 'VCC')), wire(at('ir', 'GND'), at('uno', 'GND.2'))],
+      {},
+      {},
+    )
+    expect(floating.irReceivers.ir).toBeUndefined()
+    expect(floating.warnings.ir).toMatch(/DAT/i)
+
+    const shelf = evaluateCircuit([uno, ir()], [], {}, {})
+    expect(shelf.warnings.ir).toBeUndefined()
   })
 })
