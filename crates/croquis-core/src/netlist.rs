@@ -421,6 +421,7 @@ struct Rails {
     mcu_high: HashSet<String>,
     mcu_low: HashSet<String>,
     duty: HashMap<String, f64>,
+    pulse: HashMap<String, f64>,
     mcu_pins: HashMap<String, (char, u8)>,
 }
 
@@ -430,6 +431,7 @@ fn collect_rails(
     uf: &mut UnionFind,
     avr: &HashMap<String, bool>,
     pin_duty: &HashMap<String, f64>,
+    pin_pulse: &HashMap<String, f64>,
 ) -> Rails {
     let mut rails = Rails {
         vcc: HashSet::new(),
@@ -437,6 +439,7 @@ fn collect_rails(
         mcu_high: HashSet::new(),
         mcu_low: HashSet::new(),
         duty: HashMap::new(),
+        pulse: HashMap::new(),
         mcu_pins: HashMap::new(),
     };
     for part in parts {
@@ -449,6 +452,14 @@ fn collect_rails(
             };
             let key = format!("{}{}", port, pin);
             let root = uf.find(&format!("{}:{}", part.id, node_name(part.kind, name)));
+            if let Some(width) = pin_pulse
+                .get(&key)
+                .copied()
+                .filter(|width| width.is_finite() && *width > 0.0)
+            {
+                let current = rails.pulse.get(&root).copied().unwrap_or(0.0);
+                rails.pulse.insert(root.clone(), current.max(width));
+            }
             let high = avr.get(&key).copied().unwrap_or(false);
             if high {
                 rails.mcu_high.insert(root.clone());
@@ -527,6 +538,7 @@ pub fn evaluate_circuit_with_keypad(
         pressed,
         avr,
         pin_duty,
+        &HashMap::new(),
         keypad_keys,
         &HashMap::new(),
     )
@@ -539,6 +551,7 @@ pub fn evaluate_circuit_with_state(
     pressed: &HashMap<String, bool>,
     avr: &HashMap<String, bool>,
     pin_duty: &HashMap<String, f64>,
+    pin_pulse: &HashMap<String, f64>,
     keypad_keys: &HashMap<String, Option<KeyPosition>>,
     previous_shift: &HashMap<String, ShiftState>,
 ) -> CircuitEval {
@@ -610,7 +623,7 @@ pub fn evaluate_circuit_with_state(
         }
     }
 
-    let coil_rails = collect_rails(parts, wires, &mut uf, avr, pin_duty);
+    let coil_rails = collect_rails(parts, wires, &mut uf, avr, pin_duty, pin_pulse);
     for part in parts {
         if part.kind != PartKind::Relay {
             continue;
@@ -631,7 +644,7 @@ pub fn evaluate_circuit_with_state(
         );
     }
 
-    let rails = collect_rails(parts, wires, &mut uf, avr, pin_duty);
+    let rails = collect_rails(parts, wires, &mut uf, avr, pin_duty, pin_pulse);
     let edges = resistor_edges(parts, &mut uf);
     let high_nets: HashSet<String> = rails.vcc.union(&rails.mcu_high).cloned().collect();
     let low_nets: HashSet<String> = rails.gnd.union(&rails.mcu_low).cloned().collect();
@@ -1195,6 +1208,45 @@ pub fn evaluate_circuit_with_state(
     }
 
     for part in parts {
+        if part.kind != PartKind::Servo {
+            continue;
+        }
+        let plus = uf.find(&format!("{}:V+", part.id));
+        let minus = uf.find(&format!("{}:GND", part.id));
+        let signal = uf.find(&format!("{}:PWM", part.id));
+        if !net_high(&plus) || !net_low(&minus) {
+            eval.outputs.insert(
+                part.id.clone(),
+                OutputState {
+                    active: false,
+                    ..Default::default()
+                },
+            );
+            continue;
+        }
+        let Some(width) = rails.pulse.get(&signal).copied() else {
+            eval.outputs.insert(
+                part.id.clone(),
+                OutputState {
+                    active: false,
+                    ..Default::default()
+                },
+            );
+            continue;
+        };
+        let angle = ((width - 544.0) * 180.0 / (2400.0 - 544.0)).clamp(0.0, 180.0);
+        eval.outputs.insert(
+            part.id.clone(),
+            OutputState {
+                active: true,
+                values: Vec::new(),
+                angle: Some(angle.round()),
+                ..Default::default()
+            },
+        );
+    }
+
+    for part in parts {
         match part.kind {
             PartKind::Buzzer | PartKind::Relay => {
                 let (a, b) = if part.kind == PartKind::Buzzer {
@@ -1714,6 +1766,7 @@ mod tests {
             &wires,
             &HashMap::new(),
             &avr,
+            &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
