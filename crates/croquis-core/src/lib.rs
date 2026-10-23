@@ -7,3 +7,4 @@ pub mod diagram;
 pub mod document;
 pub mod netlist;
 pub mod route;
+pub mod shift_register;
