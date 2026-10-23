@@ -32,6 +32,7 @@ pub fn run() {
             stop_sim,
             set_input,
             pulse_input,
+            pulse_script,
             set_analog,
             serial_input
         ])
@@ -187,6 +188,17 @@ fn pulse_input(port: u8, pin: u8, delay_us: u64, width_us: u64, state: State<Sim
     if let Ok(slot) = state.0.lock() {
         if let Some(sim) = slot.as_ref() {
             sim.pulse(port, pin, delay_us, width_us);
+        }
+    }
+}
+
+/// A scripted edge train — a DHT22 response or an IR frame. Each duration holds
+/// the next level, starting low and alternating; the line ends high.
+#[tauri::command]
+fn pulse_script(port: u8, pin: u8, delay_us: u64, durations: Vec<u32>, state: State<SimState>) {
+    if let Ok(slot) = state.0.lock() {
+        if let Some(sim) = slot.as_ref() {
+            sim.pulse_script(port, pin, delay_us, durations.into_iter().map(u64::from).collect());
         }
     }
 }

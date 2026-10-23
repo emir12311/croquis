@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "DHT22",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 40,
+      "top": 100,
+      "attrs": {}
+    },
+    {
+      "id": "dht",
+      "type": "wokwi-dht22",
+      "left": 430,
+      "top": 100,
+      "attrs": {
+        "temperature": "25",
+        "humidity": "50"
+      }
+    }
+  ],
+  "connections": [
+    ["uno:5V", "dht:VCC"],
+    ["dht:GND", "uno:GND.2"],
+    ["uno:2", "dht:SDA"]
+  ],
+  "sketch": "// DHT22 — temperature and humidity on one wire.\n//\n// The library pulls SDA low to start a read, then times the sensor's 40-bit\n// response. Change the sliders in the properties strip and read the values.\n\n#include <DHT.h>\n\nconst int DHTPIN = 2;\nconst int DHTTYPE = DHT22;\nDHT dht(DHTPIN, DHTTYPE);\n\nvoid setup() {\n  Serial.begin(9600);\n  dht.begin();\n}\n\nvoid loop() {\n  float humidity = dht.readHumidity();\n  float temperature = dht.readTemperature();\n  if (isnan(humidity) || isnan(temperature)) {\n    Serial.println(\"DHT read failed\");\n  } else {\n    Serial.print(\"humidity \");\n    Serial.print(humidity);\n    Serial.print(\"%  temperature \");\n    Serial.print(temperature);\n    Serial.println(\" C\");\n  }\n  delay(2000);\n}\n"
+}

@@ -9,6 +9,7 @@ class FakeBackend implements SimBackend {
   stopped = 0
   inputs: [number, number, boolean][] = []
   pulses: [number, number, number, number][] = []
+  scripts: [number, number, number, number[]][] = []
   analogs: [number, number][] = []
   serialWrites: string[] = []
   failCompile = ''
@@ -37,6 +38,9 @@ class FakeBackend implements SimBackend {
   }
   async pulseInput(port: number, pin: number, delayMicros: number, widthMicros: number) {
     this.pulses.push([port, pin, delayMicros, widthMicros])
+  }
+  async pulseScript(port: number, pin: number, delayMicros: number, durations: number[]) {
+    this.scripts.push([port, pin, delayMicros, durations])
   }
   async setAnalog(channel: number, millivolts: number) {
     this.analogs.push([channel, millivolts])
@@ -287,6 +291,181 @@ describe('Sim.solve', () => {
     expect(backend.inputs).toHaveLength(0)
     expect(sim.ledStates).toEqual({})
     expect(sim.warnings).toEqual({})
+  })
+
+  it('answers a DHT start with a timed pulse script, once', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    const stop = sim.attach()
+    await Promise.resolve()
+    await sim.run('void setup(){}', false)
+
+    const dhtParts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'dht', kind: 'dht22', attrs: { temperature: '25', humidity: '50' } },
+    ]
+    const dhtWires: EvalWire[] = [
+      { a: { instanceId: 'uno', pin: '5V' }, b: { instanceId: 'dht', pin: 'VCC' } },
+      { a: { instanceId: 'dht', pin: 'GND' }, b: { instanceId: 'uno', pin: 'GND.2' } },
+      { a: { instanceId: 'uno', pin: '2' }, b: { instanceId: 'dht', pin: 'SDA' } },
+    ]
+    sim.solve(dhtParts, dhtWires)
+    expect(backend.scripts).toHaveLength(0)
+
+    backend.pinCb?.(68, 2, false)
+    backend.pinCb?.(68, 2, true)
+    expect(backend.scripts).toHaveLength(1)
+    const [port, pin, delay, durations] = backend.scripts[0]!
+    expect([port, pin, delay]).toEqual([68, 2, 30])
+    expect(durations).toHaveLength(83)
+
+    // The response's own rising edges must not start another read.
+    backend.pinCb?.(68, 2, false)
+    backend.pinCb?.(68, 2, true)
+    expect(backend.scripts).toHaveLength(1)
+    stop()
+  })
+
+  it('sends a NEC frame to every wired IR receiver', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    await sim.run('void setup(){}', false)
+
+    const irParts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'ir', kind: 'ir-receiver' },
+    ]
+    const irWires: EvalWire[] = [
+      { a: { instanceId: 'ir', pin: 'VCC' }, b: { instanceId: 'uno', pin: '5V' } },
+      { a: { instanceId: 'ir', pin: 'GND' }, b: { instanceId: 'uno', pin: 'GND.2' } },
+      { a: { instanceId: 'uno', pin: '2' }, b: { instanceId: 'ir', pin: 'DAT' } },
+    ]
+    sim.solve(irParts, irWires)
+    sim.sendIr(0xa2)
+
+    expect(backend.scripts).toHaveLength(1)
+    const [port, pin, delay, durations] = backend.scripts[0]!
+    expect([port, pin, delay]).toEqual([68, 2, 0])
+    expect(durations.slice(0, 2)).toEqual([9000, 4500])
+    expect(durations).toHaveLength(67)
+    expect(durations.at(-1)).toBe(560)
+  })
+
+  it('decodes LCD commands and writes text', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    const stop = sim.attach()
+    await Promise.resolve()
+    await sim.run('void setup(){}', false)
+
+    const lcdParts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'lcd', kind: 'lcd1602' },
+    ]
+    const lcdWires: EvalWire[] = [
+      { a: { instanceId: 'lcd', pin: 'VSS' }, b: { instanceId: 'uno', pin: 'GND.2' } },
+      { a: { instanceId: 'lcd', pin: 'VDD' }, b: { instanceId: 'uno', pin: '5V' } },
+      { a: { instanceId: 'lcd', pin: 'RS' }, b: { instanceId: 'uno', pin: '12' } },
+      { a: { instanceId: 'lcd', pin: 'E' }, b: { instanceId: 'uno', pin: '11' } },
+      { a: { instanceId: 'lcd', pin: 'D4' }, b: { instanceId: 'uno', pin: '5' } },
+      { a: { instanceId: 'lcd', pin: 'D5' }, b: { instanceId: 'uno', pin: '4' } },
+      { a: { instanceId: 'lcd', pin: 'D6' }, b: { instanceId: 'uno', pin: '3' } },
+      { a: { instanceId: 'lcd', pin: 'D7' }, b: { instanceId: 'uno', pin: '2' } },
+    ]
+    sim.solve(lcdParts, lcdWires)
+
+    const data = [
+      ['D5', 68, 5],
+      ['D4', 68, 4],
+      ['D3', 68, 3],
+      ['D2', 68, 2],
+    ] as const
+    const setNibble = (nibble: number) => {
+      for (let i = 0; i < 4; i++) backend.pinCb?.(data[i]![1], data[i]![2], ((nibble >> i) & 1) === 1)
+    }
+    const send = (value: number, rs: boolean) => {
+      backend.pinCb?.(66, 4, rs)
+      setNibble(value >> 4)
+      backend.pinCb?.(66, 3, true)
+      backend.pinCb?.(66, 3, false)
+      setNibble(value & 0x0f)
+      backend.pinCb?.(66, 3, true)
+      backend.pinCb?.(66, 3, false)
+    }
+
+    send(0x01, false) // clear
+    send(0x80, false) // cursor to 0,0
+    send('H'.charCodeAt(0), true)
+    send('i'.charCodeAt(0), true)
+    sim.solve(lcdParts, lcdWires)
+
+    expect(sim.outputs.lcd.values.slice(0, 2)).toEqual([72, 105])
+    expect(sim.outputs.lcd.cursorX).toBe(2)
+    expect(sim.outputs.lcd.cursorY).toBe(0)
+    stop()
+  })
+
+  it('turns a stepper motor from the coil sequence', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    const stop = sim.attach()
+    await Promise.resolve()
+    await sim.run('void setup(){}', false)
+
+    const motorParts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'motor', kind: 'stepper-motor', attrs: { steps: '200' } },
+    ]
+    const motorWires: EvalWire[] = [
+      { a: { instanceId: 'uno', pin: '8' }, b: { instanceId: 'motor', pin: 'A-' } },
+      { a: { instanceId: 'uno', pin: '9' }, b: { instanceId: 'motor', pin: 'A+' } },
+      { a: { instanceId: 'uno', pin: '10' }, b: { instanceId: 'motor', pin: 'B+' } },
+      { a: { instanceId: 'uno', pin: '11' }, b: { instanceId: 'motor', pin: 'B-' } },
+    ]
+    sim.solve(motorParts, motorWires)
+    expect(sim.outputs.motor.angle).toBe(0)
+
+    // Phase 0 = A-/B+; then phase 1 = A+/B+; then phase 2 = A+/B-.
+    for (const levels of [
+      [true, false, true, false],
+      [false, true, true, false],
+      [false, true, false, true],
+    ]) {
+      for (let pin = 0; pin < 4; pin++) backend.pinCb?.(66, pin, levels[pin]!)
+    }
+    sim.solve(motorParts, motorWires)
+    expect(sim.outputs.motor.angle).toBeCloseTo(3.6)
+    stop()
+  })
+
+  it('drives a keypad column through the matrix while a key is held', async () => {
+    const backend = new FakeBackend()
+    const sim = new Sim(backend)
+    await sim.run('void setup(){}', false)
+
+    const padParts: EvalPart[] = [
+      { id: 'uno', kind: 'uno' },
+      { id: 'pad', kind: 'membrane-keypad' },
+    ]
+    const padWires: EvalWire[] = [
+      { a: { instanceId: 'uno', pin: '9' }, b: { instanceId: 'pad', pin: 'R1' } },
+      { a: { instanceId: 'uno', pin: '8' }, b: { instanceId: 'pad', pin: 'R2' } },
+      { a: { instanceId: 'uno', pin: '7' }, b: { instanceId: 'pad', pin: 'R3' } },
+      { a: { instanceId: 'uno', pin: '6' }, b: { instanceId: 'pad', pin: 'R4' } },
+      { a: { instanceId: 'uno', pin: '5' }, b: { instanceId: 'pad', pin: 'C1' } },
+      { a: { instanceId: 'uno', pin: '4' }, b: { instanceId: 'pad', pin: 'C2' } },
+      { a: { instanceId: 'uno', pin: '3' }, b: { instanceId: 'pad', pin: 'C3' } },
+      { a: { instanceId: 'uno', pin: '2' }, b: { instanceId: 'pad', pin: 'C4' } },
+    ]
+
+    sim.avrPins = { B1: false }
+    sim.pressKey('pad', 0, 0)
+    sim.solve(padParts, padWires)
+    expect(backend.inputs).toContainEqual([68, 5, false])
+
+    sim.releaseKey('pad')
+    sim.solve(padParts, padWires)
+    expect(backend.inputs).toContainEqual([68, 5, true])
   })
 
   it('steps a 74HC595 on every clock edge, not once per solve', async () => {

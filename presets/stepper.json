@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Stepper",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 40,
+      "top": 100,
+      "attrs": {}
+    },
+    {
+      "id": "motor",
+      "type": "wokwi-stepper-motor",
+      "left": 480,
+      "top": 90,
+      "attrs": {
+        "steps": "200"
+      }
+    }
+  ],
+  "connections": [
+    ["uno:8", "motor:A-"],
+    ["uno:9", "motor:A+"],
+    ["uno:10", "motor:B+"],
+    ["uno:11", "motor:B-"]
+  ],
+  "sketch": "// Stepper — a four-wire motor turned by its own sequence.\n//\n// The class library energises two coils at a time in a repeating order; the\n// shaft moves one step for each change. 200 steps make a full turn.\n\n#include <Stepper.h>\n\nconst int STEPS_PER_REV = 200;\nStepper motor(STEPS_PER_REV, 8, 9, 10, 11);\n\nvoid setup() {\n  motor.setSpeed(30);\n}\n\nvoid loop() {\n  motor.step(STEPS_PER_REV / 4);\n  delay(500);\n}\n"
+}

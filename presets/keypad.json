@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Keypad",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 40,
+      "top": 100,
+      "attrs": {}
+    },
+    {
+      "id": "pad",
+      "type": "wokwi-membrane-keypad",
+      "left": 430,
+      "top": 40,
+      "attrs": {
+        "columns": "4"
+      }
+    }
+  ],
+  "connections": [
+    ["uno:9", "pad:R1"],
+    ["uno:8", "pad:R2"],
+    ["uno:7", "pad:R3"],
+    ["uno:6", "pad:R4"],
+    ["uno:5", "pad:C1"],
+    ["uno:4", "pad:C2"],
+    ["uno:3", "pad:C3"],
+    ["uno:2", "pad:C4"]
+  ],
+  "sketch": "// Keypad — a 4x4 matrix on eight pins.\n//\n// The library pulls each row low in turn and reads the columns; a pressed key\n// joins its row and column, so the scan finds it. Click a key on the canvas.\n\n#include <Keypad.h>\n\nconst byte ROWS = 4;\nconst byte COLS = 4;\nchar keys[ROWS][COLS] = {\n  {'1', '2', '3', 'A'},\n  {'4', '5', '6', 'B'},\n  {'7', '8', '9', 'C'},\n  {'*', '0', '#', 'D'},\n};\nbyte rowPins[ROWS] = {9, 8, 7, 6};\nbyte colPins[COLS] = {5, 4, 3, 2};\n\nKeypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  char key = keypad.getKey();\n  if (key) {\n    Serial.print(\"key \");\n    Serial.println(key);\n  }\n}\n"
+}

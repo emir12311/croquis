@@ -162,6 +162,9 @@
     pulseInput: async (port, pin, delayMicros, widthMicros) => {
       await invoke('pulse_input', { port, pin, delayUs: delayMicros, widthUs: widthMicros })
     },
+    pulseScript: async (port, pin, delayMicros, durations) => {
+      await invoke('pulse_script', { port, pin, delayUs: delayMicros, durations })
+    },
     setAnalog: async (channel, millivolts) => {
       await invoke('set_analog', { channel, millivolts })
     },
@@ -293,6 +296,7 @@
   /** What's wrong with a part — the strip says it in words, the canvas badges it. */
   let warnings = $derived(sim.warnings)
   let pressedButtons = $derived(sim.pressedButtons)
+  let keypadKeys = $derived(sim.keypadKeys)
   let sensorStates = $derived(sim.sensors)
   interface PendingWire {
     a: PinRef
@@ -311,6 +315,7 @@
     rgbLeds,
     outputs,
     pressedButtons,
+    keypadKeys,
     sensorStates,
     warnings,
   }))
@@ -1081,11 +1086,29 @@
         { name: 'ledSignal', value: !!state?.active },
       ]
     }
+    if (inst.kind === 'gas-sensor') {
+      const state = sensorStates[inst.id]
+      return [
+        { name: 'ledPower', value: !!state?.powered },
+        { name: 'ledD0', value: !!state?.active },
+      ]
+    }
     if (inst.kind === 'buzzer') {
       return [{ name: 'hasSignal', value: !!outputs[inst.id]?.active }]
     }
-    if (inst.kind === 'servo') {
+    if (inst.kind === 'servo' || inst.kind === 'stepper-motor') {
       return [{ name: 'angle', value: outputs[inst.id]?.angle ?? 0 }]
+    }
+    if (inst.kind === 'lcd1602') {
+      const state = outputs[inst.id]
+      return [
+        { name: 'characters', value: state?.values ?? [] },
+        { name: 'cursorX', value: state?.cursorX ?? 0 },
+        { name: 'cursorY', value: state?.cursorY ?? 0 },
+        { name: 'cursor', value: !!state?.cursor },
+        { name: 'blink', value: !!state?.blink },
+        { name: 'backlight', value: !!state?.active },
+      ]
     }
     if (
       inst.kind === 'seven-segment' ||
@@ -1106,6 +1129,56 @@
     }
     apply(state)
     return { update: apply }
+  }
+
+  /** An IR remote is wireless: its buttons send NEC frames to the receivers. */
+  function irRemoteState(node: HTMLElement, inst: Instance) {
+    if (inst.kind !== 'ir-remote') return
+    const press = (event: Event) => {
+      const detail = (event as CustomEvent<{ irCode: number }>).detail
+      sim.sendIr(detail.irCode)
+    }
+    node.addEventListener('button-press', press)
+    return {
+      destroy() {
+        node.removeEventListener('button-press', press)
+      },
+    }
+  }
+
+  /** A keypad reports its own key presses; the circuit treats them as switches. */
+  function keypadState(node: HTMLElement, inst: Instance) {
+    if (inst.kind !== 'membrane-keypad') return
+    const press = (event: Event) => {
+      const detail = (event as CustomEvent<{ row: number; column: number }>).detail
+      sim.pressKey(inst.id, detail.row, detail.column)
+    }
+    const release = (event: Event) => {
+      const detail = (event as CustomEvent<{ row: number; column: number }>).detail
+      sim.releaseKey(inst.id, detail.row, detail.column)
+    }
+    const releaseAll = () => {
+      sim.releaseKey(inst.id)
+      const pad = node as HTMLElement & {
+        pressedKeys?: Set<string>
+        up?: (key: string, element?: Element | null) => void
+      }
+      if (pad.pressedKeys && pad.up) {
+        for (const key of [...pad.pressedKeys]) pad.up(key)
+      }
+    }
+    node.addEventListener('button-press', press)
+    node.addEventListener('button-release', release)
+    window.addEventListener('pointerup', releaseAll)
+    window.addEventListener('pointercancel', releaseAll)
+    return {
+      destroy() {
+        node.removeEventListener('button-press', press)
+        node.removeEventListener('button-release', release)
+        window.removeEventListener('pointerup', releaseAll)
+        window.removeEventListener('pointercancel', releaseAll)
+      },
+    }
   }
 
   // When the circuit or the chip's pins change: re-solve the netlist, light the
@@ -1724,7 +1797,12 @@
             >
               <!-- One element for every part, named by the catalogue — so adding
                    a component is a catalogue entry, not a branch here. -->
-              <svelte:element this={def.tag} use:liveState={liveProp(inst)} {...attrsOf(inst)}
+              <svelte:element
+                this={def.tag}
+                use:liveState={liveProp(inst)}
+                use:keypadState={inst}
+                use:irRemoteState={inst}
+                {...attrsOf(inst)}
               ></svelte:element>
 
               <!-- A breadboard's 400 holes are hit-tested from data, not DOM. -->

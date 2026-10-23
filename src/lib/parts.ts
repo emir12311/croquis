@@ -26,17 +26,24 @@ export type PartKind =
   | 'photoresistor-sensor'
   | 'ntc-temperature-sensor'
   | 'analog-joystick'
+  | 'membrane-keypad'
+  | 'dht22'
   | 'tilt-switch'
   | 'pir-motion-sensor'
   | 'flame-sensor'
+  | 'gas-sensor'
   | 'sound-sensor'
   | 'hc-sr04'
+  | 'ir-receiver'
+  | 'ir-remote'
   | 'buzzer'
   | 'relay'
   | 'servo'
+  | 'stepper-motor'
   | '74hc595'
   | 'seven-segment'
   | 'seven-segment-4'
+  | 'lcd1602'
   | 'led-bar-graph'
   | 'breadboard'
   | 'breadboard-full'
@@ -145,6 +152,8 @@ export interface PartDef {
    * hit-testing reads `pinsById` (data) anyway, so they'd be dead weight.
    */
   skipDomPins?: boolean
+  /** The part has no electrical pins at all (an IR remote). */
+  noPins?: boolean
   /**
    * Which of this part's pins are electrically one point — a pushbutton's four
    * legs are two, a breadboard's five-hole strip is one. Anything not named here
@@ -327,6 +336,28 @@ export const PARTS: PartDef[] = [
     icon: '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><path d="M12 4v3M12 17v3M4 12h3M17 12h3"/>',
   },
   {
+    kind: 'membrane-keypad',
+    label: 'Keypad',
+    tag: 'wokwi-membrane-keypad',
+    // A 4×4 matrix: rows R1–R4, columns C1–C4. The element draws the pressed key.
+    attrs: { columns: '4' },
+    live: true,
+    icon: '<rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/>',
+  },
+  {
+    kind: 'dht22',
+    label: 'DHT22',
+    tag: 'wokwi-dht22',
+    // A one-wire temperature/humidity sensor. The sketch reads it; the element
+    // itself has no display, so the values live in the properties strip.
+    attrs: { temperature: '25', humidity: '50' },
+    fields: [
+      { name: 'temperature', label: 'Temperature (°C)', control: { kind: 'range', min: -40, max: 80, step: 1 } },
+      { name: 'humidity', label: 'Humidity (%)', control: { kind: 'range', min: 0, max: 100, step: 1 } },
+    ],
+    icon: '<rect x="5" y="4" width="14" height="13" rx="1"/><circle cx="12" cy="10" r="2.5"/><path d="M8 17v3M12 17v3M16 17v3"/>',
+  },
+  {
     kind: 'tilt-switch',
     label: 'Tilt switch',
     tag: 'wokwi-tilt-switch',
@@ -353,6 +384,17 @@ export const PARTS: PartDef[] = [
     fields: [{ name: 'flame', label: 'Flame', control: { kind: 'range', min: 0, max: 100, step: 1 } }],
     live: true,
     icon: '<path d="M12 3c3 4-1 5 1 8 1-1 2-2 2-4 2 3 2 8-3 10-4-2-5-5-3-8 1 1 1 2 2 3 0-3 2-5 1-9z"/>',
+  },
+  {
+    kind: 'gas-sensor',
+    label: 'Gas sensor',
+    tag: 'wokwi-gas-sensor',
+    // AOUT rises with the gas reading; DOUT crosses at half scale. The element
+    // calls its signal lamp `ledD0` (with a zero), not `ledDO`.
+    attrs: { gas: '0' },
+    fields: [{ name: 'gas', label: 'Gas', control: { kind: 'range', min: 0, max: 100, step: 1 } }],
+    live: true,
+    icon: '<rect x="5" y="7" width="14" height="10" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M8 5v2M16 5v2M8 17v2M16 17v2"/>',
   },
   {
     kind: 'sound-sensor',
@@ -383,6 +425,23 @@ export const PARTS: PartDef[] = [
     icon: '<rect x="2" y="7" width="20" height="3" rx="1"/><circle cx="8" cy="14" r="3.5"/><circle cx="16" cy="14" r="3.5"/>',
   },
   {
+    kind: 'ir-receiver',
+    label: 'IR receiver',
+    tag: 'wokwi-ir-receiver',
+    // A 38 kHz demodulating receiver: the DAT pin is low while a burst is present.
+    attrs: {},
+    icon: '<rect x="5" y="6" width="14" height="10" rx="1"/><circle cx="12" cy="11" r="2"/><path d="M12 16v3M8 19h8"/>',
+  },
+  {
+    kind: 'ir-remote',
+    label: 'IR remote',
+    tag: 'wokwi-ir-remote',
+    // Wireless: its buttons dispatch NEC codes. It has no board pins.
+    attrs: {},
+    noPins: true,
+    icon: '<rect x="8" y="2" width="8" height="20" rx="2"/><circle cx="12" cy="6" r="1"/><path d="M10 10h4M10 13h4M10 16h4M10 19h4"/>',
+  },
+  {
     kind: 'buzzer',
     label: 'Buzzer',
     tag: 'wokwi-buzzer',
@@ -406,6 +465,17 @@ export const PARTS: PartDef[] = [
     icon: '<rect x="5" y="10" width="14" height="7" rx="1"/><path d="M12 10V7M12 7a2 2 0 1 0 2-2 2 2 0 0 0-2 2"/><path d="M9 17v2M15 17v2"/>',
   },
   {
+    kind: 'stepper-motor',
+    label: 'Stepper motor',
+    tag: 'wokwi-stepper-motor',
+    // A four-coil motor driven directly here; the class library's step sequence
+    // is what turns the shaft. `steps` is the motor's full-step count per turn.
+    attrs: { steps: '200' },
+    fields: [{ name: 'steps', label: 'Steps/rev', control: { kind: 'range', min: 20, max: 400, step: 1 } }],
+    live: true,
+    icon: '<rect x="5" y="5" width="14" height="14" rx="1"/><circle cx="12" cy="12" r="4"/><path d="M12 8V3M12 16v5M8 12H3M16 12h5"/>',
+  },
+  {
     kind: '74hc595',
     label: '74HC595 shift register',
     tag: 'wokwi-74hc595',
@@ -427,6 +497,16 @@ export const PARTS: PartDef[] = [
     attrs: {},
     live: true,
     icon: '<rect x="2" y="5" width="20" height="14" rx="1"/><path d="M4 9h3M9 9h3M14 9h3M19 9h1M4 13h3M9 13h3M14 13h3M19 13h1M4 17h3M9 17h3M14 17h3M19 17h1"/>',
+  },
+  {
+    kind: 'lcd1602',
+    label: 'LCD 1602',
+    tag: 'wokwi-lcd1602',
+    // A 16×2 character display in 4-bit mode. The bundled LiquidCrystal library
+    // writes RS/E/D4–D7; RW is tied low.
+    attrs: {},
+    live: true,
+    icon: '<rect x="3" y="5" width="18" height="12" rx="1"/><path d="M6 9h12M6 12h12M6 15h8"/>',
   },
   {
     kind: 'led-bar-graph',

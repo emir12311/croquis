@@ -404,6 +404,49 @@ check('the servo preset loads with a horn', async (app) => {
   assert(await app.ev(`!!document.querySelector('wokwi-servo')`), 'the servo is on the canvas')
 })
 
+check('the IR remote preset loads', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('IR remote')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 3, 'IR remote gives three parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-ir-receiver')`), 'the receiver is on the canvas')
+  assert(await app.ev(`!!document.querySelector('wokwi-ir-remote')`), 'the remote is on the canvas')
+})
+
+check('the DHT22 preset loads', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('DHT22')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 2, 'DHT22 gives two parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-dht22')`), 'the DHT22 is on the canvas')
+})
+
+check('the LCD preset loads with a display', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('LCD 1602')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 2, 'LCD gives two parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-lcd1602')`), 'the LCD is on the canvas')
+})
+
+check('the stepper preset loads with a motor', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Stepper')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 2, 'Stepper gives two parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-stepper-motor')`), 'the stepper is on the canvas')
+})
+
+check('the keypad preset loads', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Keypad')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 2, 'Keypad gives two parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-membrane-keypad')`), 'the keypad is on the canvas')
+})
+
+check('the gas sensor preset loads', async (app) => {
+  await app.goto(`http://localhost:${DEV_PORT}`)
+  await app.loadPreset('Gas sensor')
+  assert((await app.ev(`document.querySelectorAll('.instance').length`)) === 2, 'Gas sensor gives two parts')
+  assert(await app.ev(`!!document.querySelector('wokwi-gas-sensor')`), 'the gas sensor is on the canvas')
+})
+
 check('the ultrasonic preset loads with a sensor', async (app) => {
   await app.goto(`http://localhost:${DEV_PORT}`)
   await app.loadPreset('Ultrasonic')

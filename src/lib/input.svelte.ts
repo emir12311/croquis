@@ -545,6 +545,12 @@ export class Input {
 
   startMove(e: PointerEvent, inst: Instance) {
     if (e.button !== 0) return
+    // The keypad's own element handles its keys; do not turn that into a drag.
+    if (inst.kind === 'membrane-keypad' || inst.kind === 'ir-remote') {
+      if (!this.selectedIds.includes(inst.id)) this.selectedIds = [inst.id]
+      this.selectedWireId = null
+      return
+    }
     const p = this.toCanvas(e.clientX, e.clientY)
     const pin = this.nearestPin(p.x, p.y, 18 / this.deps.view.zoom, inst.id)
     if (pin) {
