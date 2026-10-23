@@ -639,7 +639,11 @@ const PWM_MAX_PERIOD: u64 = 800_000;
 const PWM_MIN_PERIOD: u64 = F_CPU as u64 / 10_000;
 /// How many complete periods before a pin is trusted as PWM rather than a
 /// button's brief chatter.
-const PWM_MIN_PERIODS: u32 = 4;
+const PWM_MIN_PERIODS: u32 = 6;
+/// How often a held input level is pushed again. A sketch that rewrites the port
+/// clears it, so at 16 MHz this is 16 µs — often enough that the level is back
+/// before the sketch reads the pin, and cheap enough to ignore.
+const HOLD_RESTORE_CYCLES: u64 = F_CPU as u64 / 62_500;
 
 struct PinCtx {
     emit: Emit,
@@ -649,6 +653,10 @@ struct PinCtx {
     /// needs this to read the cycle counter.
     avr: usize,
     timing: Mutex<PinTiming>,
+    /// The level last reported to the UI. A held input is re-applied constantly
+    /// so a port rewrite cannot lose it, and each of those raises the pin's IRQ;
+    /// without this, every one became a `sim:pin` event and the webview drowned.
+    sent: Mutex<Option<bool>>,
 }
 
 unsafe extern "C" fn pin_notify(_irq: *mut ffi::avr_irq_t, value: u32, param: *mut c_void) {
@@ -658,7 +666,11 @@ unsafe extern "C" fn pin_notify(_irq: *mut ffi::avr_irq_t, value: u32, param: *m
     let mut pwm = false;
     if let Ok(mut timing) = ctx.timing.lock() {
         timing.edge(now, high);
-        pwm = timing.periods() >= PWM_MIN_PERIODS
+        // `steady`, not `periods`: a pin whose period keeps changing is carrying
+        // data — an LCD writing a character, a shift register clocking a byte —
+        // even when that period lands inside the PWM window. Swallowing its edges
+        // loses samples the UI needs.
+        pwm = timing.steady() >= PWM_MIN_PERIODS
             && timing.timing().is_some_and(|timing| {
                 timing.period_cycles >= PWM_MIN_PERIOD && timing.period_cycles <= PWM_MAX_PERIOD
             });
@@ -667,11 +679,24 @@ unsafe extern "C" fn pin_notify(_irq: *mut ffi::avr_irq_t, value: u32, param: *m
     // duty every 20 ms instead. A digital edge after the meter resets still gets
     // its Pin event, and the UI clears the stale timing.
     if !pwm {
-        (ctx.emit)(SimEvent::Pin {
-            port: ctx.port,
-            pin: ctx.pin,
-            high,
-        });
+        // Report a level once, even if simavr says it twice. A held input is
+        // re-applied on a timer, and although simavr is silent when the level has
+        // not moved, nothing here should depend on that.
+        let already = match ctx.sent.lock() {
+            Ok(mut sent) => {
+                let same = *sent == Some(high);
+                *sent = Some(high);
+                same
+            }
+            Err(_) => false,
+        };
+        if !already {
+            (ctx.emit)(SimEvent::Pin {
+                port: ctx.port,
+                pin: ctx.pin,
+                high,
+            });
+        }
     }
 }
 
@@ -727,6 +752,7 @@ fn sim_main(
                         emit: emit.clone(),
                         port,
                         pin,
+                        sent: Mutex::new(None),
                         avr: avr as usize,
                         timing: Mutex::new(PinTiming::default()),
                     }));
@@ -807,6 +833,13 @@ fn sim_main(
             cursor: usize,
         }
         let mut bounces: Vec<Bounce> = Vec::new();
+        // Levels the circuit is holding on an input pin — a button held down, a
+        // keypad column pulled low. A sketch that rewrites its port register
+        // (the matrix scan does, every pass) makes simavr recompute the pin from
+        // the port, which drops the level we last pushed. These are re-applied on
+        // a short timer so a held line stays held.
+        let mut held: Vec<(u8, u8, bool)> = Vec::new();
+        let mut next_restore: u64 = 0;
         let mut echoes: Vec<Echo> = Vec::new();
         let mut trains: Vec<Train> = Vec::new();
         let mut next_timing = sim_shim_cycle(avr) + TIMING_TICK;
@@ -830,6 +863,9 @@ fn sim_main(
                 } else {
                     // A clean change, straight to the level asked for.
                     raise_pin(avr, port, pin, high);
+                    // Remember it, so a port rewrite by the sketch cannot lose it.
+                    held.retain(|h| !(h.0 == port && h.1 == pin));
+                    held.push((port, pin, high));
                 }
             }
             // Analogue inputs are not momentary: whatever the circuit last said is
@@ -878,6 +914,15 @@ fn sim_main(
                 });
             }
             let state = ffi::avr_run(avr);
+            if !held.is_empty() {
+                let now = sim_shim_cycle(avr);
+                if now >= next_restore {
+                    next_restore = now + HOLD_RESTORE_CYCLES;
+                    for &(port, pin, high) in &held {
+                        raise_pin(avr, port, pin, high);
+                    }
+                }
+            }
             // Settle the contacts that are still chattering.
             if !bounces.is_empty() {
                 let now = sim_shim_cycle(avr);
@@ -935,7 +980,7 @@ fn sim_main(
                                 .map(|edge| now.saturating_sub(edge) <= TIMING_STALE)
                                 .unwrap_or(false);
                             if recent {
-                                if timing.periods() < PWM_MIN_PERIODS {
+                                if timing.steady() < PWM_MIN_PERIODS {
                                     None
                                 } else {
                                     timing.timing().filter(|timing| {
@@ -1249,7 +1294,10 @@ void loop() {
                 _ => None,
             })
             .collect();
-        let readings: Vec<i32> = serial.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+        // Only complete lines: the run is cut short by `stop()`, which can land
+        // mid-print and leave a truncated number at the end.
+        let complete = serial.rsplit_once('\n').map_or("", |(head, _)| head);
+        let readings: Vec<i32> = complete.split_whitespace().filter_map(|t| t.parse().ok()).collect();
         let last = *readings.last().unwrap_or_else(|| panic!("no analogRead output: {serial:?}"));
         assert!(
             (500..=525).contains(&last),
@@ -1686,6 +1734,186 @@ void loop() {
             .collect();
         assert!(serial.contains("h=50.00"), "humidity should be 50.00, serial was {serial:?}");
         assert!(serial.contains("t=25.00"), "temperature should be 25.00, serial was {serial:?}");
+    }
+
+    /// A keypad is read by the sketch, not watched: the canvas has to push the
+    /// column low and the scan picks it up. This holds C1 low and checks the
+    /// sketch's own `Keypad` library finds key '1' when it scans row R1.
+    #[test]
+    fn a_held_keypad_column_reads_as_its_key() {
+        let _serial = test_lock();
+        let dir = std::env::temp_dir().join("croquis-keypad-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+#include <Keypad.h>
+const byte ROWS = 4;
+const byte COLS = 4;
+char keys[ROWS][COLS] = {
+  {'1', '2', '3', 'A'},
+  {'4', '5', '6', 'B'},
+  {'7', '8', '9', 'C'},
+  {'*', '0', '#', 'D'},
+};
+byte rowPins[ROWS] = {9, 8, 7, 6};
+byte colPins[COLS] = {5, 4, 3, 2};
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+void setup() { Serial.begin(9600); }
+void loop() {
+  char key = keypad.getKey();
+  if (key) {
+    Serial.print("key ");
+    Serial.println(key);
+  }
+}
+"#;
+        let fw = compile(sketch, &dir).expect("sketch should compile");
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+
+        // The netlist's model: a closed key ties its column to its row, so C1
+        // follows R1. R1 is Arduino pin 9 → PORTB bit 1; C1 is pin 5 → PORTD bit 5.
+        // The answer cannot be instant: it travels out to the UI and back, which
+        // is real milliseconds while the engine paces itself to real time. 8 ms is
+        // what that round trip measured; the library's row window has to be wider
+        // than it or the scan has already moved on when the level lands.
+        const UI_LATENCY: Duration = Duration::from_millis(8);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let serial = loop {
+            let row_low = {
+                let seen = events.lock().unwrap();
+                seen.iter()
+                    .rev()
+                    .find_map(|e| match e {
+                        SimEvent::Pin { port: b'B', pin: 1, high } => Some(!*high),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            };
+            thread::sleep(UI_LATENCY);
+            sim.set_pin(b'D', 5, !row_low);
+            let text: String = {
+                let seen = events.lock().unwrap();
+                seen.iter()
+                    .filter_map(|e| match e {
+                        SimEvent::Serial(b) => Some(*b as char),
+                        _ => None,
+                    })
+                    .collect()
+            };
+            if Instant::now() > deadline {
+                break text;
+            }
+        };
+        sim.stop();
+        // Every report must be the key that is actually down. A late column level
+        // made one press report twice: '1' from its own row, then '4' from the
+        // next row picking up the level that belonged to the row before.
+        let reported: Vec<&str> = serial
+            .lines()
+            .filter_map(|line| line.strip_prefix("key "))
+            .map(|key| key.trim())
+            .collect();
+        assert!(!reported.is_empty(), "the scan should find the key at all, serial was {serial:?}");
+        assert!(
+            reported.iter().all(|key| *key == "1"),
+            "only the key that is down should be reported, saw {reported:?}"
+        );
+    }
+
+    /// A fading LED steps `analogWrite` every few milliseconds. Each step nudges
+    /// one period, and if that were enough to un-classify the pin the UI would go
+    /// back to reading the raw level — which is a pin that is high half the time,
+    /// so the LED jumps to full brightness. A pin that is plainly PWM has to stay
+    /// classified through its own duty changes.
+    #[test]
+    fn a_fading_pwm_pin_stops_emitting_edges() {
+        let _serial = test_lock();
+        let dir = std::env::temp_dir().join("croquis-fade-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+void setup() {
+  pinMode(9, OUTPUT);
+}
+void loop() {
+  for (int v = 0; v <= 255; v += 5) {
+    analogWrite(9, v);
+    delay(5);
+  }
+}
+"#;
+        let fw = compile(sketch, &dir).expect("sketch should compile");
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+        thread::sleep(Duration::from_millis(1200));
+        sim.stop();
+
+        // Pin 9 is PORTB bit 1. The first few edges are how the meter learns the
+        // pin is PWM; after that, per-edge events should stop.
+        let seen = events.lock().unwrap();
+        let edges = seen
+            .iter()
+            .filter(|e| matches!(e, SimEvent::Pin { port: b'B', pin: 1, .. }))
+            .count();
+        assert!(
+            edges <= 40,
+            "a fading PWM pin must stop reporting edges once classified, saw {edges}"
+        );
+    }
+
+    /// The LCD writes with the same kind of burst a shiftOut does: data and
+    /// enable edges a few microseconds apart, over and over. The pin meter used to
+    /// decide those were PWM and swallow them, which left the display with a
+    /// handful of stray glyphs — and the enable line's edges matter twice over,
+    /// because a single lost one shifts every later byte by half a byte.
+    #[test]
+    fn an_lcd_write_reaches_the_ui_as_each_nibble() {
+        let _serial = test_lock();
+        let dir = std::env::temp_dir().join("croquis-lcd-edges-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+void setup() {
+  lcd.begin(16, 2);
+  lcd.print("Hello, Croquis!");
+  lcd.setCursor(0, 1);
+  lcd.print("LCD 1602 ready");
+}
+void loop() {}
+"#;
+        let fw = compile(sketch, &dir).expect("sketch should compile");
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+        thread::sleep(Duration::from_millis(1200));
+        sim.stop();
+
+        // Every pin the display listens on, and how many edges each must deliver.
+        // The sketch sends 36 bytes, so the enable line sees 72 pulses (144 edges);
+        // each data line changes on most nibbles.
+        let seen = events.lock().unwrap();
+        let count = |port: u8, pin: u8| {
+            seen.iter()
+                .filter(|e| matches!(e, SimEvent::Pin { port: p, pin: n, .. } if *p == port && *n == pin))
+                .count()
+        };
+        let enable = count(b'B', 3);
+        assert!(enable >= 120, "the enable line's edges must all arrive, got {enable}");
+        for (pin, label) in [(2u8, "D7"), (3, "D6"), (4, "D5"), (5, "D4")] {
+            let edges = count(b'D', pin);
+            assert!(edges >= 20, "{label} carried the data: expected its edges, got {edges}");
+        }
     }
 
     /// A shiftOut burst clocks eight bits in a few microseconds. The pin meter

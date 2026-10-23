@@ -60,6 +60,18 @@ export interface PinTiming {
 
 const SERIAL_LIMIT = 20_000
 
+/**
+ * How long a tapped key stays closed. The sketch only samples the matrix, so a
+ * press has to outlive one whole pass — a click arrives as press+release in a
+ * single task, which is nothing. A pass is four rows at the bundled library's
+ * 20 ms settle each, so 80 ms.
+ *
+ * One pass, no more. A pass is what a tap has to survive, and holding longer
+ * bridges two quick taps into one continuous press: the sketch never sees the key
+ * lift, so it swallows the second tap and you end up tapping twice.
+ */
+const KEY_TAP_HOLD_MS = 80
+
 /** The two-coil sequence the bundled Stepper library writes. */
 const STEPPER_PHASES = [
   [true, false, true, false],
@@ -164,6 +176,8 @@ export class Sim {
   pressedButtons = $state<Record<string, boolean>>({})
   /** The key held on each keypad, by part id. */
   keypadKeys = $state<Record<string, { row: number; column: number }>>({})
+  /** Pending minimum-hold timers, so a tap outlives one scan of the matrix. */
+  private keypadHolds = new Map<string, ReturnType<typeof setTimeout>>()
 
   /** The last level sent per pin, so an unchanged drive is not re-sent every solve. */
   private lastDrives = new Map<string, boolean>()
@@ -225,6 +239,8 @@ export class Sim {
     // A fresh run never inherits a held button.
     this.pressedButtons = {}
     this.keypadKeys = {}
+    for (const hold of this.keypadHolds.values()) clearTimeout(hold)
+    this.keypadHolds.clear()
     this.sensors = {}
     // A new simulator has no memory of the levels sent to the old one, so the
     // duplicate-suppression caches must not survive a restart either.
@@ -266,6 +282,8 @@ export class Sim {
     this.dhtBusy.clear()
     this.pressedButtons = {}
     this.keypadKeys = {}
+    for (const hold of this.keypadHolds.values()) clearTimeout(hold)
+    this.keypadHolds.clear()
     this.sensors = {}
   }
 
@@ -297,6 +315,8 @@ export class Sim {
     this.dhtBusy.clear()
     this.pressedButtons = {}
     this.keypadKeys = {}
+    for (const hold of this.keypadHolds.values()) clearTimeout(hold)
+    this.keypadHolds.clear()
     this.sensors = {}
     this.analogs = []
     this.pin13 = false
@@ -359,6 +379,9 @@ export class Sim {
   }
 
   pressKey(partId: string, row: number, column: number) {
+    // A fresh press cancels any pending release for this pad.
+    clearTimeout(this.keypadHolds.get(partId))
+    this.keypadHolds.delete(partId)
     this.keypadKeys[partId] = { row, column }
   }
 
@@ -367,7 +390,18 @@ export class Sim {
     const key = this.keypadKeys[partId]
     if (!key) return
     if (row !== undefined && (key.row !== row || key.column !== column)) return
-    delete this.keypadKeys[partId]
+    clearTimeout(this.keypadHolds.get(partId))
+    // A click lasts less than one pass of the sketch: press and release arrive
+    // in the same task, so the netlist never solves while the key is closed and
+    // the scan finds nothing. Hold it for a moment so at least one scan sees it,
+    // the way a finger on a real membrane keypad would.
+    this.keypadHolds.set(
+      partId,
+      setTimeout(() => {
+        this.keypadHolds.delete(partId)
+        delete this.keypadKeys[partId]
+      }, KEY_TAP_HOLD_MS),
+    )
   }
 
   /** Send text to the sketch's Serial input, if a desktop simulation is running. */
@@ -519,6 +553,9 @@ export class Sim {
     this.backend
       .onPin((port, pin, high) => {
         const key = `${String.fromCharCode(port)}${pin}`
+        // Where the pin was before this event: a latch happens on a real
+        // falling edge, and that needs to know it was high.
+        const wasHigh = this.avrPins[key] === true
         // A Pin event means this is no longer PWM; clear the timing so it does
         // not keep overriding the level in solve().
         if (this.pinTimings[key]) {
@@ -560,7 +597,12 @@ export class Sim {
           this.stepperPhases.set(partId, phase)
         }
         for (const [partId, wiring] of Object.entries(this.lcdWiring)) {
-          if (key !== wiring.pins.e || high) continue
+          if (key !== wiring.pins.e || high || !wasHigh) continue
+          // `!wasHigh` matters: the simulator announces every pin's level when it
+          // starts, and that lone `low` on the enable line is not a pulse. Taking
+          // it as one latches a phantom nibble, and every byte after it is then
+          // half a byte out of step — the display shows a couple of stray glyphs
+          // in the wrong cells, which is exactly how this looked.
           this.latchLcd(partId, wiring)
         }
         if (high) {
