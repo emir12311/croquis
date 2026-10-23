@@ -14,8 +14,8 @@
 
 use std::collections::HashMap;
 
-use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 use croquis_core::route::{expand_path, Point as CorePoint};
+use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod art;
 mod scene;
@@ -119,8 +119,8 @@ impl eframe::App for Spike {
             if self.textures.contains_key(&part.kind) {
                 continue;
             }
-            let width = part.size.x.max(1.0) as u32;
-            let height = part.size.y.max(1.0) as u32;
+            let width = (part.size.x * 3.0).max(1.0) as u32;
+            let height = (part.size.y * 3.0).max(1.0) as u32;
             if let Some(image) = art::rasterize(&part.svg, width, height) {
                 let texture = ctx.load_texture(
                     format!("part-{}", part.kind),
@@ -341,7 +341,6 @@ fn draw_part(
     let min = camera.world_to_screen(rect, part.bounds().min);
     let max = camera.world_to_screen(rect, part.bounds().max);
     let screen = Rect::from_min_max(min, max);
-    painter.rect_filled(screen, 4.0, part.color);
     if let Some(texture) = texture {
         painter.image(
             texture.id(),
@@ -349,6 +348,8 @@ fn draw_part(
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             Color32::WHITE,
         );
+    } else {
+        painter.rect_filled(screen, 4.0, part.color);
     }
     let border = if selected {
         Color32::from_rgb(217, 164, 65)
@@ -372,10 +373,10 @@ fn draw_part(
     for (index, pin) in part.pins.iter().enumerate() {
         let p = camera.world_to_screen(rect, part.pin_world(index));
         let hovered = hovered_pin.is_some_and(|(_, pin_index)| pin_index == index);
-        let radius = if hovered { 7.0 } else { 4.5 };
-        painter.circle_filled(
-            p,
-            radius,
+        let side = if hovered { 14.0 } else { 9.0 };
+        painter.rect_filled(
+            Rect::from_center_size(p, Vec2::splat(side)),
+            0.0,
             if hovered {
                 Color32::from_rgb(217, 164, 65)
             } else {
@@ -445,12 +446,7 @@ mod tests {
             let image = art::rasterize(&part.svg, part.size.x as u32, part.size.y as u32)
                 .unwrap_or_else(|| panic!("{} rasterises", part.kind));
             let visible = image.pixels.iter().filter(|pixel| pixel.a() > 0).count();
-            eprintln!("{} {}x{} visible={visible}", part.kind, image.size[0], image.size[1]);
-            assert!(
-                visible > 100,
-                "{} has visible pixels",
-                part.kind
-            );
+            assert!(visible > 100, "{} has visible pixels", part.kind);
         }
     }
 }

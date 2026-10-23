@@ -140,13 +140,10 @@ pub fn load_blink() -> (Vec<Part>, Vec<Wire>) {
             continue;
         };
         let from = parts[a].pin_world(pin_a);
-        let waypoints = decode_route(
-            CorePoint::new(from.x as f64, from.y as f64),
-            &wire.route,
-        )
-        .into_iter()
-        .map(|point| Pos2::new(point.x as f32, point.y as f32))
-        .collect();
+        let waypoints = decode_route(CorePoint::new(from.x as f64, from.y as f64), &wire.route)
+            .into_iter()
+            .map(|point| Pos2::new(point.x as f32, point.y as f32))
+            .collect();
         wires.push(Wire {
             a: (a, pin_a),
             b: (b, pin_b),

@@ -28,8 +28,11 @@ pub fn rasterize(svg: &str, width: u32, height: u32) -> Option<egui::ColorImage>
     };
     let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
     let size = tree.size();
-    let scale = (width as f32 / size.width()).min(height as f32 / size.height());
-    let transform = resvg::tiny_skia::Transform::from_scale(scale, scale);
+    // The manifest box is the pin coordinate space: fill it exactly rather than
+    // preserving the SVG aspect and letterboxing the drawing inside it.
+    let scale_x = width as f32 / size.width();
+    let scale_y = height as f32 / size.height();
+    let transform = resvg::tiny_skia::Transform::from_scale(scale_x, scale_y);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     Some(egui::ColorImage::from_rgba_unmultiplied(
         [width as usize, height as usize],
