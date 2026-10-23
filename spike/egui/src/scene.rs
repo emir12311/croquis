@@ -59,8 +59,16 @@ struct ManifestPin {
     y: f32,
 }
 
+use croquis_core::route::{decode_route, Point as CorePoint};
+
 pub type PinRef = (usize, usize);
-pub type Wire = (PinRef, PinRef);
+
+#[derive(Clone)]
+pub struct Wire {
+    pub a: PinRef,
+    pub b: PinRef,
+    pub waypoints: Vec<Pos2>,
+}
 
 pub fn load_blink() -> (Vec<Part>, Vec<Wire>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -131,7 +139,19 @@ pub fn load_blink() -> (Vec<Part>, Vec<Wire>) {
         let Some(pin_b) = parts[b].pins.iter().position(|pin| pin.name == wire.b.pin) else {
             continue;
         };
-        wires.push(((a, pin_a), (b, pin_b)));
+        let from = parts[a].pin_world(pin_a);
+        let waypoints = decode_route(
+            CorePoint::new(from.x as f64, from.y as f64),
+            &wire.route,
+        )
+        .into_iter()
+        .map(|point| Pos2::new(point.x as f32, point.y as f32))
+        .collect();
+        wires.push(Wire {
+            a: (a, pin_a),
+            b: (b, pin_b),
+            waypoints,
+        });
     }
     (parts, wires)
 }

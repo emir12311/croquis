@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
+use croquis_core::route::{expand_path, Point as CorePoint};
 
 mod art;
 mod scene;
@@ -225,7 +226,11 @@ impl eframe::App for Spike {
             if response.clicked_by(PointerButton::Primary) {
                 if let Some(pin) = self.hovered_pin {
                     match self.wire_start.take() {
-                        Some(start) if start != pin => self.wires.push((start, pin)),
+                        Some(start) if start != pin => self.wires.push(Wire {
+                            a: start,
+                            b: pin,
+                            waypoints: Vec::new(),
+                        }),
                         Some(_) => {}
                         None => self.wire_start = Some(pin),
                     }
@@ -248,24 +253,49 @@ impl eframe::App for Spike {
                 );
             }
 
-            for &(a, b) in &self.wires {
-                let pa = self
+            for wire in &self.wires {
+                let a = self
                     .camera
-                    .world_to_screen(rect, self.parts[a.0].pin_world(a.1));
-                let pb = self
+                    .world_to_screen(rect, self.parts[wire.a.0].pin_world(wire.a.1));
+                let b = self
                     .camera
-                    .world_to_screen(rect, self.parts[b.0].pin_world(b.1));
-                painter.line_segment([pa, pb], Stroke::new(2.5, Color32::from_rgb(108, 203, 123)));
+                    .world_to_screen(rect, self.parts[wire.b.0].pin_world(wire.b.1));
+                let mut route = vec![CorePoint::new(a.x as f64, a.y as f64)];
+                route.extend(
+                    wire.waypoints
+                        .iter()
+                        .map(|point| CorePoint::new(point.x as f64, point.y as f64)),
+                );
+                route.push(CorePoint::new(b.x as f64, b.y as f64));
+                let line = expand_path(&route);
+                for pair in line.windows(2) {
+                    painter.line_segment(
+                        [
+                            Pos2::new(pair[0].x as f32, pair[0].y as f32),
+                            Pos2::new(pair[1].x as f32, pair[1].y as f32),
+                        ],
+                        Stroke::new(2.5, Color32::from_rgb(108, 203, 123)),
+                    );
+                }
             }
 
             if let (Some(start), Some(pointer)) = (self.wire_start, pointer) {
                 let pa = self
                     .camera
                     .world_to_screen(rect, self.parts[start.0].pin_world(start.1));
-                painter.line_segment(
-                    [pa, pointer],
-                    Stroke::new(2.0, Color32::from_rgb(217, 164, 65)),
-                );
+                let preview = expand_path(&[
+                    CorePoint::new(pa.x as f64, pa.y as f64),
+                    CorePoint::new(pointer.x as f64, pointer.y as f64),
+                ]);
+                for pair in preview.windows(2) {
+                    painter.line_segment(
+                        [
+                            Pos2::new(pair[0].x as f32, pair[0].y as f32),
+                            Pos2::new(pair[1].x as f32, pair[1].y as f32),
+                        ],
+                        Stroke::new(2.0, Color32::from_rgb(217, 164, 65)),
+                    );
+                }
             }
         });
     }
@@ -311,6 +341,7 @@ fn draw_part(
     let min = camera.world_to_screen(rect, part.bounds().min);
     let max = camera.world_to_screen(rect, part.bounds().max);
     let screen = Rect::from_min_max(min, max);
+    painter.rect_filled(screen, 4.0, part.color);
     if let Some(texture) = texture {
         painter.image(
             texture.id(),
@@ -318,8 +349,6 @@ fn draw_part(
             Rect::from_min_size(Pos2::ZERO, texture.size_vec2()),
             Color32::WHITE,
         );
-    } else {
-        painter.rect_filled(screen, 4.0, part.color);
     }
     let border = if selected {
         Color32::from_rgb(217, 164, 65)
@@ -413,9 +442,11 @@ mod tests {
         for part in &parts {
             assert!(!part.id.is_empty());
             assert!(!part.pins.is_empty(), "{} has pins", part.kind);
+            let image = art::rasterize(&part.svg, part.size.x as u32, part.size.y as u32)
+                .unwrap_or_else(|| panic!("{} rasterises", part.kind));
             assert!(
-                art::rasterize(&part.svg, part.size.x as u32, part.size.y as u32).is_some(),
-                "{} rasterises",
+                image.pixels.iter().any(|pixel| pixel.a() > 0),
+                "{} has visible pixels",
                 part.kind
             );
         }
