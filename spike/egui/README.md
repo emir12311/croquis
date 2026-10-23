@@ -39,3 +39,31 @@ Proves:
 Not yet proven: IME/compose behaviour, long-line performance, a maintained
 editor-crate comparison, and completion at a wrapped caret on a real display.
 Those are measured before choosing the production editor.
+
+## Spike C — host shell
+
+```bash
+cargo run --manifest-path spike/egui/Cargo.toml --bin host
+cargo test --manifest-path spike/egui/Cargo.toml --bin host -- --ignored
+```
+
+Proves:
+
+- native Open/Save through `rfd`;
+- a background compile/run worker calling the existing Tauri-free engine API;
+- live pin, serial and timing events drained into the egui UI;
+- a native generated-tone audio path through `rodio`;
+- a release binary can be built without a webview.
+
+The engine is still a path dependency on `src-tauri`; moving it into its own
+crate is Phase 1. A display run, an installed deb/rpm/AppImage and audio-device
+behaviour still need measurement. This spike does not yet load or render a real
+diagram — it exercises the host boundary around the engine.
+
+Measured release build on the development machine:
+
+- `spike/egui/target/release/host` is 15 MB;
+- the release build took 4m42s from the spike's first release compile;
+- because the engine is still a path dependency, the binary links the Tauri
+  stack (GTK/WebKit) even though the UI is egui. Extraction into `croquis-sim`
+  is therefore required before the size/lightweight claim can be evaluated.
