@@ -566,6 +566,27 @@ pub fn evaluate_circuit(
         }
     }
 
+    let coil_rails = collect_rails(parts, wires, &mut uf, avr, pin_duty);
+    for part in parts {
+        if part.kind != PartKind::Relay {
+            continue;
+        }
+        let coil1 = uf.find(&format!("{}:COIL1", part.id));
+        let coil2 = uf.find(&format!("{}:COIL2", part.id));
+        let high = |root: &str| coil_rails.vcc.contains(root) || coil_rails.mcu_high.contains(root);
+        let low = |root: &str| coil_rails.gnd.contains(root) || coil_rails.mcu_low.contains(root);
+        let energised = (high(&coil1) && low(&coil2)) || (high(&coil2) && low(&coil1));
+        let contact = if energised { "NO" } else { "NC" };
+        uf.union(
+            &format!("{}:P1", part.id),
+            &format!("{}:{contact}1", part.id),
+        );
+        uf.union(
+            &format!("{}:P2", part.id),
+            &format!("{}:{contact}2", part.id),
+        );
+    }
+
     let rails = collect_rails(parts, wires, &mut uf, avr, pin_duty);
     let edges = resistor_edges(parts, &mut uf);
     let high_nets: HashSet<String> = rails.vcc.union(&rails.mcu_high).cloned().collect();
@@ -1545,5 +1566,21 @@ mod tests {
         assert!((out.stepper_wiring["step"].step_angle - 1.8).abs() < 1e-9);
         assert!(out.lcd_wiring["lcd"].powered);
         assert_eq!(out.lcd_wiring["lcd"].pins.rs, "D6");
+    }
+
+    #[test]
+    fn an_energised_relay_switches_its_contact_into_a_load() {
+        let relay = EvalPart::new("relay", PartKind::Relay);
+        let wires = [
+            wire(at("uno", "5V"), at("relay", "COIL1")),
+            wire(at("relay", "COIL2"), at("uno", "GND.2")),
+            wire(at("uno", "5V"), at("relay", "P1")),
+            wire(at("relay", "NO1"), at("r", "1")),
+            wire(at("r", "2"), at("led", "A")),
+            wire(at("led", "C"), at("uno", "GND.2")),
+        ];
+        let out = run(&[relay, resistor("220"), led("red")], &wires, &[]);
+        assert!(out.outputs["relay"].active);
+        assert_eq!(out.leds["led"], LedState::Lit);
     }
 }
