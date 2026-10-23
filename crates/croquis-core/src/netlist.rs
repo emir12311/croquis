@@ -152,6 +152,12 @@ pub struct SensorState {
     pub active: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KeyPosition {
+    pub row: usize,
+    pub column: usize,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OutputState {
     pub active: bool,
@@ -497,6 +503,18 @@ pub fn evaluate_circuit(
     pressed: &HashMap<String, bool>,
     avr: &HashMap<String, bool>,
     pin_duty: &HashMap<String, f64>,
+) -> CircuitEval {
+    evaluate_circuit_with_keypad(parts, wires, pressed, avr, pin_duty, &HashMap::new())
+}
+
+/// Like [`evaluate_circuit`], with the keypad matrix state supplied by the caller.
+pub fn evaluate_circuit_with_keypad(
+    parts: &[EvalPart],
+    wires: &[EvalWire],
+    pressed: &HashMap<String, bool>,
+    avr: &HashMap<String, bool>,
+    pin_duty: &HashMap<String, f64>,
+    keypad_keys: &HashMap<String, Option<KeyPosition>>,
 ) -> CircuitEval {
     let mut uf = UnionFind::new();
     let key = |reference: &PinRef| {
@@ -1200,6 +1218,32 @@ pub fn evaluate_circuit(
         }
     }
 
+    for part in parts {
+        if part.kind != PartKind::MembraneKeypad {
+            continue;
+        }
+        let key = keypad_keys.get(&part.id).copied().flatten();
+        for column in 0..4 {
+            let high = match key {
+                Some(key) if key.column == column => {
+                    let row = uf.find(&format!("{}:R{}", part.id, key.row + 1));
+                    !net_low(&row)
+                }
+                _ => true,
+            };
+            let root = uf.find(&format!("{}:C{}", part.id, column + 1));
+            for (label, (port, pin)) in &rails.mcu_pins {
+                if label.starts_with(&format!("{root}/")) {
+                    eval.drives.push(Drive {
+                        port: *port,
+                        pin: *pin,
+                        high,
+                    });
+                }
+            }
+        }
+    }
+
     eval
 }
 
@@ -1582,5 +1626,38 @@ mod tests {
         let out = run(&[relay, resistor("220"), led("red")], &wires, &[]);
         assert!(out.outputs["relay"].active);
         assert_eq!(out.leds["led"], LedState::Lit);
+    }
+
+    #[test]
+    fn keypad_scans_only_the_selected_column() {
+        let pad = EvalPart::new("pad", PartKind::MembraneKeypad);
+        let wires = [
+            wire(at("uno", "9"), at("pad", "R1")),
+            wire(at("uno", "8"), at("pad", "R2")),
+            wire(at("uno", "7"), at("pad", "R3")),
+            wire(at("uno", "6"), at("pad", "R4")),
+            wire(at("uno", "5"), at("pad", "C1")),
+            wire(at("uno", "4"), at("pad", "C2")),
+            wire(at("uno", "3"), at("pad", "C3")),
+            wire(at("uno", "2"), at("pad", "C4")),
+        ];
+        let avr = HashMap::from([("B1".into(), false)]);
+        let keys = HashMap::from([("pad".into(), Some(KeyPosition { row: 0, column: 0 }))]);
+        let out = evaluate_circuit_with_keypad(
+            &[uno(), pad],
+            &wires,
+            &HashMap::new(),
+            &avr,
+            &HashMap::new(),
+            &keys,
+        );
+        assert!(out
+            .drives
+            .iter()
+            .any(|drive| drive.port == 'D' && drive.pin == 5 && !drive.high));
+        assert!(out
+            .drives
+            .iter()
+            .any(|drive| drive.port == 'D' && drive.pin == 4 && drive.high));
     }
 }
