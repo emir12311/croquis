@@ -197,3 +197,56 @@ pub fn evaluate_blink() -> HashMap<String, LedState> {
     )
     .leds
 }
+
+/// Apply the LED element's own state rules to its extracted SVG.
+///
+/// The element's glow group is hidden by default. Its first ellipse carries the
+/// light colour and the first/third ellipses carry `opacity = 0.3 + brightness*0.7`.
+pub fn led_state_svg(svg: &str, color: &str, brightness: f64, on: bool) -> String {
+    let light_color = match color.to_ascii_lowercase().as_str() {
+        "green" => "#80ff80",
+        "blue" => "#8080ff",
+        "yellow" => "#ffff80",
+        "orange" => "#ffcf80",
+        "white" => "#ffffff",
+        "purple" => "#ff80ff",
+        _ => "#ff8080",
+    };
+    let brightness = brightness.clamp(0.0, 1.0);
+    let opacity = if brightness > f64::EPSILON {
+        ((0.3 + brightness * 0.7) * 1000.0).round() / 1000.0
+    } else {
+        0.0
+    };
+    let Some(start) = svg.find("<g class=\"light\"") else {
+        return svg.to_string();
+    };
+    let Some(relative_end) = svg[start..].find("</g>") else {
+        return svg.to_string();
+    };
+    let end = start + relative_end + "</g>".len();
+    let group = &svg[start..end];
+    let display = if on {
+        "display: block"
+    } else {
+        "display: none"
+    };
+    let patched = group
+        .replacen(
+            "style=\"display: none\"",
+            &format!("style=\"{display}\""),
+            1,
+        )
+        .replacen("fill=\"#ff8080\"", &format!("fill=\"{light_color}\""), 1)
+        .replacen(
+            "style=\"opacity: 1\"",
+            &format!("style=\"opacity: {opacity}\""),
+            1,
+        )
+        .replacen(
+            "style=\"opacity: 1\"",
+            &format!("style=\"opacity: {opacity}\""),
+            1,
+        );
+    format!("{}{}{}", &svg[..start], patched, &svg[end..])
+}

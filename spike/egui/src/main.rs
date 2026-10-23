@@ -119,18 +119,34 @@ impl eframe::App for Spike {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         for part in &self.parts {
-            if self.textures.contains_key(&part.kind) {
+            let lit = self
+                .led_states
+                .get(&part.id)
+                .is_some_and(|state| *state == LedState::Lit);
+            let key = if part.kind == "led" {
+                format!("led:{lit}")
+            } else {
+                part.kind.clone()
+            };
+            if self.textures.contains_key(&key) {
                 continue;
             }
+            let svg = if part.kind == "led" {
+                scene::led_state_svg(
+                    &part.svg,
+                    part.attrs.get("color").map(String::as_str).unwrap_or("red"),
+                    if lit { 1.0 } else { 0.0 },
+                    lit,
+                )
+            } else {
+                part.svg.clone()
+            };
             let width = (part.size.x * 3.0).max(1.0) as u32;
             let height = (part.size.y * 3.0).max(1.0) as u32;
-            if let Some(image) = art::rasterize(&part.svg, width, height) {
-                let texture = ctx.load_texture(
-                    format!("part-{}", part.kind),
-                    image,
-                    egui::TextureOptions::LINEAR,
-                );
-                self.textures.insert(part.kind.clone(), texture);
+            if let Some(image) = art::rasterize(&svg, width, height) {
+                let texture =
+                    ctx.load_texture(format!("part-{key}"), image, egui::TextureOptions::LINEAR);
+                self.textures.insert(key, texture);
             }
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -252,10 +268,19 @@ impl eframe::App for Spike {
                     self.selected == Some(index),
                     self.hovered_pin
                         .filter(|(part_index, _)| *part_index == index),
-                    self.textures.get(&part.kind),
-                    self.led_states
-                        .get(&part.id)
-                        .is_some_and(|state| *state == LedState::Lit),
+                    self.textures.get(if part.kind == "led" {
+                        if self
+                            .led_states
+                            .get(&part.id)
+                            .is_some_and(|state| *state == LedState::Lit)
+                        {
+                            "led:true"
+                        } else {
+                            "led:false"
+                        }
+                    } else {
+                        &part.kind
+                    }),
                 );
             }
 
@@ -343,7 +368,6 @@ fn draw_part(
     selected: bool,
     hovered_pin: Option<PinRef>,
     texture: Option<&egui::TextureHandle>,
-    lit: bool,
 ) {
     let min = camera.world_to_screen(rect, part.bounds().min);
     let max = camera.world_to_screen(rect, part.bounds().max);
@@ -357,13 +381,6 @@ fn draw_part(
         );
     } else {
         painter.rect_filled(screen, 4.0, part.color);
-    }
-    if lit && part.kind == "led" {
-        painter.circle_filled(
-            screen.center(),
-            screen.width().min(screen.height()) * 0.28,
-            Color32::from_rgba_unmultiplied(255, 120, 80, 90),
-        );
     }
     let border = if selected {
         Color32::from_rgb(217, 164, 65)
@@ -462,5 +479,22 @@ mod tests {
     fn blink_netlist_lights_its_led() {
         let leds = scene::evaluate_blink();
         assert_eq!(leds.get("led1"), Some(&LedState::Lit));
+    }
+
+    #[test]
+    fn led_state_uses_the_wokwi_glow_rule() {
+        let parts = scene::load_blink().0;
+        let led = parts
+            .iter()
+            .find(|part| part.kind == "led")
+            .expect("Blink LED");
+        let on = scene::led_state_svg(&led.svg, "blue", 1.0, true);
+        assert!(on.contains("display: block"));
+        assert!(on.contains("#8080ff"));
+        assert!(on.contains("opacity: 1"));
+        let dim = scene::led_state_svg(&led.svg, "red", 0.5, true);
+        assert!(dim.contains("opacity: 0.65"));
+        let off = scene::led_state_svg(&led.svg, "red", 1.0, false);
+        assert!(off.contains("display: none"));
     }
 }
