@@ -1,0 +1,63 @@
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="58.3mm" height="62.3mm" viewBox="0 0 220.37399999999997 235.49399999999997">
+      <defs>
+        <linearGradient id="frame-gradient" gradientUnits="userSpaceOnUse" x1="-11.46" x2="114.6" y1="57.3" y2="57.3">
+          <stop stop-color="#666" offset="0"></stop>
+          <stop stop-color="#fff" offset="1"></stop>
+        </linearGradient>
+        <linearGradient id="shaft-gradient" x1="0" x2="0" y1="-5" y2="5" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#9d9d9d" offset="0"></stop>
+          <stop stop-color="#9d9d9d" stop-opacity="0" offset="1"></stop>
+        </linearGradient>
+        <linearGradient id="body-gradient" gradientUnits="userSpaceOnUse" x1="5.73" x2="40.10999999999999" y1="57.3" y2="57.3">
+          <stop stop-color="#9d9d9d" offset="0"></stop>
+          <stop stop-color="#fdfafa" offset=".29501"></stop>
+          <stop offset="1" stop-color="#2a2a2a"></stop>
+        </linearGradient>
+      </defs>
+      <!-- Body -->
+      <g transform="translate(1,1)">
+        <g transform="scale(3.78)">
+          <!-- Pins -->
+          <path id="pin" fill="#9f9f9f" d="m 0 0 c .5 0 .5 0 .5 .5 v 4.55 c -.5 .5 -.5 .5 -1 0 v -4.5 c 0 -.5 0 -.5 .5 -.5" transform="translate(24.9 57.3)"></path>
+          <use xlink:href="#pin" x="2.54"></use>
+          <use xlink:href="#pin" x="5.08"></use>
+          <use xlink:href="#pin" x="7.62"></use>
+
+          <g stroke-linecap="round" stroke-linejoin="round">
+            <rect fill="url(#frame-gradient)" stroke="#000" stroke-width=".3245" width="57.3" height="57.3" rx="5" ry="5"></rect>
+            <circle fill="#666" cx="5.5" cy="5.5" r="2.75"></circle>
+            <circle fill="#e6e6e6" cx="5.5" cy="5.5" r="2.25"></circle>
+            <circle fill="#666" cx="51.8" cy="5.5" r="2.75"></circle>
+            <circle fill="#e6e6e6" cx="51.8" cy="5.5" r="2.25"></circle>
+            <circle fill="#666" cx="5.5" cy="51.8" r="2.75"></circle>
+            <circle fill="#e6e6e6" cx="5.5" cy="51.8" r="2.25"></circle>
+            <circle fill="#666" cx="51.8" cy="51.8" r="2.75"></circle>
+            <circle fill="#e6e6e6" cx="51.8" cy="51.8" r="2.25"></circle>
+          </g>
+
+          <!-- motor body -->
+          <circle fill="#868686" fill-opacity=".89602" opacity=".73" stroke="url(#body-gradient)" stroke-width="1.41429" cx="28.65" cy="28.65" r="19.5"></circle>
+          <!-- Rotator -->
+          <g>
+            <path id="arrow-path" transform="
+                rotate(0, 28.65,28.65) 
+                translate(28.65 28.65)" fill="transparent" d="m 0 0 l -6.35 0 l 6.35 
+                -25.65 l 6.35 25.65 z"></path>
+            <path id="shaft-path" fill="#4d4d4d" stroke="url(#shaft-gradient)" stroke-width=".57968" transform="
+                translate(28.65, 28.65) 
+                rotate(0) 
+                translate(0, 0)" d="m -3.175 -5.499261314031186 a 6.35 6.35 0 1 0 6.35 0 z"></path>
+          </g>
+
+          <!-- Text -->
+          <text font-family="arial" font-size="14.667px" text-align="center" text-anchor="middle">
+            <tspan x="28.65" y="41" font-size="6.34920634920635px">
+              <!--?lit$505831870$-->
+            </tspan>
+            <tspan x="28.65" y="46" font-size="4.444444444444444px">
+              <!--?lit$505831870$-->
+            </tspan>
+          </text>
+        </g>
+      </g>
+    </svg>
