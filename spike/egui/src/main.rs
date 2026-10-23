@@ -14,6 +14,8 @@
 
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 
+mod art;
+
 const GRID: f32 = 24.0;
 const PIN_HIT_RADIUS: f32 = 9.0;
 
@@ -93,6 +95,7 @@ struct Spike {
     selected: Option<usize>,
     dragging: Option<usize>,
     hovered_pin: Option<PinRef>,
+    led_art: Option<egui::TextureHandle>,
 }
 
 impl Default for Spike {
@@ -105,6 +108,7 @@ impl Default for Spike {
             selected: None,
             dragging: None,
             hovered_pin: None,
+            led_art: None,
         }
     }
 }
@@ -214,6 +218,12 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
 impl eframe::App for Spike {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
+        if self.led_art.is_none() {
+            if let Some(image) = art::rasterize(art::SPIKE_LED_SVG, 96, 128) {
+                self.led_art =
+                    Some(ctx.load_texture("spike-led", image, egui::TextureOptions::LINEAR));
+            }
+        }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.wire_start = None;
         }
@@ -329,6 +339,7 @@ impl eframe::App for Spike {
                     self.selected == Some(index),
                     self.hovered_pin
                         .filter(|(part_index, _)| *part_index == index),
+                    self.led_art.as_ref(),
                 );
             }
 
@@ -390,11 +401,25 @@ fn draw_part(
     part: &Part,
     selected: bool,
     hovered_pin: Option<PinRef>,
+    led_art: Option<&egui::TextureHandle>,
 ) {
     let min = camera.world_to_screen(rect, part.bounds().min);
     let max = camera.world_to_screen(rect, part.bounds().max);
     let screen = Rect::from_min_max(min, max);
-    painter.rect_filled(screen, 4.0, part.color);
+    if part.name == "LED" {
+        if let Some(texture) = led_art {
+            painter.image(
+                texture.id(),
+                screen,
+                Rect::from_min_size(Pos2::ZERO, texture.size_vec2()),
+                Color32::WHITE,
+            );
+        } else {
+            painter.rect_filled(screen, 4.0, part.color);
+        }
+    } else {
+        painter.rect_filled(screen, 4.0, part.color);
+    }
     let border = if selected {
         Color32::from_rgb(217, 164, 65)
     } else {
