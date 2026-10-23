@@ -5,4 +5,5 @@
 pub mod catalogue;
 pub mod diagram;
 pub mod document;
+pub mod netlist;
 pub mod route;
