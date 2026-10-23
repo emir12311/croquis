@@ -450,13 +450,21 @@ dependencies = [
 name = "croquis"
 version = "0.2.0"
 dependencies = [
- "bindgen",
- "cc",
+ "croquis-sim",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+]
+
+[[package]]
+name = "croquis-sim"
+version = "0.2.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "serde",
 ]
 
 [[package]]
