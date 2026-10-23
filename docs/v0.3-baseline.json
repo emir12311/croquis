@@ -1,0 +1,1232 @@
+{
+  "version": "0.2.0",
+  "parts": [
+    {
+      "kind": "uno",
+      "label": "Arduino Uno",
+      "tag": "wokwi-arduino-uno",
+      "diagramType": null,
+      "attrs": {},
+      "live": false,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "led",
+      "label": "LED",
+      "tag": "wokwi-led",
+      "diagramType": null,
+      "attrs": {
+        "color": "red"
+      },
+      "live": false,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "color",
+          "label": "Colour",
+          "control": "select",
+          "options": [
+            "red",
+            "green",
+            "blue",
+            "yellow",
+            "orange",
+            "white",
+            "purple"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "rgb-led",
+      "label": "RGB LED",
+      "tag": "wokwi-rgb-led",
+      "diagramType": null,
+      "attrs": {},
+      "live": true,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "resistor",
+      "label": "Resistor",
+      "tag": "wokwi-resistor",
+      "diagramType": null,
+      "attrs": {
+        "value": "220"
+      },
+      "live": false,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "value",
+          "label": "Resistance",
+          "control": "resistance"
+        }
+      ]
+    },
+    {
+      "kind": "pushbutton",
+      "label": "Pushbutton",
+      "tag": "wokwi-pushbutton",
+      "diagramType": null,
+      "attrs": {},
+      "live": false,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "potentiometer",
+      "label": "Potentiometer",
+      "tag": "wokwi-potentiometer",
+      "diagramType": null,
+      "attrs": {
+        "value": "0"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "value",
+          "label": "Position",
+          "control": "range",
+          "min": 0,
+          "max": 1023,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "slide-potentiometer",
+      "label": "Slide potentiometer",
+      "tag": "wokwi-slide-potentiometer",
+      "diagramType": null,
+      "attrs": {
+        "value": "0"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "value",
+          "label": "Position",
+          "control": "range",
+          "min": 0,
+          "max": 100,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "photoresistor-sensor",
+      "label": "Photoresistor",
+      "tag": "wokwi-photoresistor-sensor",
+      "diagramType": null,
+      "attrs": {
+        "light": "50",
+        "threshold": "50"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "light",
+          "label": "Light",
+          "control": "range",
+          "min": 0,
+          "max": 100,
+          "step": 1
+        },
+        {
+          "name": "threshold",
+          "label": "DO threshold",
+          "control": "range",
+          "min": 0,
+          "max": 100,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "ntc-temperature-sensor",
+      "label": "NTC temperature sensor",
+      "tag": "wokwi-ntc-temperature-sensor",
+      "diagramType": null,
+      "attrs": {
+        "temperature": "25"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "temperature",
+          "label": "Temperature",
+          "control": "range",
+          "min": -15,
+          "max": 135,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "analog-joystick",
+      "label": "Analog joystick",
+      "tag": "wokwi-analog-joystick",
+      "diagramType": null,
+      "attrs": {
+        "x": "50",
+        "y": "50"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "x",
+          "label": "Horizontal",
+          "control": "range",
+          "min": 0,
+          "max": 100,
+          "step": 1
+        },
+        {
+          "name": "y",
+          "label": "Vertical",
+          "control": "range",
+          "min": 0,
+          "max": 100,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "membrane-keypad",
+      "label": "Keypad",
+      "tag": "wokwi-membrane-keypad",
+      "diagramType": null,
+      "attrs": {
+        "columns": "4",
+        "connector": "true"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "dht22",
+      "label": "DHT22",
+      "tag": "wokwi-dht22",
+      "diagramType": null,
+      "attrs": {
+        "temperature": "25",
+        "humidity": "50"
+      },
+      "live": false,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "temperature",
+          "label": "Temperature (°C)",
+          "control": "range",
+          "min": -40,
+          "max": 80,
+          "step": 1
+        },
+        {
+          "name": "humidity",
+          "label": "Humidity (%)",
+          "control": "range",
+          "min": 0,
+          "max": 100,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "tilt-switch",
+      "label": "Tilt switch",
+      "tag": "wokwi-tilt-switch",
+      "diagramType": null,
+      "attrs": {
+        "tilted": "0"
+      },
+      "live": false,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "tilted",
+          "label": "Tilted",
+          "control": "toggle"
+        }
+      ]
+    },
+    {
+      "kind": "pir-motion-sensor",
+      "label": "PIR motion sensor",
+      "tag": "wokwi-pir-motion-sensor",
+      "diagramType": null,
+      "attrs": {
+        "motion": "0"
+      },
+      "live": false,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "motion",
+          "label": "Motion",
+          "control": "toggle"
+        }
+      ]
+    },
+    {
+      "kind": "flame-sensor",
+      "label": "Flame sensor",
+      "tag": "wokwi-flame-sensor",
+      "diagramType": null,
+      "attrs": {
+        "flame": "0"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "flame",
+          "label": "Flame",
+          "control": "range",
+          "min": 0,
+          "max": 100,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "gas-sensor",
+      "label": "Gas sensor",
+      "tag": "wokwi-gas-sensor",
+      "diagramType": null,
+      "attrs": {
+        "gas": "0"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "gas",
+          "label": "Gas",
+          "control": "range",
+          "min": 0,
+          "max": 100,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "sound-sensor",
+      "label": "Sound sensor",
+      "tag": "wokwi-small-sound-sensor",
+      "diagramType": null,
+      "attrs": {
+        "noise": "0"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "noise",
+          "label": "Noise",
+          "control": "range",
+          "min": 0,
+          "max": 100,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "hc-sr04",
+      "label": "Ultrasonic sensor",
+      "tag": "wokwi-hc-sr04",
+      "diagramType": null,
+      "attrs": {
+        "distance": "100"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "distance",
+          "label": "Distance (cm)",
+          "control": "range",
+          "min": 2,
+          "max": 400,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "ir-receiver",
+      "label": "IR receiver",
+      "tag": "wokwi-ir-receiver",
+      "diagramType": null,
+      "attrs": {},
+      "live": false,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "ir-remote",
+      "label": "IR remote",
+      "tag": "wokwi-ir-remote",
+      "diagramType": null,
+      "attrs": {},
+      "live": false,
+      "noPins": true,
+      "fields": []
+    },
+    {
+      "kind": "buzzer",
+      "label": "Buzzer",
+      "tag": "wokwi-buzzer",
+      "diagramType": null,
+      "attrs": {},
+      "live": true,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "relay",
+      "label": "Relay",
+      "tag": "wokwi-ks2e-m-dc5",
+      "diagramType": null,
+      "attrs": {},
+      "live": false,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "servo",
+      "label": "Servo",
+      "tag": "wokwi-servo",
+      "diagramType": null,
+      "attrs": {},
+      "live": true,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "stepper-motor",
+      "label": "Stepper motor",
+      "tag": "wokwi-stepper-motor",
+      "diagramType": null,
+      "attrs": {
+        "steps": "200"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "steps",
+          "label": "Steps/rev",
+          "control": "range",
+          "min": 20,
+          "max": 400,
+          "step": 1
+        }
+      ]
+    },
+    {
+      "kind": "74hc595",
+      "label": "74HC595 shift register",
+      "tag": "wokwi-74hc595",
+      "diagramType": null,
+      "attrs": {},
+      "live": false,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "seven-segment",
+      "label": "7-segment display",
+      "tag": "wokwi-7segment",
+      "diagramType": null,
+      "attrs": {},
+      "live": true,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "seven-segment-4",
+      "label": "4-digit display",
+      "tag": "wokwi-7segment-4",
+      "diagramType": null,
+      "attrs": {},
+      "live": true,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "lcd1602",
+      "label": "LCD 1602",
+      "tag": "wokwi-lcd1602",
+      "diagramType": null,
+      "attrs": {},
+      "live": true,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "led-bar-graph",
+      "label": "LED bar graph",
+      "tag": "wokwi-led-bar-graph",
+      "diagramType": null,
+      "attrs": {
+        "color": "red"
+      },
+      "live": true,
+      "noPins": false,
+      "fields": [
+        {
+          "name": "color",
+          "label": "Colour",
+          "control": "select",
+          "options": [
+            "red",
+            "green",
+            "yellow",
+            "blue",
+            "white"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "breadboard",
+      "label": "Breadboard",
+      "tag": "sim-breadboard",
+      "diagramType": null,
+      "attrs": {},
+      "live": false,
+      "noPins": false,
+      "fields": []
+    },
+    {
+      "kind": "breadboard-full",
+      "label": "Breadboard · full",
+      "tag": "sim-breadboard-full",
+      "diagramType": null,
+      "attrs": {},
+      "live": false,
+      "noPins": false,
+      "fields": []
+    }
+  ],
+  "presets": [
+    {
+      "id": "blink",
+      "label": "Blink",
+      "group": "Basics",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-resistor",
+        "wokwi-led"
+      ],
+      "connections": 3,
+      "sketchHash": "40f8df4845e5"
+    },
+    {
+      "id": "button",
+      "label": "Button",
+      "group": "Basics",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-pushbutton"
+      ],
+      "connections": 2,
+      "sketchHash": "8d3f729b609f"
+    },
+    {
+      "id": "buzzer-relay",
+      "label": "Buzzer & relay",
+      "group": "Outputs",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-buzzer",
+        "wokwi-ks2e-m-dc5"
+      ],
+      "connections": 4,
+      "sketchHash": "5875f1dac859"
+    },
+    {
+      "id": "dht22",
+      "label": "DHT22",
+      "group": "Sensors",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-dht22"
+      ],
+      "connections": 3,
+      "sketchHash": "5cce8f95013f"
+    },
+    {
+      "id": "digital-sensors",
+      "label": "Digital sensors",
+      "group": "Sensors",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-tilt-switch",
+        "wokwi-pir-motion-sensor",
+        "wokwi-flame-sensor",
+        "wokwi-small-sound-sensor"
+      ],
+      "connections": 14,
+      "sketchHash": "056af4854f19"
+    },
+    {
+      "id": "fade",
+      "label": "Fade",
+      "group": "Basics",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-resistor",
+        "wokwi-led"
+      ],
+      "connections": 3,
+      "sketchHash": "693aa145ebbc"
+    },
+    {
+      "id": "four-digit",
+      "label": "Four digit",
+      "group": "Outputs",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-7segment-4"
+      ],
+      "connections": 11,
+      "sketchHash": "04a75cbb27a0"
+    },
+    {
+      "id": "gas-sensor",
+      "label": "Gas sensor",
+      "group": "Sensors",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-gas-sensor"
+      ],
+      "connections": 4,
+      "sketchHash": "af6279f11f6d"
+    },
+    {
+      "id": "ir-remote",
+      "label": "IR remote",
+      "group": "Sensors",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-ir-receiver",
+        "wokwi-ir-remote"
+      ],
+      "connections": 3,
+      "sketchHash": "492aa45de554"
+    },
+    {
+      "id": "joystick",
+      "label": "Joystick",
+      "group": "Sensors",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-analog-joystick"
+      ],
+      "connections": 5,
+      "sketchHash": "983d1ae43256"
+    },
+    {
+      "id": "keypad",
+      "label": "Keypad",
+      "group": "Sensors",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-membrane-keypad"
+      ],
+      "connections": 8,
+      "sketchHash": "044df99f8799"
+    },
+    {
+      "id": "lcd",
+      "label": "LCD 1602",
+      "group": "Outputs",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-lcd1602"
+      ],
+      "connections": 12,
+      "sketchHash": "86275d1f569f"
+    },
+    {
+      "id": "led-bar",
+      "label": "LED bar",
+      "group": "Outputs",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-led-bar-graph"
+      ],
+      "connections": 10,
+      "sketchHash": "2068bb9fd61d"
+    },
+    {
+      "id": "photoresistor",
+      "label": "Photoresistor",
+      "group": "Sensors",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-photoresistor-sensor"
+      ],
+      "connections": 4,
+      "sketchHash": "900fe9000ba4"
+    },
+    {
+      "id": "potentiometer",
+      "label": "Potentiometer",
+      "group": "Basics",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-potentiometer"
+      ],
+      "connections": 3,
+      "sketchHash": "6576a1fe677a"
+    },
+    {
+      "id": "rgb",
+      "label": "RGB LED",
+      "group": "Outputs",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-resistor",
+        "wokwi-resistor",
+        "wokwi-resistor",
+        "wokwi-rgb-led"
+      ],
+      "connections": 7,
+      "sketchHash": "306964ad5c37"
+    },
+    {
+      "id": "serial",
+      "label": "Button + serial",
+      "group": "Basics",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-pushbutton"
+      ],
+      "connections": 2,
+      "sketchHash": "8cd35fbfe035"
+    },
+    {
+      "id": "servo",
+      "label": "Servo",
+      "group": "Outputs",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-servo"
+      ],
+      "connections": 3,
+      "sketchHash": "2d3261b4be43"
+    },
+    {
+      "id": "seven-segment",
+      "label": "Seven segment",
+      "group": "Outputs",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-7segment"
+      ],
+      "connections": 8,
+      "sketchHash": "e42f5376946b"
+    },
+    {
+      "id": "shift-register",
+      "label": "Shift register",
+      "group": "Outputs",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-74hc595",
+        "wokwi-led-bar-graph"
+      ],
+      "connections": 23,
+      "sketchHash": "d496ef262e50"
+    },
+    {
+      "id": "slide-pot",
+      "label": "Slide potentiometer",
+      "group": "Basics",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-slide-potentiometer"
+      ],
+      "connections": 3,
+      "sketchHash": "4adeb7a86cc2"
+    },
+    {
+      "id": "stepper",
+      "label": "Stepper",
+      "group": "Outputs",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-stepper-motor"
+      ],
+      "connections": 4,
+      "sketchHash": "fbf493cfbd12"
+    },
+    {
+      "id": "thermometer",
+      "label": "Thermometer",
+      "group": "Sensors",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-ntc-temperature-sensor"
+      ],
+      "connections": 3,
+      "sketchHash": "d35c0408bc2f"
+    },
+    {
+      "id": "ultrasonic",
+      "label": "Ultrasonic",
+      "group": "Sensors",
+      "parts": [
+        "wokwi-arduino-uno",
+        "wokwi-hc-sr04"
+      ],
+      "connections": 4,
+      "sketchHash": "3b5ed3095aa9"
+    }
+  ],
+  "tests": {
+    "frontend": [
+      {
+        "file": "arduino-api.test.ts",
+        "tests": [
+          "documents every entry: a signature and a sentence",
+          "ends every statement in a semicolon, and leaves expressions alone",
+          "has no duplicate names",
+          "offers the function being typed, as a whole statement",
+          "completes the Serial members after a dot",
+          "offers pin mode constants",
+          "stays quiet on an empty prefix, and on words it does not know",
+          "lists everything when explicitly asked on an empty prefix",
+          "is case-insensitive, the way a beginner types"
+        ]
+      },
+      {
+        "file": "breadboard.test.ts",
+        "tests": [
+          "is spaced so every insertable part seats",
+          "makes the pushbutton exact, since it was the worst fit",
+          "spaces holes and rows by the pitch",
+          "puts the rows either side of the trench exactly two pitches apart",
+          "sizes both boards from the same generator",
+          "groups a strip, above and below the trench separately",
+          "groups each rail segment, split on a full board",
+          "leaves anything else alone"
+        ]
+      },
+      {
+        "file": "compile-errors.test.ts",
+        "tests": [
+          "reads file, line, column, severity and message in order",
+          "accepts a diagnostic without a column",
+          "keeps header errors but ignores linker lines without a position",
+          "returns nothing for output with no diagnostics",
+          "accepts the sketch and absolute paths to it, and nothing else"
+        ]
+      },
+      {
+        "file": "diagram.test.ts",
+        "tests": [
+          "writes the Wokwi shape, with the sketch riding along",
+          "keeps position, rotation and attributes through a save and a load",
+          "sends a circuit back through unchanged — the round trip",
+          "loads every shipped preset and gives back the same circuit",
+          "skips what it does not recognise rather than guessing",
+          "treats the default wire colour as no colour at all",
+          "reads a pin reference, and refuses a malformed one"
+        ]
+      },
+      {
+        "file": "document.test.ts",
+        "tests": [
+          "puts the part own attributes over the catalogue defaults",
+          "copies parts, wires and waypoints so later edits cannot reach back",
+          "keeps the newest 200 snapshots",
+          "drops a pair already present, whichever way round it is",
+          "draws breadboards behind everything else, keeping placement order inside each group",
+          "holds the group relative to its own top-left, with rotation and attributes",
+          "is empty when nothing is selected"
+        ]
+      },
+      {
+        "file": "file-session.test.ts",
+        "tests": [
+          "asks where a first save goes, offers documents, and adopts the path",
+          "writes straight home on later saves, without asking again",
+          "reports a failed write and keeps the old home",
+          "does nothing when the picker is cancelled",
+          "adopts the path only after the file was read and applied",
+          "does not adopt a file the loader rejects",
+          "leaves the previous home alone when the read fails",
+          "does nothing when the picker is cancelled",
+          "forgets the home and any error, so the next save asks"
+        ]
+      },
+      {
+        "file": "input.test.ts",
+        "tests": [
+          "puts the middle of the track straight up",
+          "turns clockwise through the GND-to-VCC sweep",
+          "clamps at the end stops",
+          "ignores a pointer at the centre",
+          "undoes the part rotation before reading the angle"
+        ]
+      },
+      {
+        "file": "netlist.test.ts",
+        "tests": [
+          "quantises to the sprite steps and clamps",
+          "lights through a resistor in the usual range",
+          "follows PWM duty instead of flickering on and off",
+          "dims as the resistance climbs, and goes out when it is far too high",
+          "is over-driven with no resistor at all, and says how much",
+          "is over-driven by a resistor that is too small",
+          "draws less when the forward voltage is higher",
+          "notices one that is in backwards",
+          "lights the channel that has a path, and leaves the others dark",
+          "maps the green and blue pins separately",
+          "uses PWM duty per channel",
+          "warns when the common leg is not grounded",
+          "warns when a channel has no resistor",
+          "puts the two axes on their own ADC channels",
+          "drives SEL high released and low while pressed",
+          "warns when the module is wired but not powered",
+          "turns a tilt switch into a driven OUT level",
+          "turns PIR motion into a driven OUT level",
+          "splits the flame sensor into an analogue reading and a thresholded DOUT",
+          "does the same for the sound sensor",
+          "does the same for the gas sensor",
+          "warns when a digital sensor is wired but not powered",
+          "turns a buzzer on across its two terminals",
+          "energizes a relay coil the same way",
+          "switches a load through its contacts",
+          "lights seven-segment segments only when their common is low",
+          "selects a multiplexed digit by its low common",
+          "maps each LED bar pair independently",
+          "joins the strip it stands in",
+          "is genuinely connected, not just lit by a wire — with no resistor it is over-driven",
+          "does not reach the other bank, because the trench is a break",
+          "needs to be in a hole, not merely near one",
+          "is dark until the switch is pressed",
+          "bridges the two banks when pressed",
+          "pulls the pin low when it shorts to ground",
+          "pulls the pin high when it shorts to +5V",
+          "reads low when released if a pull-down resistor is there",
+          "carries power the length of a half board",
+          "does not, across the break on a full board",
+          "reads a dead short as burnt rather than dividing into absurdity",
+          "reads an insulator as off, not as an error",
+          "still lights normally in the middle of the ladder",
+          "is a fraction of the supply between its end stops",
+          "reads the other way round when its ends are swapped, the way it would on a bench",
+          "says which rail is missing rather than reading nothing",
+          "is quiet until its wiper reaches an analogue input",
+          "feeds every analogue pin its wiper is wired to",
+          "is a fraction of the supply between its end stops",
+          "reads the other way round when its ends are swapped, like the rotary pot",
+          "is quiet until its wiper reaches an analogue input",
+          "complains rather than reading nothing when a rail is missing",
+          "AO sits higher with more light",
+          "DO follows light against the threshold, driving the pin high or low",
+          "sits high exactly at the threshold, like a comparator without hysteresis",
+          "drives nothing when its rails are backwards — a module is not a bare divider",
+          "stays quiet with no rails at all",
+          "shows its lamps with no outputs wired, and drives nothing",
+          "maps −15…135 °C across the supply",
+          "clamps a temperature below the documented floor",
+          "does nothing until its rails are the right way round",
+          "maps the classic 544–2400 µs widths onto degrees",
+          "clamps a width past either end of the range",
+          "holds position when the pulse stops: no angle, but no reset",
+          "wants power before it wants signal, and only then warns",
+          "reports the trigger and echo pins and times the echo by the distance",
+          "clamps the distance to what the sensor can see",
+          "says both signal pins need the board",
+          "answers nothing while it is unpowered, and says which rails it wants",
+          "is quiet with no wires at all",
+          "moves MSBFIRST into Q7…Q0 and shows it only after the latch",
+          "clears the shift register with MR but leaves the latched outputs alone",
+          "tri-states the outputs while OE is high, keeping the latch",
+          "drives a board pin from an output bit",
+          "runs with MR tied high and OE tied low, as the preset does",
+          "wants power, and wants its unused control pins tied",
+          "pulls the selected column low only while its row is scanned",
+          "leaves every column pulled high when no key is down",
+          "maps A-, A+, B+, B- to their board pins and computes the step size",
+          "warns when only some coils reach the board",
+          "is quiet when it has no wires at all",
+          "maps RS, E and the four data pins",
+          "warns when a data pin is not on the board",
+          "wants both rails",
+          "reports the board pin and the configured values, clamped honestly",
+          "wants power and a board pin",
+          "reports the board pin",
+          "wants power and a DAT pin, but is quiet on the shelf"
+        ]
+      },
+      {
+        "file": "parts.test.ts",
+        "tests": [
+          "keeps the 1- and 4-digit displays as separate kinds",
+          "picks the unit that keeps the number readable",
+          "turns the number and the unit into ohms",
+          "takes a comma as a decimal point, the way much of the world types",
+          "clamps to what the part supports, so the box can show what is stored",
+          "returns null for anything that is not a number, to put back what is stored",
+          "round-trips every resistance the old list offered, in every unit",
+          "offers the whole SI ladder, smallest first",
+          "can reach every unit it offers, so none of them is a dead choice",
+          "keeps values below an ohm, which rounding to whole ohms would erase"
+        ]
+      },
+      {
+        "file": "presets.test.ts",
+        "tests": [
+          "ships the circuits a first run should offer",
+          "gives each one a label someone can read",
+          "puts every preset under a tab that exists",
+          "has something under every tab",
+          "carries parts, connections and a sketch",
+          "has a sketch with setup() and loop(), so it can actually run",
+          "places each part once, and only parts the catalogue knows",
+          "wires only parts it places, with a named pin on each end",
+          "does not wire a part to itself",
+          "blink: the LED on pin 13 lights up",
+          "button: held, pin 2 is pulled low; released, the pull-up takes it back high",
+          "button: held, it pulls the pin low even though the pin itself reads high",
+          "button + serial: the same circuit, so the same drive",
+          "potentiometer: mid-track, A0 reads about half the supply, and wired right",
+          "slide-pot: mid-track, A0 reads half the supply, wired right",
+          "photoresistor: mid-light, AO reads half the supply and DO is held high",
+          "thermometer: room temperature reads the module ramp, and nothing else"
+        ]
+      },
+      {
+        "file": "project.test.ts",
+        "tests": [
+          "records a step per edit and undoes/redoes it",
+          "is dirty again after undoing a saved document",
+          "loads a circuit with a clean history and no clipboard",
+          "pastes a group as one undo step, keeping its shape",
+          "duplicates the selection through copy and paste",
+          "deleting a part takes the wires hanging off it",
+          "clicking the same pins again removes that wire",
+          "rotates the whole selection as one undo step",
+          "nudges the selection by whole grid steps, once",
+          "changes a part attribute once, and ignores an identical value",
+          "refuses to place parts or paste",
+          "asks the injected geometry where a dropped part goes"
+        ]
+      },
+      {
+        "file": "route.test.ts",
+        "tests": [
+          "never produces a diagonal, whatever it is handed",
+          "leaves a route that already runs on the axes alone",
+          "adds exactly one bend between two points sharing no axis, and alternates the corner",
+          "writes a polyline with no diagonals in it",
+          "survives a trip through the saved mini-language",
+          "decodes to the points between the ends, which is the bend a plain wire needs"
+        ]
+      },
+      {
+        "file": "serial-scroll.test.ts",
+        "tests": [
+          "follows while the box is at the bottom",
+          "stops following once the user scrolls up",
+          "treats a box shorter than its viewport as at the bottom",
+          "allows a few pixels of rounding slack"
+        ]
+      },
+      {
+        "file": "sim.test.ts",
+        "tests": [
+          "compiles and starts, clearing everything a previous run left behind",
+          "reports a compile failure and stays stopped",
+          "stop resets the levels a stopped chip no longer drives",
+          "restart stops before it starts again",
+          "pushes a changed button drive once, and the release too",
+          "holds a potentiometer voltage on the ADC channel, and only when it changes",
+          "re-sends held inputs to the fresh simulator after a restart",
+          "sends serial input only while a desktop simulation is running",
+          "turns a pin timing into LED brightness when solving",
+          "remembers each digit of a multiplexed display",
+          "still solves the netlist in a plain browser, without sending anything",
+          "answers a DHT start with a timed pulse script, once",
+          "answers a DHT read with the humidity it was just given",
+          "sends a NEC frame to every wired IR receiver",
+          "decodes LCD commands and writes text",
+          "turns a stepper motor from the coil sequence",
+          "does not latch a phantom nibble from the startup pin levels",
+          "keeps a tapped key closed long enough for one scan",
+          "drives a keypad column through the matrix while a key is held",
+          "shows the text a LiquidCrystal sketch prints",
+          "steps a 74HC595 on every clock edge, not once per solve",
+          "turns pin and serial events into state, and unsubscribes on cleanup",
+          "answers a trigger falling edge with an echo pulse, and not a rising one",
+          "clears a PWM timing when a pin event says it is digital again",
+          "does nothing in a plain browser"
+        ]
+      },
+      {
+        "file": "snap.test.ts",
+        "tests": [
+          "seats every leg, from every column, however sloppily the part is dropped",
+          "seats both sides of a two-row part, wherever it sits down the board",
+          "snaps at negative canvas coordinates",
+          "leaves a part alone when no hole is in reach",
+          "does not move a part just to seat one leg",
+          "does nothing without pins or holes to snap to"
+        ]
+      },
+      {
+        "file": "view.test.ts",
+        "tests": [
+          "maps a screen point through the pan and zoom",
+          "zooms toward the pointer, keeping that point still",
+          "clamps the zoom to its limits",
+          "centres the world origin, and reset restores zoom and centre",
+          "frames every part with a margin inside the canvas",
+          "does nothing when there is nothing to frame"
+        ]
+      }
+    ],
+    "rust": [
+      {
+        "file": "engine.rs",
+        "name": "a_button_bounces_unless_the_sketch_debounces"
+      },
+      {
+        "file": "engine.rs",
+        "name": "every_shipped_preset_compiles"
+      },
+      {
+        "file": "engine.rs",
+        "name": "compiles_and_runs_a_blinking_sketch"
+      },
+      {
+        "file": "engine.rs",
+        "name": "an_adc_voltage_reaches_analog_read"
+      },
+      {
+        "file": "engine.rs",
+        "name": "serial_input_reaches_serial_read"
+      },
+      {
+        "file": "engine.rs",
+        "name": "pwm_duty_reaches_the_ui"
+      },
+      {
+        "file": "engine.rs",
+        "name": "a_bundled_library_compiles_and_drives_a_servo_pulse"
+      },
+      {
+        "file": "engine.rs",
+        "name": "an_echo_answers_pulsein_in_simulated_time"
+      },
+      {
+        "file": "engine.rs",
+        "name": "an_ir_remote_frame_decodes_to_its_command"
+      },
+      {
+        "file": "engine.rs",
+        "name": "a_dht22_answers_a_read_on_its_own_clock"
+      },
+      {
+        "file": "engine.rs",
+        "name": "a_held_keypad_column_reads_as_its_key"
+      },
+      {
+        "file": "engine.rs",
+        "name": "a_fading_pwm_pin_stops_emitting_edges"
+      },
+      {
+        "file": "engine.rs",
+        "name": "an_lcd_write_reaches_the_ui_as_each_nibble"
+      },
+      {
+        "file": "engine.rs",
+        "name": "a_shift_clock_reaches_the_ui_as_each_edge"
+      },
+      {
+        "file": "engine.rs",
+        "name": "a_read_only_toolchain_falls_back_instead_of_failing"
+      },
+      {
+        "file": "engine.rs",
+        "name": "a_writable_toolchain_is_used_as_it_is"
+      },
+      {
+        "file": "lib.rs",
+        "name": "only_absolute_json_paths_are_circuit_files"
+      },
+      {
+        "file": "lib.rs",
+        "name": "a_json_circuit_round_trips_and_other_files_are_refused"
+      },
+      {
+        "file": "lib.rs",
+        "name": "a_large_file_is_refused_before_it_is_read"
+      },
+      {
+        "file": "lib.rs",
+        "name": "dma_buf_falls_back_only_where_it_is_known_to_crash"
+      },
+      {
+        "file": "lib.rs",
+        "name": "the_gpu_is_identified_from_its_driver_module"
+      },
+      {
+        "file": "lib.rs",
+        "name": "nvidia_on_wayland_is_the_only_case_with_an_extra"
+      },
+      {
+        "file": "timing.rs",
+        "name": "measures_half_duty_at_one_khz"
+      },
+      {
+        "file": "timing.rs",
+        "name": "measures_quarter_duty"
+      },
+      {
+        "file": "timing.rs",
+        "name": "measures_a_servo_pulse"
+      },
+      {
+        "file": "timing.rs",
+        "name": "waits_for_a_second_rising_edge"
+      },
+      {
+        "file": "timing.rs",
+        "name": "ignores_a_held_level_and_starts_cleanly_on_a_low_edge"
+      },
+      {
+        "file": "timing.rs",
+        "name": "ignores_repeated_levels"
+      },
+      {
+        "file": "timing.rs",
+        "name": "ignores_contact_glitches"
+      },
+      {
+        "file": "timing.rs",
+        "name": "restarts_after_a_long_silence"
+      },
+      {
+        "file": "timing.rs",
+        "name": "reset_forgets_the_previous_pin_owner"
+      }
+    ]
+  }
+}
