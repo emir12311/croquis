@@ -159,7 +159,7 @@ impl eframe::App for Spike {
             self.wire_start = None;
         }
 
-        egui::Panel::left("components")
+        egui::Panel::right("components")
             .exact_size(220.0)
             .show(root, |ui| {
                 ui.heading("Components");
@@ -181,7 +181,7 @@ impl eframe::App for Spike {
                     });
             });
 
-        egui::Panel::right("editor")
+        egui::Panel::left("editor")
             .exact_size(420.0)
             .show(root, |ui| {
                 ui.heading("Sketch");
