@@ -1146,6 +1146,40 @@
     }
   }
 
+  /**
+   * Hand a press to one of the part's own controls — a keypad key, a remote
+   * button.
+   *
+   * The elements live behind `visibility: hidden` (the canvas above them is the
+   * visible circuit), and a hidden element is not hit-testable: a real press
+   * never reaches its shadow tree, so its own `mousedown` handler never runs.
+   * The controls are still laid out, so their rects are good — the press is
+   * matched against those and dispatched to the control directly.
+   *
+   * Returns true when a control took the press, so it does not also drag the part.
+   */
+  function pressPartControl(instanceEl: HTMLElement, e: PointerEvent): boolean {
+    const root = instanceEl.firstElementChild?.shadowRoot
+    if (!root) return false
+    for (const control of root.querySelectorAll<SVGElement>('[data-key-name], [data-btn]')) {
+      const r = control.getBoundingClientRect()
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) {
+        continue
+      }
+      const at = { clientX: e.clientX, clientY: e.clientY, bubbles: true, composed: true }
+      control.dispatchEvent(new MouseEvent('mousedown', at))
+      const up = () => {
+        control.dispatchEvent(new MouseEvent('mouseup', at))
+        window.removeEventListener('pointerup', up)
+        window.removeEventListener('pointercancel', up)
+      }
+      window.addEventListener('pointerup', up)
+      window.addEventListener('pointercancel', up)
+      return true
+    }
+    return false
+  }
+
   /** A keypad reports its own key presses; the circuit treats them as switches. */
   function keypadState(node: HTMLElement, inst: Instance) {
     if (inst.kind !== 'membrane-keypad') return
@@ -1793,7 +1827,10 @@
               aria-label={def.label}
               tabindex="0"
               style="transform: translate({input.domX(inst)}px, {input.domY(inst)}px) rotate({inst.rotate ?? 0}deg)"
-              onpointerdown={(e) => input.startMove(e, inst)}
+              onpointerdown={(e) => {
+                if (pressPartControl(e.currentTarget as HTMLElement, e)) return
+                input.startMove(e, inst)
+              }}
             >
               <!-- One element for every part, named by the catalogue — so adding
                    a component is a catalogue entry, not a branch here. -->

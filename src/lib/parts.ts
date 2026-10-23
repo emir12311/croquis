@@ -340,7 +340,11 @@ export const PARTS: PartDef[] = [
     label: 'Keypad',
     tag: 'wokwi-membrane-keypad',
     // A 4×4 matrix: rows R1–R4, columns C1–C4. The element draws the pressed key.
-    attrs: { columns: '4' },
+    // `connector` draws the pin strip below the body. The element's `pinInfo` puts
+    // the pins at y≈338 while a connectorless body is only 76 mm (≈287 px) tall,
+    // so without it every pin is measured below the drawing — and there is no pin
+    // strip to wire to in the first place.
+    attrs: { columns: '4', connector: 'true' },
     live: true,
     icon: '<rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/>',
   },
