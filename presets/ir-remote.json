@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "IR remote",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 40,
+      "top": 100,
+      "attrs": {}
+    },
+    {
+      "id": "receiver",
+      "type": "wokwi-ir-receiver",
+      "left": 420,
+      "top": 100,
+      "attrs": {}
+    },
+    {
+      "id": "remote",
+      "type": "wokwi-ir-remote",
+      "left": 650,
+      "top": 80,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    ["receiver:GND", "uno:GND.2"],
+    ["receiver:VCC", "uno:5V"],
+    ["receiver:DAT", "uno:2"]
+  ],
+  "sketch": "// IR remote — NEC codes over a 38 kHz receiver.\n//\n// The receiver demodulates the carrier, leaving a low pulse for each burst.\n// The library records the edges and decodes address/complement/command bytes.\n// Click a button on the remote on the canvas.\n\n#include <IRremote.h>\n\nconst int RECV_PIN = 2;\nIRrecv irrecv(RECV_PIN);\ndecode_results results;\n\nvoid setup() {\n  Serial.begin(9600);\n  irrecv.enableIRIn();\n}\n\nvoid loop() {\n  if (irrecv.decode(&results)) {\n    Serial.print(\"ir=0x\");\n    Serial.print(results.value, HEX);\n    Serial.print(\" command=0x\");\n    Serial.println(results.command, HEX);\n    irrecv.resume();\n  }\n  delay(50);\n}\n"
+}

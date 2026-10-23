@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "author": "croquis",
+  "editor": "croquis",
+  "title": "Gas sensor",
+  "parts": [
+    {
+      "id": "uno",
+      "type": "wokwi-arduino-uno",
+      "left": 60,
+      "top": 80,
+      "attrs": {}
+    },
+    {
+      "id": "gas",
+      "type": "wokwi-gas-sensor",
+      "left": 420,
+      "top": 120,
+      "attrs": {
+        "gas": "20"
+      }
+    }
+  ],
+  "connections": [
+    ["uno:5V", "gas:VCC"],
+    ["gas:GND", "uno:GND.2"],
+    ["gas:AOUT", "uno:A0"],
+    ["gas:DOUT", "uno:2"]
+  ],
+  "sketch": "// Gas sensor — an analogue reading and a comparator threshold.\n//\n// AOUT is the sensor's heater/chemiresistor divider: more gas, higher voltage.\n// DOUT is the module's comparator, high once the reading passes half scale.\n// Move the Gas slider in the properties strip and watch both values.\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(2, INPUT);\n}\n\nvoid loop() {\n  Serial.print(\"gas \");\n  Serial.print(analogRead(A0));\n  Serial.print(\"/1023  DOUT \");\n  Serial.println(digitalRead(2) == HIGH ? \"high\" : \"low\");\n  delay(200);\n}\n"
+}

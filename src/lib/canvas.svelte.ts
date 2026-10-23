@@ -50,6 +50,7 @@ export interface RenderState {
   rgbLeds: Record<string, RgbState>
   outputs: Record<string, OutputState>
   pressedButtons: Record<string, boolean>
+  keypadKeys: Record<string, { row: number; column: number }>
   sensorStates: Record<string, SensorState>
   warnings: Record<string, string>
 }
@@ -130,9 +131,17 @@ export class CanvasSurface {
     for (const inst of instances) {
       const el = this.canvasEl?.querySelector(`.instance[data-id="${inst.id}"]`) as HTMLElement | null
       const comp = el?.firstElementChild as (HTMLElement & { pinInfo?: PinGeom[] }) | null
-      // Not mounted or not upgraded yet — try again next frame.
+      // Not mounted or not upgraded yet — try again next frame. A part with no
+      // electrical pins (the IR remote) is complete as soon as it has a size.
       if (!comp?.pinInfo) {
-        needRetry = true
+        const w = el?.offsetWidth ?? 0
+        const h = el?.offsetHeight ?? 0
+        if (comp && partByKind(inst.kind).noPins) {
+          next[inst.id] = []
+          sizes[inst.id] = { w, h }
+        }
+        if (!comp || (!partByKind(inst.kind).noPins && !comp.pinInfo)) needRetry = true
+        if (!w || !h) needRetry = true
         continue
       }
       next[inst.id] = comp.pinInfo.map((p) => ({
@@ -356,9 +365,14 @@ export class CanvasSurface {
     const sensor =
       inst.kind === 'photoresistor-sensor' ||
       inst.kind === 'flame-sensor' ||
+      inst.kind === 'gas-sensor' ||
       inst.kind === 'sound-sensor'
         ? sensorLook(state.sensorStates[inst.id])
         : 0
+    const keypad =
+      inst.kind === 'membrane-keypad' && state.keypadKeys[inst.id]
+        ? `${state.keypadKeys[inst.id]!.row},${state.keypadKeys[inst.id]!.column}`
+        : ''
     const rgb =
       inst.kind === 'rgb-led'
         ? [state.rgbLeds[inst.id]?.r ?? 0, state.rgbLeds[inst.id]?.g ?? 0, state.rgbLeds[inst.id]?.b ?? 0]
@@ -371,15 +385,17 @@ export class CanvasSurface {
         ? output?.active
           ? '1'
           : '0'
-        : inst.kind === 'servo'
-          ? // The horn turns with the angle; a whole signalled position is a sprite.
+        : inst.kind === 'servo' || inst.kind === 'stepper-motor'
+          ? // The horn/shaft turns with the angle; a whole position is a sprite.
             String(output?.angle ?? '')
-          : inst.kind === 'seven-segment' ||
-              inst.kind === 'seven-segment-4' ||
-              inst.kind === 'led-bar-graph'
-            ? (output?.values.join('') ?? '')
+          : inst.kind === 'lcd1602'
+            ? `${output?.values.join(',') ?? ''}|${output?.cursorX ?? 0}|${output?.cursorY ?? 0}|${output?.cursor ? 1 : 0}|${output?.blink ? 1 : 0}`
+            : inst.kind === 'seven-segment' ||
+                inst.kind === 'seven-segment-4' ||
+                inst.kind === 'led-bar-graph'
+              ? (output?.values.join('') ?? '')
             : ''
-    return `${this.baseKey(inst)}|${chip}${bright}${down}${sensor}${rgb}${outputKey}`
+    return `${this.baseKey(inst)}|${chip}${bright}${down}${sensor}${keypad}${rgb}${outputKey}`
   }
 
   /** Rasterise a part's element (its shadow-root contents) into an image we blit. */

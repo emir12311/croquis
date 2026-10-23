@@ -500,6 +500,8 @@ pub struct Simulator {
     serial: Sender<u8>,
     /// Input pulses scheduled in simulated time (`pulse()`).
     pulses: Sender<PulseReq>,
+    /// Timed edge scripts (a DHT response or an IR frame).
+    pulse_trains: Sender<PulseTrainReq>,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
@@ -513,6 +515,16 @@ struct PulseReq {
     width_us: u64,
 }
 
+/// A scripted sequence of levels on a pin, in simulated microseconds.
+struct PulseTrainReq {
+    port: u8,
+    pin: u8,
+    delay_us: u64,
+    /// Each entry is how long the line stays at the next level; the first level
+    /// is low, then levels alternate, and the line ends high.
+    durations: Vec<u64>,
+}
+
 impl Simulator {
     /// Load `elf` and start running it, calling `emit` for pin changes and serial.
     /// With `bounce`, a pressed switch chatters the way a real contact does; without
@@ -522,6 +534,7 @@ impl Simulator {
         let (analog_tx, analog_rx) = mpsc::channel();
         let (serial_tx, serial_rx) = mpsc::channel();
         let (pulse_tx, pulse_rx) = mpsc::channel();
+        let (train_tx, train_rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
         let elf = elf.to_path_buf();
@@ -533,6 +546,7 @@ impl Simulator {
                 analog_rx,
                 serial_rx,
                 pulse_rx,
+                train_rx,
                 stop_thread,
                 emit,
                 &ready_tx,
@@ -547,6 +561,7 @@ impl Simulator {
                 analog: analog_tx,
                 serial: serial_tx,
                 pulses: pulse_tx,
+                pulse_trains: train_tx,
                 stop,
                 handle: Some(handle),
             }),
@@ -575,6 +590,17 @@ impl Simulator {
             pin,
             delay_us,
             width_us,
+        });
+    }
+
+    /// Schedule a scripted edge train on a pin: the line goes low after
+    /// `delay_us`, holds each duration in turn, alternating level, then ends high.
+    pub fn pulse_script(&self, port: u8, pin: u8, delay_us: u64, durations: Vec<u64>) {
+        let _ = self.pulse_trains.send(PulseTrainReq {
+            port,
+            pin,
+            delay_us,
+            durations,
         });
     }
 
@@ -662,6 +688,7 @@ fn sim_main(
     analog: Receiver<(u8, u16)>,
     serial: Receiver<u8>,
     pulses: Receiver<PulseReq>,
+    pulse_trains: Receiver<PulseTrainReq>,
     stop: Arc<AtomicBool>,
     emit: Emit,
     ready: &Sender<Result<(), String>>,
@@ -773,8 +800,15 @@ fn sim_main(
             flips: u64,
             next: u64,
         }
+        struct Train {
+            port: u8,
+            pin: u8,
+            edges: Vec<(u64, bool)>,
+            cursor: usize,
+        }
         let mut bounces: Vec<Bounce> = Vec::new();
         let mut echoes: Vec<Echo> = Vec::new();
+        let mut trains: Vec<Train> = Vec::new();
         let mut next_timing = sim_shim_cycle(avr) + TIMING_TICK;
 
         loop {
@@ -825,6 +859,24 @@ fn sim_main(
                     raised: false,
                 });
             }
+            while let Ok(req) = pulse_trains.try_recv() {
+                trains.retain(|t| !(t.port == req.port && t.pin == req.pin));
+                let mut at = sim_shim_cycle(avr) + req.delay_us * CYCLES_PER_MICROSECOND;
+                let mut high = false;
+                let mut edges = Vec::with_capacity(req.durations.len() + 1);
+                for duration in req.durations {
+                    edges.push((at, high));
+                    at += duration * CYCLES_PER_MICROSECOND;
+                    high = !high;
+                }
+                edges.push((at, true));
+                trains.push(Train {
+                    port: req.port,
+                    pin: req.pin,
+                    edges,
+                    cursor: 0,
+                });
+            }
             let state = ffi::avr_run(avr);
             // Settle the contacts that are still chattering.
             if !bounces.is_empty() {
@@ -858,6 +910,16 @@ fn sim_main(
                         return false;
                     }
                     true
+                });
+            }
+            if !trains.is_empty() {
+                let now = sim_shim_cycle(avr);
+                trains.retain_mut(|t| {
+                    while t.cursor < t.edges.len() && now >= t.edges[t.cursor].0 {
+                        raise_pin(avr, t.port, t.pin, t.edges[t.cursor].1);
+                        t.cursor += 1;
+                    }
+                    t.cursor < t.edges.len()
                 });
             }
             // A 20 ms cadence for PWM timing. Each meter is updated by the pin
@@ -902,10 +964,13 @@ fn sim_main(
             if state == ffi::cpu_Done as i32 || state == ffi::cpu_Crashed as i32 {
                 break;
             }
-            // Pace to real time so `delay(500)` really is half a second.
+            // Pace to real time so `delay(500)` really is half a second. A
+            // scheduled pulse train must not sleep through its own edges: a
+            // DHT bit is only 26 µs long, and missing one is a bad read.
+            let scheduled = !trains.is_empty() || !echoes.is_empty();
             let sim_secs = (sim_shim_cycle(avr) - start_cycles) as f64 / freq;
             let real = start.elapsed().as_secs_f64();
-            if sim_secs > real {
+            if sim_secs > real && !scheduled {
                 let d = (sim_secs - real).min(0.05);
                 if d > 0.0005 {
                     thread::sleep(Duration::from_secs_f64(d));
@@ -922,10 +987,18 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// simavr tests are timing-sensitive; running several simulations (and the
+    /// preset compile sweep) at once on a small machine starves the AVR clocks.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
+
     /// A real switch chatters when it changes. A sketch with no debounce sees it;
     /// one with a debounce doesn't. The two sketches differ only in that delay.
     #[test]
     fn a_button_bounces_unless_the_sketch_debounces() {
+        let _serial = test_lock();
         let dir = std::env::temp_dir().join("croquis-bounce-test");
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -1008,6 +1081,7 @@ void loop() {{
     /// "press Run and see it work" a lie, which is the whole point of shipping it.
     #[test]
     fn every_shipped_preset_compiles() {
+        let _serial = test_lock();
         let dir = std::env::temp_dir().join("croquis-preset-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1061,6 +1135,7 @@ void loop() {{
 
     #[test]
     fn compiles_and_runs_a_blinking_sketch() {
+        let _serial = test_lock();
         let dir = std::env::temp_dir().join("croquis-engine-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1139,6 +1214,7 @@ void loop() {
     /// print the value a fed voltage scales to, against the Uno's 5V reference.
     #[test]
     fn an_adc_voltage_reaches_analog_read() {
+        let _serial = test_lock();
         let dir = std::env::temp_dir().join("croquis-analog-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1185,6 +1261,7 @@ void loop() {
     /// `Serial.read()`, not just appear in the output pane.
     #[test]
     fn serial_input_reaches_serial_read() {
+        let _serial = test_lock();
         let dir = std::env::temp_dir().join("croquis-uart-input-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1228,6 +1305,7 @@ void loop() {
     /// timing event must carry that rather than a flood of edges.
     #[test]
     fn pwm_duty_reaches_the_ui() {
+        let _serial = test_lock();
         let dir = std::env::temp_dir().join("croquis-pwm-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1282,6 +1360,7 @@ void loop() {
     /// 544–2400 µs widths the classic Servo library produces.
     #[test]
     fn a_bundled_library_compiles_and_drives_a_servo_pulse() {
+        let _serial = test_lock();
         let dir = std::env::temp_dir().join("croquis-servo-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1336,6 +1415,7 @@ void loop() {}
     /// width itself the thing that matters.
     #[test]
     fn an_echo_answers_pulsein_in_simulated_time() {
+        let _serial = test_lock();
         let dir = std::env::temp_dir().join("croquis-echo-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1425,11 +1505,195 @@ void loop() {
         );
     }
 
+    fn ir_durations(command: u8, address: u8) -> Vec<u64> {
+        let bytes = [address, !address, command, !command];
+        let mut durations = vec![9000u64, 4500];
+        for byte in bytes {
+            for bit in 0..8 {
+                durations.push(560);
+                durations.push(if (byte >> bit) & 1 == 1 { 1690 } else { 560 });
+            }
+        }
+        durations.push(560);
+        durations
+    }
+
+    fn dht_durations(humidity: f32, temperature: f32) -> Vec<u64> {
+        let rh = (humidity * 10.0).round() as u16;
+        let raw = (temperature.abs() * 10.0).round() as u16;
+        let t = if temperature < 0.0 { raw | 0x8000 } else { raw };
+        let bytes = [rh >> 8, rh & 0xff, t >> 8, t & 0xff];
+        let checksum = bytes.iter().fold(0u8, |sum, byte| sum.wrapping_add(*byte as u8));
+        let mut durations = vec![80u64, 80];
+        for byte in bytes.into_iter().chain(std::iter::once(u16::from(checksum))) {
+            for bit in (0..8).rev() {
+                durations.push(80);
+                durations.push(if (byte >> bit) & 1 == 1 { 120 } else { 40 });
+            }
+        }
+        durations.push(80);
+        durations
+    }
+
+    /// An NEC frame: the receiver's ISR records the demodulated envelope, and
+    /// `decode()` returns the address and command bytes.
+    #[test]
+    fn an_ir_remote_frame_decodes_to_its_command() {
+        let _serial = test_lock();
+        let dir = std::env::temp_dir().join("croquis-ir-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+#include <IRremote.h>
+IRrecv irrecv(2);
+decode_results results;
+void setup() {
+  Serial.begin(9600);
+  irrecv.enableIRIn();
+}
+void loop() {
+  if (irrecv.decode(&results)) {
+    Serial.print("ir=");
+    Serial.print(results.value, HEX);
+    Serial.print(" cmd=");
+    Serial.println(results.command, HEX);
+    irrecv.resume();
+  }
+  delay(20);
+}
+"#;
+        let fw = compile(sketch, &dir).expect("IR sketch should compile");
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+        thread::sleep(Duration::from_millis(100));
+        sim.pulse_script(b'D', 2, 0, ir_durations(0xa2, 0));
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let serial: String = {
+                let seen = events.lock().unwrap();
+                seen.iter()
+                    .filter_map(|e| match e {
+                        SimEvent::Serial(b) => Some(*b as char),
+                        _ => None,
+                    })
+                    .collect()
+            };
+            if serial.contains("ir=") && serial[serial.find("ir=").unwrap()..].contains('\n') {
+                break;
+            }
+            if Instant::now() > deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        sim.stop();
+        let ev = events.lock().unwrap();
+        let serial: String = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Serial(b) => Some(*b as char),
+                _ => None,
+            })
+            .collect();
+        assert!(serial.contains("ir=FFA25D"), "expected FFA25D, serial was {serial:?}");
+        assert!(serial.contains("cmd=A2"), "expected command A2, serial was {serial:?}");
+    }
+
+    /// A DHT22 read: the sketch pulls SDA low, releases it, and times the 40-bit
+    /// answer. The test plays the sensor with a simulated-time pulse script.
+    #[test]
+    fn a_dht22_answers_a_read_on_its_own_clock() {
+        let _serial = test_lock();
+        let dir = std::env::temp_dir().join("croquis-dht-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sketch = r#"
+#include <DHT.h>
+#include <math.h>
+DHT dht(2, DHT22);
+void setup() {
+  Serial.begin(9600);
+  dht.begin();
+}
+void loop() {
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+  if (isnan(h) || isnan(t)) {
+    Serial.println("fail");
+  } else {
+    Serial.print("h=");
+    Serial.print(h);
+    Serial.print(",t=");
+    Serial.println(t);
+  }
+  delay(2000);
+}
+"#;
+        let fw = compile(sketch, &dir).expect("DHT sketch should compile");
+
+        let events: Arc<Mutex<Vec<SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
+        let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut armed = false;
+        let mut sent = false;
+        loop {
+            let (rise, serial) = {
+                let seen = events.lock().unwrap();
+                let mut rise = false;
+                let mut text = String::new();
+                for event in seen.iter() {
+                    if let SimEvent::Pin { port: b'D', pin: 2, high } = event {
+                        if *high && armed && !sent {
+                            rise = true;
+                        }
+                        if !*high {
+                            armed = true;
+                        }
+                    } else if let SimEvent::Serial(b) = event {
+                        text.push(*(b) as char);
+                    }
+                }
+                (rise, text)
+            };
+            if rise {
+                sim.pulse_script(b'D', 2, 30, dht_durations(50.0, 25.0));
+                sent = true;
+            }
+            if serial.contains("h=") && serial[serial.find("h=").unwrap()..].contains('\n') {
+                break;
+            }
+            if Instant::now() > deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        sim.stop();
+
+        let ev = events.lock().unwrap();
+        let serial: String = ev
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Serial(b) => Some(*b as char),
+                _ => None,
+            })
+            .collect();
+        assert!(serial.contains("h=50.00"), "humidity should be 50.00, serial was {serial:?}");
+        assert!(serial.contains("t=25.00"), "temperature should be 25.00, serial was {serial:?}");
+    }
+
     /// A shiftOut burst clocks eight bits in a few microseconds. The pin meter
     /// must not mistake that for PWM and swallow the edges: the UI needs every
     /// one to feed the shift register.
     #[test]
     fn a_shift_clock_reaches_the_ui_as_each_edge() {
+        let _serial = test_lock();
         let dir = std::env::temp_dir().join("croquis-shift-clock-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1458,9 +1722,8 @@ void loop() {
         let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
         let mut sim = Simulator::start(Path::new(&fw.elf), emit, false).expect("sim should start");
         let deadline = Instant::now() + Duration::from_secs(8);
-        let mut rises = 0usize;
-        loop {
-            rises = {
+        let rises = loop {
+            let rises = {
                 let seen = events.lock().unwrap();
                 let mut was_high = false;
                 let mut rises = 0usize;
@@ -1475,10 +1738,10 @@ void loop() {
                 rises
             };
             if rises >= 8 || Instant::now() > deadline {
-                break;
+                break rises;
             }
             thread::sleep(Duration::from_millis(10));
-        }
+        };
         sim.stop();
         assert!(
             rises >= 8,

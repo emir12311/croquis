@@ -140,8 +140,14 @@ export interface OutputState {
   values: number[]
   /** A buzzer's tone, in Hz. Absent on non-audio outputs. */
   frequency?: number
-  /** A servo's horn angle in degrees 0–180. Absent while it holds its position. */
+  /** A servo's horn angle or a stepper shaft's angle, in degrees. */
   angle?: number
+  /** An LCD's cursor position. */
+  cursorX?: number
+  cursorY?: number
+  /** Whether an LCD is showing its cursor or blinking it. */
+  cursor?: boolean
+  blink?: boolean
   /** For a multiplexed display, which digit this sample belongs to. */
   digit?: number
 }
@@ -159,6 +165,39 @@ export interface EchoResponse {
   delayUs: number
   /** How long the echo lasts, in microseconds — this is the distance. */
   widthUs: number
+}
+
+/** A stepper's four coil pins, in A-, A+, B+, B- order, and its step size. */
+export interface StepperWiring {
+  /** Board pin keys (`B0`) for the four coils; all four are present. */
+  pins: string[]
+  /** Degrees per full step, from the part's `steps` attribute. */
+  stepAngle: number
+}
+
+/** An LCD1602's control pins, when all of them reach the board. */
+export interface LcdWiring {
+  powered: boolean
+  pins: {
+    rs: string
+    e: string
+    d4: string
+    d5: string
+    d6: string
+    d7: string
+  }
+}
+
+/** A powered DHT22 and the board pin its one-wire line reaches. */
+export interface DhtSensor {
+  pin: string
+  temperature: number
+  humidity: number
+}
+
+/** A powered IR receiver and the board pin its demodulated DAT line reaches. */
+export interface IrReceiver {
+  pin: string
 }
 
 export interface CircuitEval {
@@ -187,6 +226,14 @@ export interface CircuitEval {
   shiftRegisters: Record<string, ShiftRegisterState>
   /** How each shift register's inputs are wired, by part id. */
   shiftWiring: Record<string, ShiftRegisterWiring>
+  /** Stepper coils that reach the board, by part id. */
+  stepperWiring: Record<string, StepperWiring>
+  /** LCD control pins that reach the board, by part id. */
+  lcdWiring: Record<string, LcdWiring>
+  /** Powered DHT22 sensors and the pin their SDA line reaches. */
+  dhtSensors: Record<string, DhtSensor>
+  /** IR receivers and the pin their DAT line reaches. */
+  irReceivers: Record<string, IrReceiver>
 }
 
 // A small, honest model rather than a real circuit solver: enough that a
@@ -302,6 +349,16 @@ const ANALOG_SOURCES: {
     },
   },
   {
+    kind: 'gas-sensor',
+    out: 'AOUT',
+    symmetric: false,
+    fractionOf: (attrs) => fractionOf(attrs?.gas, 100),
+    onOff: {
+      pin: 'DOUT',
+      active: (attrs) => fractionOf(attrs?.gas, 100) >= 0.5,
+    },
+  },
+  {
     kind: 'sound-sensor',
     out: 'AOUT',
     symmetric: false,
@@ -367,6 +424,7 @@ export function evaluateCircuit(
   pinFrequency: Record<string, number> = {},
   pinPulse: Record<string, number> = {},
   previousShiftRegisters: Record<string, ShiftRegisterState> = {},
+  keypadKeys: Record<string, { row: number; column: number } | null> = {},
 ): CircuitEval {
   const kindById = new Map(parts.map((p) => [p.id, p.kind]))
   const key = (ref: PinRef) => {
@@ -654,6 +712,100 @@ export function evaluateCircuit(
     }
   }
 
+  const stepperWiring: CircuitEval['stepperWiring'] = {}
+  for (const part of parts) {
+    if (part.kind !== 'stepper-motor') continue
+    const pins: string[] = []
+    let found = 0
+    for (const coil of ['A-', 'A+', 'B+', 'B-']) {
+      const boardPin = mcuPinOn(uf.find(`${part.id}:${coil}`))
+      if (boardPin) {
+        pins.push(`${boardPin.port}${boardPin.pin}`)
+        found++
+      } else {
+        pins.push('')
+      }
+    }
+    if (found === 4) {
+      const raw = Number(part.attrs?.steps ?? 200)
+      const steps = Math.min(400, Math.max(20, Number.isFinite(raw) ? raw : 200))
+      stepperWiring[part.id] = { pins, stepAngle: 360 / steps }
+    } else if (found > 0) {
+      warnings[part.id] = 'Its four coil pins need the board.'
+    }
+  }
+
+  const lcdWiring: CircuitEval['lcdWiring'] = {}
+  for (const part of parts) {
+    if (part.kind !== 'lcd1602') continue
+    const powered = netHigh(uf.find(`${part.id}:VDD`)) && netLow(uf.find(`${part.id}:VSS`))
+    const names = ['RS', 'E', 'D4', 'D5', 'D6', 'D7'] as const
+    const found = names.map((pin) => mcuPinOn(uf.find(`${part.id}:${pin}`)))
+    const wired = found.filter((pin) => pin !== null).length
+    if (!powered) {
+      if (wired > 0) warnings[part.id] = 'Its VDD pin needs 5V and its VSS pin needs GND.'
+      continue
+    }
+    if (wired < names.length) {
+      if (wired > 0) warnings[part.id] = 'Its RS, E and D4–D7 pins need the board.'
+      continue
+    }
+    const [rs, e, d4, d5, d6, d7] = found as { port: string; pin: number }[]
+    lcdWiring[part.id] = {
+      powered,
+      pins: {
+        rs: `${rs!.port}${rs!.pin}`,
+        e: `${e!.port}${e!.pin}`,
+        d4: `${d4!.port}${d4!.pin}`,
+        d5: `${d5!.port}${d5!.pin}`,
+        d6: `${d6!.port}${d6!.pin}`,
+        d7: `${d7!.port}${d7!.pin}`,
+      },
+    }
+  }
+
+  const dhtSensors: CircuitEval['dhtSensors'] = {}
+  for (const part of parts) {
+    if (part.kind !== 'dht22') continue
+    const powered = netHigh(uf.find(`${part.id}:VCC`)) && netLow(uf.find(`${part.id}:GND`))
+    const dataPin = mcuPinOn(uf.find(`${part.id}:SDA`))
+    if (!powered) {
+      if (dataPin || touchesWire(part.id)) {
+        warnings[part.id] = 'Its VCC pin needs 5V and its GND pin needs GND.'
+      }
+      continue
+    }
+    if (!dataPin) {
+      if (touchesWire(part.id)) warnings[part.id] = 'Its SDA pin needs a pin on the board.'
+      continue
+    }
+    const t = Number(part.attrs?.temperature ?? 25)
+    const h = Number(part.attrs?.humidity ?? 50)
+    dhtSensors[part.id] = {
+      pin: `${dataPin.port}${dataPin.pin}`,
+      temperature: Math.min(80, Math.max(-40, Number.isFinite(t) ? t : 25)),
+      humidity: Math.min(100, Math.max(0, Number.isFinite(h) ? h : 50)),
+    }
+  }
+
+  const irReceivers: CircuitEval['irReceivers'] = {}
+  for (const part of parts) {
+    if (part.kind !== 'ir-receiver') continue
+    const powered = netHigh(uf.find(`${part.id}:VCC`)) && netLow(uf.find(`${part.id}:GND`))
+    const dataPin = mcuPinOn(uf.find(`${part.id}:DAT`))
+    if (!powered) {
+      if (dataPin || touchesWire(part.id)) {
+        warnings[part.id] = 'Its VCC pin needs 5V and its GND pin needs GND.'
+      }
+      continue
+    }
+    if (!dataPin) {
+      if (touchesWire(part.id)) warnings[part.id] = 'Its DAT pin needs a pin on the board.'
+      continue
+    }
+    irReceivers[part.id] = { pin: `${dataPin.port}${dataPin.pin}` }
+  }
+
   const highNets = new Set([...vcc, ...mcuHigh, ...partHigh])
   const lowNets = new Set([...gnd, ...mcuLow, ...partLow])
 
@@ -921,6 +1073,25 @@ export function evaluateCircuit(
     }
   }
 
+  // A keypad is a matrix of switches: the sketch pulls one row low and reads the
+  // columns. Closing a key joins that row and column, and the column then follows
+  // the row's level; with no key, the column's pull-up keeps it high.
+  for (const part of parts) {
+    if (part.kind !== 'membrane-keypad') continue
+    const key = keypadKeys[part.id] ?? null
+    for (let column = 0; column < 4; column++) {
+      let high = true
+      if (key && key.column === column) {
+        high = !netLow(uf.find(`${part.id}:R${key.row + 1}`))
+      }
+      const columnRoot = uf.find(`${part.id}:C${column + 1}`)
+      for (const [label, pins] of mcuPinOf) {
+        if (!label.startsWith(columnRoot + '/')) continue
+        drives.push({ ...pins, high })
+      }
+    }
+  }
+
   // Digital-only modules drive their OUT high or low whenever they are powered.
   for (const def of DIGITAL_SENSORS) {
     for (const part of parts) {
@@ -1057,5 +1228,9 @@ export function evaluateCircuit(
     echoes,
     shiftRegisters: nextShiftRegisters,
     shiftWiring,
+    stepperWiring,
+    lcdWiring,
+    dhtSensors,
+    irReceivers,
   }
 }
