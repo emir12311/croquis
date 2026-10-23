@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use croquis_core::catalogue::parts;
 use croquis_core::netlist::LedState;
 use croquis_core::route::{expand_path, Point as CorePoint};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
@@ -76,6 +77,8 @@ struct Spike {
     hovered_pin: Option<PinRef>,
     textures: HashMap<String, egui::TextureHandle>,
     led_states: HashMap<String, LedState>,
+    sketch: String,
+    next_id: usize,
 }
 
 impl Default for Spike {
@@ -91,6 +94,8 @@ impl Default for Spike {
             hovered_pin: None,
             textures: HashMap::new(),
             led_states: scene::evaluate_blink(),
+            sketch: scene::blink_sketch(),
+            next_id: 0,
         }
     }
 }
@@ -153,10 +158,45 @@ impl eframe::App for Spike {
             self.wire_start = None;
         }
 
-        egui::Panel::right("spike-info")
-            .exact_size(250.0)
+        egui::Panel::left("components")
+            .exact_size(220.0)
             .show(root, |ui| {
-                ui.heading("egui spike A");
+                ui.heading("Components");
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .id_salt("component-list")
+                    .show(ui, |ui| {
+                        for def in parts() {
+                            if ui.button(def.label).clicked() {
+                                let id = format!("{}-{}", def.kind.as_str(), self.next_id);
+                                if let Some(part) =
+                                    scene::part_from_kind(def.kind, Pos2::new(0.0, 0.0), id)
+                                {
+                                    self.parts.push(part);
+                                    self.next_id += 1;
+                                }
+                            }
+                        }
+                    });
+            });
+
+        egui::Panel::right("editor")
+            .exact_size(420.0)
+            .show(root, |ui| {
+                ui.heading("Sketch");
+                egui::ScrollArea::vertical()
+                    .id_salt("sketch-editor")
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.sketch)
+                                .code_editor()
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(20),
+                        );
+                    });
+                ui.separator();
+                ui.heading("Canvas");
                 ui.label("Canvas, pan/zoom, pin hit-testing, wiring.");
                 ui.separator();
                 ui.label(format!("Zoom: {:.0}%", self.camera.zoom * 100.0));
