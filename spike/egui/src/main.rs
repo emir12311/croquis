@@ -372,13 +372,14 @@ fn draw_part(
 
     for (index, pin) in part.pins.iter().enumerate() {
         let hovered = hovered_pin.is_some_and(|(_, pin_index)| pin_index == index);
-        // Match the app: no markers at rest, and only the hovered pin gets a
-        // fixed-size amber square (screen space, not zoomed).
+        // Match the app: no markers at rest, and only the hovered pin gets an
+        // amber square. Size it in world space (10 px at 100%) so it stays
+        // proportional to the part instead of appearing to grow when zoomed out.
         if !hovered {
             continue;
         }
         let p = camera.world_to_screen(rect, part.pin_world(index));
-        let square = Rect::from_center_size(p, Vec2::splat(10.0));
+        let square = Rect::from_center_size(p, Vec2::splat(10.0 * camera.zoom));
         painter.rect_filled(square, 0.0, Color32::from_rgb(217, 164, 65));
         painter.rect_stroke(
             square,
