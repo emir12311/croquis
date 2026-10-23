@@ -28,6 +28,8 @@ simavr — GPL-3.0
 @wokwi/elements — MIT
     Draws the components: the Uno, the LED, the resistor, the pushbutton.
     https://github.com/wokwi/wokwi-elements
+    Extracted SVG artwork lives in assets/wokwi/ under the same terms; see
+    assets/wokwi/LICENSE.
 
 CodeMirror 6 — MIT
     The sketch editor.

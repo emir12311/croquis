@@ -1,0 +1,9 @@
+<svg width="10.1mm" height="25.5mm" version="1.1" viewBox="0 0 10.1 25.5" xmlns="http://www.w3.org/2000/svg">
+        <pattern id="pin-pattern" height="2.54" width="10.1" patternUnits="userSpaceOnUse">
+          <circle cx="1.27" cy="1.27" r="0.5" fill="#aaa"></circle>
+          <circle cx="8.83" cy="1.27" r="0.5" fill="#aaa"></circle>
+        </pattern>
+        <path d="m1.4 0h8.75v25.5h-10.1v-24.2z"></path>
+        <rect width="10.1" height="25.4" fill="url(#pin-pattern)"></rect>
+        <!--?lit$505831870$--><!----><rect x="2.5" width="5" height="1.74" y="0.4" fill="#444"></rect><!----><!----><rect x="2.5" width="5" height="1.74" y="2.94" fill="#444"></rect><!----><!----><rect x="2.5" width="5" height="1.74" y="5.48" fill="#444"></rect><!----><!----><rect x="2.5" width="5" height="1.74" y="8.02" fill="#444"></rect><!----><!----><rect x="2.5" width="5" height="1.74" y="10.56" fill="#444"></rect><!----><!----><rect x="2.5" width="5" height="1.74" y="13.1" fill="#444"></rect><!----><!----><rect x="2.5" width="5" height="1.74" y="15.64" fill="#444"></rect><!----><!----><rect x="2.5" width="5" height="1.74" y="18.18" fill="#444"></rect><!----><!----><rect x="2.5" width="5" height="1.74" y="20.72" fill="#444"></rect><!----><!----><rect x="2.5" width="5" height="1.74" y="23.259999999999998" fill="#444"></rect><!---->
+      </svg>
