@@ -10,6 +10,9 @@ use std::collections::{HashMap, HashSet};
 use crate::catalogue::{is_breadboard, part_by_kind, PartKind, CATALOGUE};
 use crate::diagram::parse_diagram;
 use crate::document::PinRef;
+use crate::shift_register::{
+    step_shift_register, ShiftLevels, ShiftSignal, ShiftState, ShiftWiring,
+};
 
 const SUPPLY_V: f64 = 5.0;
 const PIN_OHMS: f64 = 25.0;
@@ -224,6 +227,8 @@ pub struct CircuitEval {
     pub lcd_wiring: HashMap<String, LcdWiring>,
     pub dht_sensors: HashMap<String, DhtSensor>,
     pub ir_receivers: HashMap<String, IrReceiver>,
+    pub shift_registers: HashMap<String, ShiftState>,
+    pub shift_wiring: HashMap<String, ShiftWiring>,
 }
 
 pub fn led_step(brightness: f64) -> f64 {
@@ -515,6 +520,27 @@ pub fn evaluate_circuit_with_keypad(
     avr: &HashMap<String, bool>,
     pin_duty: &HashMap<String, f64>,
     keypad_keys: &HashMap<String, Option<KeyPosition>>,
+) -> CircuitEval {
+    evaluate_circuit_with_state(
+        parts,
+        wires,
+        pressed,
+        avr,
+        pin_duty,
+        keypad_keys,
+        &HashMap::new(),
+    )
+}
+
+/// Like [`evaluate_circuit_with_keypad`], with prior shift-register state.
+pub fn evaluate_circuit_with_state(
+    parts: &[EvalPart],
+    wires: &[EvalWire],
+    pressed: &HashMap<String, bool>,
+    avr: &HashMap<String, bool>,
+    pin_duty: &HashMap<String, f64>,
+    keypad_keys: &HashMap<String, Option<KeyPosition>>,
+    previous_shift: &HashMap<String, ShiftState>,
 ) -> CircuitEval {
     let mut uf = UnionFind::new();
     let key = |reference: &PinRef| {
@@ -1126,6 +1152,49 @@ pub fn evaluate_circuit_with_keypad(
     }
 
     for part in parts {
+        if part.kind != PartKind::ShiftRegister74hc595 {
+            continue;
+        }
+        let powered = net_high(&uf.find(&format!("{}:VCC", part.id)))
+            && net_low(&uf.find(&format!("{}:GND", part.id)));
+        let mut pins = HashMap::new();
+        let mut levels = ShiftLevels::default();
+        for (signal, pin) in [
+            (ShiftSignal::Ds, "DS"),
+            (ShiftSignal::Shcp, "SHCP"),
+            (ShiftSignal::Stcp, "STCP"),
+            (ShiftSignal::Mr, "MR"),
+            (ShiftSignal::Oe, "OE"),
+        ] {
+            let root = uf.find(&format!("{}:{pin}", part.id));
+            if let Some((port, number)) = mcu_pin_on(&rails, &root) {
+                pins.insert(signal, format!("{port}{number}"));
+            } else {
+                let high = net_high(&root);
+                match signal {
+                    ShiftSignal::Ds => levels.ds = high,
+                    ShiftSignal::Shcp => levels.shcp = high,
+                    ShiftSignal::Stcp => levels.stcp = high,
+                    ShiftSignal::Mr => levels.mr = high,
+                    ShiftSignal::Oe => levels.oe = high,
+                }
+            }
+        }
+        let wiring = ShiftWiring {
+            powered,
+            pins,
+            levels,
+        };
+        let state = step_shift_register(
+            previous_shift.get(&part.id).copied().unwrap_or_default(),
+            &wiring,
+            avr,
+        );
+        eval.shift_wiring.insert(part.id.clone(), wiring);
+        eval.shift_registers.insert(part.id.clone(), state);
+    }
+
+    for part in parts {
         match part.kind {
             PartKind::Buzzer | PartKind::Relay => {
                 let (a, b) = if part.kind == PartKind::Buzzer {
@@ -1626,6 +1695,30 @@ mod tests {
         let out = run(&[relay, resistor("220"), led("red")], &wires, &[]);
         assert!(out.outputs["relay"].active);
         assert_eq!(out.leds["led"], LedState::Lit);
+    }
+
+    #[test]
+    fn shift_register_steps_from_board_pins() {
+        let shift = EvalPart::new("sr", PartKind::ShiftRegister74hc595);
+        let wires = [
+            wire(at("uno", "5V"), at("sr", "VCC")),
+            wire(at("sr", "GND"), at("uno", "GND.2")),
+            wire(at("uno", "2"), at("sr", "DS")),
+            wire(at("uno", "3"), at("sr", "SHCP")),
+            wire(at("uno", "5V"), at("sr", "MR")),
+            wire(at("sr", "OE"), at("uno", "GND.2")),
+        ];
+        let avr = HashMap::from([("D2".into(), true), ("D3".into(), true)]);
+        let out = evaluate_circuit_with_state(
+            &[uno(), shift],
+            &wires,
+            &HashMap::new(),
+            &avr,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert_eq!(out.shift_registers["sr"].shift, 1);
     }
 
     #[test]
