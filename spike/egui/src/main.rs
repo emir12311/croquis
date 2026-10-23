@@ -20,6 +20,7 @@ use croquis_core::route::{expand_path, Point as CorePoint};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod art;
+mod editor;
 mod scene;
 
 use scene::{Part, PinRef, Wire};
@@ -184,6 +185,11 @@ impl eframe::App for Spike {
             .exact_size(420.0)
             .show(root, |ui| {
                 ui.heading("Sketch");
+                let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+                    let mut job = editor::highlight(text.as_str());
+                    job.wrap.max_width = wrap_width;
+                    ui.fonts_mut(|fonts| fonts.layout_job(job))
+                };
                 egui::ScrollArea::vertical()
                     .id_salt("sketch-editor")
                     .max_height(320.0)
@@ -192,7 +198,8 @@ impl eframe::App for Spike {
                             egui::TextEdit::multiline(&mut self.sketch)
                                 .code_editor()
                                 .desired_width(f32::INFINITY)
-                                .desired_rows(20),
+                                .desired_rows(20)
+                                .layouter(&mut layouter),
                         );
                     });
                 ui.separator();
