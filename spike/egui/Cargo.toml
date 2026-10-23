@@ -10,5 +10,8 @@ publish = false
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 resvg = "0.48"
 croquis-sim = { path = "../../crates/croquis-sim" }
+croquis-core = { path = "../../crates/croquis-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 rfd = "0.17"
 rodio = { version = "0.23", default-features = false, features = ["playback"] }

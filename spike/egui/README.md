@@ -18,8 +18,9 @@ Proves:
 - `resvg` rasterises an embedded SVG into an egui texture;
 - deterministic geometry, hit-test and raster tests without a display.
 
-The Wokwi asset/licensing decision is still open. The vector placeholders are
-intentionally not the final catalogue.
+The spike now loads the Blink preset through `croquis-core` and renders the
+extracted Wokwi SVGs/pins from `assets/wokwi`. Dynamic state overlays (LED lit,
+RGB channels, displays) are still pending.
 
 ## Spike B — editor and diagnostics
 

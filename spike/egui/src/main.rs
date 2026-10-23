@@ -12,9 +12,14 @@
 //! A display server is needed for the binary; `cargo test` exercises the pure
 //! geometry without one.
 
+use std::collections::HashMap;
+
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod art;
+mod scene;
+
+use scene::{Part, PinRef, Wire};
 
 const GRID: f32 = 24.0;
 const PIN_HIT_RADIUS: f32 = 9.0;
@@ -59,34 +64,6 @@ impl Camera {
     }
 }
 
-#[derive(Clone)]
-struct Pin {
-    name: &'static str,
-    offset: Vec2,
-}
-
-#[derive(Clone)]
-struct Part {
-    name: &'static str,
-    center: Pos2,
-    size: Vec2,
-    color: Color32,
-    pins: Vec<Pin>,
-}
-
-impl Part {
-    fn bounds(&self) -> Rect {
-        Rect::from_center_size(self.center, self.size)
-    }
-
-    fn pin_world(&self, index: usize) -> Pos2 {
-        self.center + self.pins[index].offset
-    }
-}
-
-type PinRef = (usize, usize);
-type Wire = (PinRef, PinRef);
-
 struct Spike {
     camera: Camera,
     parts: Vec<Part>,
@@ -95,107 +72,26 @@ struct Spike {
     selected: Option<usize>,
     dragging: Option<usize>,
     hovered_pin: Option<PinRef>,
-    led_art: Option<egui::TextureHandle>,
+    textures: HashMap<String, egui::TextureHandle>,
 }
 
 impl Default for Spike {
     fn default() -> Self {
+        let (parts, wires) = scene::load_blink();
         Self {
             camera: Camera::default(),
-            parts: sample_parts(),
-            wires: Vec::new(),
+            parts,
+            wires,
             wire_start: None,
             selected: None,
             dragging: None,
             hovered_pin: None,
-            led_art: None,
+            textures: HashMap::new(),
         }
     }
 }
 
-fn sample_parts() -> Vec<Part> {
-    vec![
-        Part {
-            name: "Uno",
-            center: Pos2::new(-320.0, -120.0),
-            size: Vec2::new(300.0, 210.0),
-            color: Color32::from_rgb(45, 116, 166),
-            pins: vec![
-                Pin {
-                    name: "2",
-                    offset: Vec2::new(70.0, -105.0),
-                },
-                Pin {
-                    name: "3",
-                    offset: Vec2::new(90.0, -105.0),
-                },
-                Pin {
-                    name: "5V",
-                    offset: Vec2::new(-90.0, -105.0),
-                },
-                Pin {
-                    name: "GND",
-                    offset: Vec2::new(-120.0, -105.0),
-                },
-            ],
-        },
-        Part {
-            name: "Breadboard",
-            center: Pos2::new(180.0, -60.0),
-            size: Vec2::new(420.0, 170.0),
-            color: Color32::from_rgb(220, 216, 196),
-            pins: vec![
-                Pin {
-                    name: "a1",
-                    offset: Vec2::new(-170.0, -35.0),
-                },
-                Pin {
-                    name: "a2",
-                    offset: Vec2::new(-140.0, -35.0),
-                },
-                Pin {
-                    name: "e5",
-                    offset: Vec2::new(-50.0, 35.0),
-                },
-            ],
-        },
-        Part {
-            name: "LED",
-            center: Pos2::new(30.0, 130.0),
-            size: Vec2::new(44.0, 64.0),
-            color: Color32::from_rgb(210, 54, 54),
-            pins: vec![
-                Pin {
-                    name: "A",
-                    offset: Vec2::new(-12.0, 32.0),
-                },
-                Pin {
-                    name: "C",
-                    offset: Vec2::new(12.0, 32.0),
-                },
-            ],
-        },
-        Part {
-            name: "Resistor",
-            center: Pos2::new(-120.0, 140.0),
-            size: Vec2::new(120.0, 32.0),
-            color: Color32::from_rgb(150, 110, 72),
-            pins: vec![
-                Pin {
-                    name: "1",
-                    offset: Vec2::new(-60.0, 0.0),
-                },
-                Pin {
-                    name: "2",
-                    offset: Vec2::new(60.0, 0.0),
-                },
-            ],
-        },
-    ]
-}
-
 fn hit_part(parts: &[Part], world: Pos2) -> Option<usize> {
-    // Topmost last-drawn part wins.
     parts
         .iter()
         .enumerate()
@@ -218,10 +114,19 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
 impl eframe::App for Spike {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
-        if self.led_art.is_none() {
-            if let Some(image) = art::rasterize(art::SPIKE_LED_SVG, 96, 128) {
-                self.led_art =
-                    Some(ctx.load_texture("spike-led", image, egui::TextureOptions::LINEAR));
+        for part in &self.parts {
+            if self.textures.contains_key(&part.kind) {
+                continue;
+            }
+            let width = part.size.x.max(1.0) as u32;
+            let height = part.size.y.max(1.0) as u32;
+            if let Some(image) = art::rasterize(&part.svg, width, height) {
+                let texture = ctx.load_texture(
+                    format!("part-{}", part.kind),
+                    image,
+                    egui::TextureOptions::LINEAR,
+                );
+                self.textures.insert(part.kind.clone(), texture);
             }
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -339,7 +244,7 @@ impl eframe::App for Spike {
                     self.selected == Some(index),
                     self.hovered_pin
                         .filter(|(part_index, _)| *part_index == index),
-                    self.led_art.as_ref(),
+                    self.textures.get(&part.kind),
                 );
             }
 
@@ -401,22 +306,18 @@ fn draw_part(
     part: &Part,
     selected: bool,
     hovered_pin: Option<PinRef>,
-    led_art: Option<&egui::TextureHandle>,
+    texture: Option<&egui::TextureHandle>,
 ) {
     let min = camera.world_to_screen(rect, part.bounds().min);
     let max = camera.world_to_screen(rect, part.bounds().max);
     let screen = Rect::from_min_max(min, max);
-    if part.name == "LED" {
-        if let Some(texture) = led_art {
-            painter.image(
-                texture.id(),
-                screen,
-                Rect::from_min_size(Pos2::ZERO, texture.size_vec2()),
-                Color32::WHITE,
-            );
-        } else {
-            painter.rect_filled(screen, 4.0, part.color);
-        }
+    if let Some(texture) = texture {
+        painter.image(
+            texture.id(),
+            screen,
+            Rect::from_min_size(Pos2::ZERO, texture.size_vec2()),
+            Color32::WHITE,
+        );
     } else {
         painter.rect_filled(screen, 4.0, part.color);
     }
@@ -434,7 +335,7 @@ fn draw_part(
     painter.text(
         screen.center(),
         Align2::CENTER_CENTER,
-        part.name,
+        &part.name,
         FontId::proportional(13.0),
         Color32::WHITE,
     );
@@ -456,7 +357,7 @@ fn draw_part(
             painter.text(
                 p + Vec2::new(8.0, -8.0),
                 Align2::LEFT_BOTTOM,
-                pin.name,
+                &pin.name,
                 FontId::monospace(11.0),
                 Color32::WHITE,
             );
@@ -487,7 +388,8 @@ mod tests {
 
     #[test]
     fn pins_win_over_the_part_body() {
-        let parts = sample_parts();
+        let parts = scene::load_blink().0;
+        assert!(!parts.is_empty(), "Blink preset should load");
         let pin = parts[0].pin_world(0);
         assert_eq!(hit_pin(&parts, pin, PIN_HIT_RADIUS), Some((0, 0)));
         assert_eq!(hit_part(&parts, pin), Some(0));
@@ -495,15 +397,27 @@ mod tests {
 
     #[test]
     fn a_pin_outside_the_hit_radius_is_not_hit() {
-        let parts = sample_parts();
+        let parts = scene::load_blink().0;
+        assert!(!parts.is_empty(), "Blink preset should load");
         let pin = parts[0].pin_world(0);
         assert_eq!(
-            hit_pin(
-                &parts,
-                pin + Vec2::new(PIN_HIT_RADIUS + 1.0, 0.0),
-                PIN_HIT_RADIUS
-            ),
+            hit_pin(&parts, pin + Vec2::new(100.0, 100.0), PIN_HIT_RADIUS),
             None
         );
+    }
+
+    #[test]
+    fn blink_assets_load_and_rasterise() {
+        let parts = scene::load_blink().0;
+        assert_eq!(parts.len(), 3, "Blink has Uno, resistor and LED");
+        for part in &parts {
+            assert!(!part.id.is_empty());
+            assert!(!part.pins.is_empty(), "{} has pins", part.kind);
+            assert!(
+                art::rasterize(&part.svg, part.size.x as u32, part.size.y as u32).is_some(),
+                "{} rasterises",
+                part.kind
+            );
+        }
     }
 }
