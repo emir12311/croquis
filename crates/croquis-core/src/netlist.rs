@@ -139,10 +139,35 @@ pub struct AnalogReading {
     pub millivolts: u16,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RgbState {
+    pub r: f64,
+    pub g: f64,
+    pub b: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SensorState {
+    pub powered: bool,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct OutputState {
+    pub active: bool,
+    pub values: Vec<u8>,
+    pub frequency: Option<u16>,
+    pub angle: Option<f64>,
+    pub digit: Option<u8>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CircuitEval {
     pub leds: HashMap<String, LedState>,
     pub led_brightness: HashMap<String, f64>,
+    pub rgb_leds: HashMap<String, RgbState>,
+    pub sensors: HashMap<String, SensorState>,
+    pub outputs: HashMap<String, OutputState>,
     pub drives: Vec<Drive>,
     pub warnings: HashMap<String, String>,
     pub analogs: Vec<AnalogReading>,
@@ -195,6 +220,79 @@ fn fraction_of(attrs: &HashMap<String, String>, key: &str, top: f64) -> f64 {
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(0.0);
     (value / top).clamp(0.0, 1.0)
+}
+
+type ActiveFn = fn(&HashMap<String, String>) -> bool;
+
+struct AnalogSource {
+    out: &'static str,
+    symmetric: bool,
+    top: f64,
+    attr: &'static str,
+    on_off: Option<(&'static str, ActiveFn)>,
+}
+
+fn over_half(attrs: &HashMap<String, String>, key: &str) -> bool {
+    fraction_of(attrs, key, 100.0) >= 0.5
+}
+
+fn photo_active(attrs: &HashMap<String, String>) -> bool {
+    fraction_of(attrs, "light", 100.0) >= fraction_of(attrs, "threshold", 100.0)
+}
+
+fn analog_source(kind: PartKind) -> Option<AnalogSource> {
+    match kind {
+        PartKind::Potentiometer => Some(AnalogSource {
+            out: "SIG",
+            symmetric: true,
+            top: 1023.0,
+            attr: "value",
+            on_off: None,
+        }),
+        PartKind::SlidePotentiometer => Some(AnalogSource {
+            out: "SIG",
+            symmetric: true,
+            top: 100.0,
+            attr: "value",
+            on_off: None,
+        }),
+        PartKind::PhotoresistorSensor => Some(AnalogSource {
+            out: "AO",
+            symmetric: false,
+            top: 100.0,
+            attr: "light",
+            on_off: Some(("DO", photo_active)),
+        }),
+        PartKind::NtcTemperatureSensor => Some(AnalogSource {
+            out: "OUT",
+            symmetric: false,
+            top: 150.0,
+            attr: "temperature",
+            on_off: None,
+        }),
+        PartKind::FlameSensor => Some(AnalogSource {
+            out: "AOUT",
+            symmetric: false,
+            top: 100.0,
+            attr: "flame",
+            on_off: Some(("DOUT", |attrs| over_half(attrs, "flame"))),
+        }),
+        PartKind::GasSensor => Some(AnalogSource {
+            out: "AOUT",
+            symmetric: false,
+            top: 100.0,
+            attr: "gas",
+            on_off: Some(("DOUT", |attrs| over_half(attrs, "gas"))),
+        }),
+        PartKind::SoundSensor => Some(AnalogSource {
+            out: "AOUT",
+            symmetric: false,
+            top: 100.0,
+            attr: "noise",
+            on_off: Some(("DOUT", |attrs| over_half(attrs, "noise"))),
+        }),
+        _ => None,
+    }
 }
 
 fn resistor_edges(parts: &[EvalPart], uf: &mut UnionFind) -> HashMap<String, Vec<(String, f64)>> {
@@ -492,6 +590,61 @@ pub fn evaluate_circuit(
         }
     }
 
+    const RGB_CHANNELS: [(&str, f64); 3] = [("R", 1.8), ("G", 2.2), ("B", 3.0)];
+    for part in parts {
+        if part.kind != PartKind::RgbLed {
+            continue;
+        }
+        let common = uf.find(&format!("{}:COM", part.id));
+        let back = reach_to(&common, &low_nets, &edges).map(|(_, ohms)| ohms);
+        let Some(back) = back else {
+            eval.rgb_leds.insert(part.id.clone(), RgbState::default());
+            eval.warnings
+                .insert(part.id.clone(), "Wire the common leg to GND.".into());
+            continue;
+        };
+        let mut state = RgbState::default();
+        let mut over_driven = false;
+        for (pin, forward) in RGB_CHANNELS {
+            let Some((supply_net, supply_ohms)) = reach_to(
+                &uf.find(&format!("{}:{}", part.id, pin)),
+                &high_nets,
+                &edges,
+            ) else {
+                continue;
+            };
+            let ohms = PIN_OHMS + supply_ohms + back;
+            let current = ((SUPPLY_V - forward) / ohms) * 1000.0;
+            let duty = rails.duty.get(&supply_net).copied().unwrap_or(1.0);
+            let average = current * duty;
+            if average >= LED_BURN_MA {
+                over_driven = true;
+            }
+            let base = if current >= LED_LIT_MA {
+                1.0
+            } else {
+                current / LED_LIT_MA
+            };
+            let value = if average < LED_DIM_MA {
+                0.0
+            } else {
+                (duty * base).min(1.0)
+            };
+            match pin {
+                "R" => state.r = value,
+                "G" => state.g = value,
+                _ => state.b = value,
+            }
+        }
+        if over_driven {
+            eval.warnings.insert(
+                part.id.clone(),
+                "Over-driven — put a resistor on each colour.".into(),
+            );
+        }
+        eval.rgb_leds.insert(part.id.clone(), state);
+    }
+
     let mut analog_channels: HashMap<String, Vec<u8>> = HashMap::new();
     for part in parts {
         if part.kind != PartKind::Uno {
@@ -504,33 +657,30 @@ pub fn evaluate_circuit(
     }
 
     for part in parts {
-        let source = match part.kind {
-            PartKind::Potentiometer => Some(("SIG", true, 1023.0, "value")),
-            PartKind::SlidePotentiometer => Some(("SIG", true, 100.0, "value")),
-            PartKind::PhotoresistorSensor => Some(("AO", false, 100.0, "light")),
-            PartKind::NtcTemperatureSensor => Some(("OUT", false, 150.0, "temperature")),
-            PartKind::FlameSensor => Some(("AOUT", false, 100.0, "flame")),
-            PartKind::GasSensor => Some(("AOUT", false, 100.0, "gas")),
-            PartKind::SoundSensor => Some(("AOUT", false, 100.0, "noise")),
-            _ => None,
-        };
-        let Some((out, symmetric, top, attr)) = source else {
+        let Some(source) = analog_source(part.kind) else {
             continue;
         };
         let high = uf.find(&format!("{}:VCC", part.id));
         let low = uf.find(&format!("{}:GND", part.id));
         let forward = net_high(&high) && net_low(&low);
-        let reverse = symmetric && net_high(&low) && net_low(&high);
+        let reverse = source.symmetric && net_high(&low) && net_low(&high);
         if !forward && !reverse {
-            let out_root = uf.find(&format!("{}:{}", part.id, out));
-            if rails
+            let out_root = uf.find(&format!("{}:{}", part.id, source.out));
+            let reaches = rails
                 .mcu_pins
                 .keys()
                 .any(|label| label.starts_with(&format!("{out_root}/")))
-            {
+                || source.on_off.is_some_and(|(pin, _)| {
+                    let root = uf.find(&format!("{}:{}", part.id, pin));
+                    rails
+                        .mcu_pins
+                        .keys()
+                        .any(|label| label.starts_with(&format!("{root}/")))
+                });
+            if reaches {
                 eval.warnings.insert(
                     part.id.clone(),
-                    if symmetric {
+                    if source.symmetric {
                         "Put one end on 5V and the other on GND.".into()
                     } else {
                         "Its VCC pin needs 5V and its GND pin needs GND.".into()
@@ -539,24 +689,100 @@ pub fn evaluate_circuit(
             }
             continue;
         }
+        if let Some((_, active)) = source.on_off {
+            eval.sensors.insert(
+                part.id.clone(),
+                SensorState {
+                    powered: true,
+                    active: active(&part.attrs),
+                },
+            );
+        }
         let raw = if part.kind == PartKind::NtcTemperatureSensor {
             let temperature = part
                 .attrs
                 .get("temperature")
                 .and_then(|value| value.parse::<f64>().ok())
                 .unwrap_or(25.0);
-            ((temperature + 15.0) / top).clamp(0.0, 1.0)
+            ((temperature + 15.0) / source.top).clamp(0.0, 1.0)
         } else {
-            fraction_of(&part.attrs, attr, top)
+            fraction_of(&part.attrs, source.attr, source.top)
         };
         let position = if forward { raw } else { 1.0 - raw };
         let millivolts = (SUPPLY_V * 1000.0 * position).round() as u16;
-        let root = uf.find(&format!("{}:{}", part.id, out));
+        let root = uf.find(&format!("{}:{}", part.id, source.out));
         for channel in analog_channels.get(&root).into_iter().flatten() {
             eval.analogs.push(AnalogReading {
                 channel: *channel,
                 millivolts,
             });
+        }
+    }
+
+    for part in parts {
+        let Some(source) = analog_source(part.kind) else {
+            continue;
+        };
+        let Some((on_pin, _)) = source.on_off else {
+            continue;
+        };
+        let Some(state) = eval.sensors.get(&part.id).copied() else {
+            continue;
+        };
+        if !state.powered {
+            continue;
+        }
+        let root = uf.find(&format!("{}:{}", part.id, on_pin));
+        for (label, (port, pin)) in &rails.mcu_pins {
+            if label.starts_with(&format!("{root}/")) {
+                eval.drives.push(Drive {
+                    port: *port,
+                    pin: *pin,
+                    high: state.active,
+                });
+            }
+        }
+    }
+
+    for part in parts {
+        let (out, attr) = match part.kind {
+            PartKind::TiltSwitch => ("OUT", "tilted"),
+            PartKind::PirMotionSensor => ("OUT", "motion"),
+            _ => continue,
+        };
+        let high = uf.find(&format!("{}:VCC", part.id));
+        let low = uf.find(&format!("{}:GND", part.id));
+        if !(net_high(&high) && net_low(&low)) {
+            let root = uf.find(&format!("{}:{}", part.id, out));
+            if rails
+                .mcu_pins
+                .keys()
+                .any(|label| label.starts_with(&format!("{root}/")))
+            {
+                eval.warnings.insert(
+                    part.id.clone(),
+                    "Its VCC pin needs 5V and its GND pin needs GND.".into(),
+                );
+            }
+            continue;
+        }
+        let active = part.attrs.get(attr).is_some_and(|value| value == "1");
+        eval.sensors.insert(
+            part.id.clone(),
+            SensorState {
+                powered: true,
+                active,
+            },
+        );
+        let root = uf.find(&format!("{}:{}", part.id, out));
+        for (label, (port, pin)) in &rails.mcu_pins {
+            if label.starts_with(&format!("{root}/")) {
+                eval.drives.push(Drive {
+                    port: *port,
+                    pin: *pin,
+                    high: active,
+                });
+            }
         }
     }
 
@@ -577,6 +803,16 @@ pub fn evaluate_circuit(
                 eval.analogs.push(AnalogReading {
                     channel: *channel,
                     millivolts,
+                });
+            }
+        }
+        let sel = uf.find(&format!("{}:SEL", part.id));
+        for (label, (port, pin)) in &rails.mcu_pins {
+            if label.starts_with(&format!("{sel}/")) {
+                eval.drives.push(Drive {
+                    port: *port,
+                    pin: *pin,
+                    high: !pressed.get(&part.id).copied().unwrap_or(false),
                 });
             }
         }
@@ -608,6 +844,99 @@ pub fn evaluate_circuit(
                     high,
                 });
             }
+        }
+    }
+
+    for part in parts {
+        match part.kind {
+            PartKind::Buzzer | PartKind::Relay => {
+                let (a, b) = if part.kind == PartKind::Buzzer {
+                    ("1", "2")
+                } else {
+                    ("COIL1", "COIL2")
+                };
+                let a = uf.find(&format!("{}:{a}", part.id));
+                let b = uf.find(&format!("{}:{b}", part.id));
+                let active = (high_nets.contains(&a) && low_nets.contains(&b))
+                    || (high_nets.contains(&b) && low_nets.contains(&a));
+                eval.outputs.insert(
+                    part.id.clone(),
+                    OutputState {
+                        active,
+                        values: Vec::new(),
+                        frequency: if part.kind == PartKind::Buzzer {
+                            Some(if active { 1000 } else { 0 })
+                        } else {
+                            None
+                        },
+                        ..Default::default()
+                    },
+                );
+            }
+            PartKind::SevenSegment => {
+                let lit = ["COM.1", "COM.2", "COM"]
+                    .iter()
+                    .any(|common| low_nets.contains(&uf.find(&format!("{}:{common}", part.id))));
+                let values = ["A", "B", "C", "D", "E", "F", "G", "DP"]
+                    .iter()
+                    .map(|pin| {
+                        u8::from(lit && high_nets.contains(&uf.find(&format!("{}:{pin}", part.id))))
+                    })
+                    .collect();
+                eval.outputs.insert(
+                    part.id.clone(),
+                    OutputState {
+                        active: lit,
+                        values,
+                        digit: Some(0),
+                        ..Default::default()
+                    },
+                );
+            }
+            PartKind::SevenSegment4 => {
+                let mut digit = 0;
+                let mut lit = false;
+                for index in 0..4 {
+                    if low_nets.contains(&uf.find(&format!("{}:DIG{}", part.id, index + 1))) {
+                        digit = index;
+                        lit = true;
+                        break;
+                    }
+                }
+                let values = ["A", "B", "C", "D", "E", "F", "G", "DP"]
+                    .iter()
+                    .map(|pin| {
+                        u8::from(lit && high_nets.contains(&uf.find(&format!("{}:{pin}", part.id))))
+                    })
+                    .collect();
+                eval.outputs.insert(
+                    part.id.clone(),
+                    OutputState {
+                        active: lit,
+                        values,
+                        digit: Some(digit),
+                        ..Default::default()
+                    },
+                );
+            }
+            PartKind::LedBarGraph => {
+                let values = (1..=10)
+                    .map(|index| {
+                        let anode = uf.find(&format!("{}:A{index}", part.id));
+                        let cathode = uf.find(&format!("{}:C{index}", part.id));
+                        u8::from(high_nets.contains(&anode) && low_nets.contains(&cathode))
+                    })
+                    .collect::<Vec<_>>();
+                eval.outputs.insert(
+                    part.id.clone(),
+                    OutputState {
+                        active: values.iter().any(|value| *value == 1),
+                        values,
+                        ..Default::default()
+                    },
+                );
+            }
+            _ => {}
         }
     }
 
@@ -817,5 +1146,95 @@ mod tests {
         assert_eq!(led_step(-1.0), 0.0);
         assert_eq!(led_step(2.0), 1.0);
         assert_eq!(led_step(0.25), 8.0 / 31.0);
+    }
+
+    #[test]
+    fn rgb_channels_are_independent() {
+        let rgb = EvalPart::new("rgb", PartKind::RgbLed);
+        let wires = [
+            wire(at("uno", "13"), at("r", "1")),
+            wire(at("r", "2"), at("rgb", "R")),
+            wire(at("rgb", "COM"), at("uno", "GND.2")),
+        ];
+        let out = run(&[resistor("220"), rgb], &wires, &[("B5", true)]);
+        assert_eq!(out.rgb_leds["rgb"].r, 1.0);
+        assert_eq!(out.rgb_leds["rgb"].g, 0.0);
+        assert_eq!(out.rgb_leds["rgb"].b, 0.0);
+    }
+
+    #[test]
+    fn a_powered_tilt_switch_drives_its_output() {
+        let mut tilt = EvalPart::new("tilt", PartKind::TiltSwitch);
+        tilt.attrs.insert("tilted".into(), "1".into());
+        let wires = [
+            wire(at("uno", "5V"), at("tilt", "VCC")),
+            wire(at("tilt", "GND"), at("uno", "GND.2")),
+            wire(at("tilt", "OUT"), at("uno", "2")),
+        ];
+        let out = run(&[tilt], &wires, &[]);
+        assert!(out.sensors["tilt"].active);
+        assert!(out
+            .drives
+            .iter()
+            .any(|drive| drive.port == 'D' && drive.pin == 2 && drive.high));
+    }
+
+    #[test]
+    fn a_flame_sensor_reports_both_comparator_and_analog_outputs() {
+        let mut flame = EvalPart::new("flame", PartKind::FlameSensor);
+        flame.attrs.insert("flame".into(), "80".into());
+        let wires = [
+            wire(at("uno", "5V"), at("flame", "VCC")),
+            wire(at("flame", "GND"), at("uno", "GND.2")),
+            wire(at("flame", "AOUT"), at("uno", "A0")),
+            wire(at("flame", "DOUT"), at("uno", "3")),
+        ];
+        let out = run(&[flame], &wires, &[]);
+        assert!(out.sensors["flame"].active);
+        assert!(out
+            .analogs
+            .iter()
+            .any(|analog| analog.channel == 0 && (i32::from(analog.millivolts) - 4000).abs() <= 1));
+        assert!(out
+            .drives
+            .iter()
+            .any(|drive| drive.port == 'D' && drive.pin == 3 && drive.high));
+    }
+
+    #[test]
+    fn a_buzzer_is_a_load_between_high_and_low() {
+        let buzzer = EvalPart::new("buzz", PartKind::Buzzer);
+        let wires = [
+            wire(at("uno", "8"), at("buzz", "1")),
+            wire(at("buzz", "2"), at("uno", "GND.2")),
+        ];
+        let out = run(&[buzzer], &wires, &[("B0", true)]);
+        assert!(out.outputs["buzz"].active);
+        assert_eq!(out.outputs["buzz"].frequency, Some(1000));
+    }
+
+    #[test]
+    fn a_seven_segment_maps_lit_segments() {
+        let display = EvalPart::new("seg", PartKind::SevenSegment);
+        let wires = [
+            wire(at("uno", "2"), at("seg", "A")),
+            wire(at("uno", "3"), at("seg", "B")),
+            wire(at("seg", "COM.1"), at("uno", "GND.2")),
+        ];
+        let out = run(&[display], &wires, &[("D2", true), ("D3", true)]);
+        assert!(out.outputs["seg"].active);
+        assert_eq!(&out.outputs["seg"].values[..3], &[1, 1, 0]);
+    }
+
+    #[test]
+    fn a_led_bar_maps_each_anode_cathode_pair() {
+        let bar = EvalPart::new("bar", PartKind::LedBarGraph);
+        let wires = [
+            wire(at("uno", "2"), at("bar", "A1")),
+            wire(at("bar", "C1"), at("uno", "GND.2")),
+        ];
+        let out = run(&[bar], &wires, &[("D2", true)]);
+        assert_eq!(out.outputs["bar"].values[0], 1);
+        assert_eq!(out.outputs["bar"].values[1], 0);
     }
 }
