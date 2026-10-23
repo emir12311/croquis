@@ -362,14 +362,6 @@ fn draw_part(
         Stroke::new(if selected { 2.5 } else { 1.0 }, border),
         egui::StrokeKind::Inside,
     );
-    painter.text(
-        screen.center(),
-        Align2::CENTER_CENTER,
-        &part.name,
-        FontId::proportional(13.0),
-        Color32::WHITE,
-    );
-
     for (index, pin) in part.pins.iter().enumerate() {
         let hovered = hovered_pin.is_some_and(|(_, pin_index)| pin_index == index);
         // Match the app: no markers at rest, and only the hovered pin gets an
