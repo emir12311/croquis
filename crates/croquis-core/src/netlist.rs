@@ -161,6 +161,48 @@ pub struct OutputState {
     pub digit: Option<u8>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EchoResponse {
+    pub trigger: (char, u8),
+    pub echo: (char, u8),
+    pub delay_us: u32,
+    pub width_us: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StepperWiring {
+    pub pins: Vec<String>,
+    pub step_angle: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LcdPins {
+    pub rs: String,
+    pub e: String,
+    pub d4: String,
+    pub d5: String,
+    pub d6: String,
+    pub d7: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LcdWiring {
+    pub powered: bool,
+    pub pins: LcdPins,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DhtSensor {
+    pub pin: String,
+    pub temperature: f64,
+    pub humidity: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IrReceiver {
+    pub pin: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CircuitEval {
     pub leds: HashMap<String, LedState>,
@@ -171,6 +213,11 @@ pub struct CircuitEval {
     pub drives: Vec<Drive>,
     pub warnings: HashMap<String, String>,
     pub analogs: Vec<AnalogReading>,
+    pub echoes: Vec<EchoResponse>,
+    pub stepper_wiring: HashMap<String, StepperWiring>,
+    pub lcd_wiring: HashMap<String, LcdWiring>,
+    pub dht_sensors: HashMap<String, DhtSensor>,
+    pub ir_receivers: HashMap<String, IrReceiver>,
 }
 
 pub fn led_step(brightness: f64) -> f64 {
@@ -433,6 +480,14 @@ fn collect_rails(
         }
     }
     rails
+}
+
+fn mcu_pin_on(rails: &Rails, root: &str) -> Option<(char, u8)> {
+    rails
+        .mcu_pins
+        .iter()
+        .find(|(label, _)| label.starts_with(&format!("{root}/")))
+        .map(|(_, pin)| *pin)
 }
 
 /// Evaluate connectivity, resistor paths, LEDs, buttons and analogue dividers.
@@ -848,6 +903,190 @@ pub fn evaluate_circuit(
     }
 
     for part in parts {
+        let connected = wires
+            .iter()
+            .any(|wire| wire.a.instance_id == part.id || wire.b.instance_id == part.id);
+        match part.kind {
+            PartKind::Dht22 => {
+                let high = uf.find(&format!("{}:VCC", part.id));
+                let low = uf.find(&format!("{}:GND", part.id));
+                let powered = net_high(&high) && net_low(&low);
+                let data = mcu_pin_on(&rails, &uf.find(&format!("{}:SDA", part.id)));
+                if !powered {
+                    if data.is_some() || connected {
+                        eval.warnings.insert(
+                            part.id.clone(),
+                            "Its VCC pin needs 5V and its GND pin needs GND.".into(),
+                        );
+                    }
+                } else if let Some(data) = data {
+                    let temperature = part
+                        .attrs
+                        .get("temperature")
+                        .and_then(|value| value.parse::<f64>().ok())
+                        .unwrap_or(25.0)
+                        .clamp(-40.0, 80.0);
+                    let humidity = part
+                        .attrs
+                        .get("humidity")
+                        .and_then(|value| value.parse::<f64>().ok())
+                        .unwrap_or(50.0)
+                        .clamp(0.0, 100.0);
+                    eval.dht_sensors.insert(
+                        part.id.clone(),
+                        DhtSensor {
+                            pin: format!("{}{}", data.0, data.1),
+                            temperature,
+                            humidity,
+                        },
+                    );
+                } else if connected {
+                    eval.warnings.insert(
+                        part.id.clone(),
+                        "Its SDA pin needs a pin on the board.".into(),
+                    );
+                }
+            }
+            PartKind::IrReceiver => {
+                let high = uf.find(&format!("{}:VCC", part.id));
+                let low = uf.find(&format!("{}:GND", part.id));
+                let powered = net_high(&high) && net_low(&low);
+                let data = mcu_pin_on(&rails, &uf.find(&format!("{}:DAT", part.id)));
+                if !powered {
+                    if data.is_some() || connected {
+                        eval.warnings.insert(
+                            part.id.clone(),
+                            "Its VCC pin needs 5V and its GND pin needs GND.".into(),
+                        );
+                    }
+                } else if let Some(data) = data {
+                    eval.ir_receivers.insert(
+                        part.id.clone(),
+                        IrReceiver {
+                            pin: format!("{}{}", data.0, data.1),
+                        },
+                    );
+                } else if connected {
+                    eval.warnings.insert(
+                        part.id.clone(),
+                        "Its DAT pin needs a pin on the board.".into(),
+                    );
+                }
+            }
+            PartKind::HcSr04 => {
+                let high = uf.find(&format!("{}:VCC", part.id));
+                let low = uf.find(&format!("{}:GND", part.id));
+                let trigger = mcu_pin_on(&rails, &uf.find(&format!("{}:TRIG", part.id)));
+                let echo = mcu_pin_on(&rails, &uf.find(&format!("{}:ECHO", part.id)));
+                if !(net_high(&high) && net_low(&low)) {
+                    if trigger.is_some() || echo.is_some() {
+                        eval.warnings.insert(
+                            part.id.clone(),
+                            "Its VCC pin needs 5V and its GND pin needs GND.".into(),
+                        );
+                    }
+                } else if let (Some(trigger), Some(echo)) = (trigger, echo) {
+                    let distance = part
+                        .attrs
+                        .get("distance")
+                        .and_then(|value| value.parse::<f64>().ok())
+                        .unwrap_or(100.0)
+                        .clamp(2.0, 400.0);
+                    eval.echoes.push(EchoResponse {
+                        trigger,
+                        echo,
+                        delay_us: 600,
+                        width_us: (distance * 58.0).round() as u32,
+                    });
+                } else if trigger.is_some() || echo.is_some() {
+                    eval.warnings.insert(
+                        part.id.clone(),
+                        "Its TRIG and ECHO pins both need a pin on the board.".into(),
+                    );
+                }
+            }
+            PartKind::StepperMotor => {
+                let mut pins = Vec::new();
+                let mut found = 0;
+                for coil in ["A-", "A+", "B+", "B-"] {
+                    if let Some((port, pin)) =
+                        mcu_pin_on(&rails, &uf.find(&format!("{}:{coil}", part.id)))
+                    {
+                        pins.push(format!("{port}{pin}"));
+                        found += 1;
+                    } else {
+                        pins.push(String::new());
+                    }
+                }
+                if found == 4 {
+                    let steps = part
+                        .attrs
+                        .get("steps")
+                        .and_then(|value| value.parse::<f64>().ok())
+                        .unwrap_or(200.0)
+                        .clamp(20.0, 400.0);
+                    eval.stepper_wiring.insert(
+                        part.id.clone(),
+                        StepperWiring {
+                            pins,
+                            step_angle: 360.0 / steps,
+                        },
+                    );
+                } else if found > 0 {
+                    eval.warnings
+                        .insert(part.id.clone(), "Its four coil pins need the board.".into());
+                }
+            }
+            PartKind::Lcd1602 => {
+                let high = uf.find(&format!("{}:VDD", part.id));
+                let low = uf.find(&format!("{}:VSS", part.id));
+                let powered = net_high(&high) && net_low(&low);
+                let names = ["RS", "E", "D4", "D5", "D6", "D7"];
+                let found: Vec<Option<(char, u8)>> = names
+                    .iter()
+                    .map(|name| mcu_pin_on(&rails, &uf.find(&format!("{}:{name}", part.id))))
+                    .collect();
+                let wired = found.iter().filter(|pin| pin.is_some()).count();
+                if !powered {
+                    if wired > 0 {
+                        eval.warnings.insert(
+                            part.id.clone(),
+                            "Its VDD pin needs 5V and its VSS pin needs GND.".into(),
+                        );
+                    }
+                } else if wired < names.len() {
+                    if wired > 0 {
+                        eval.warnings.insert(
+                            part.id.clone(),
+                            "Its RS, E and D4–D7 pins need the board.".into(),
+                        );
+                    }
+                } else {
+                    let code = |pin: Option<(char, u8)>| {
+                        let (port, number) = pin.expect("all LCD pins checked");
+                        format!("{port}{number}")
+                    };
+                    eval.lcd_wiring.insert(
+                        part.id.clone(),
+                        LcdWiring {
+                            powered,
+                            pins: LcdPins {
+                                rs: code(found[0]),
+                                e: code(found[1]),
+                                d4: code(found[2]),
+                                d5: code(found[3]),
+                                d6: code(found[4]),
+                                d7: code(found[5]),
+                            },
+                        },
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for part in parts {
         match part.kind {
             PartKind::Buzzer | PartKind::Relay => {
                 let (a, b) = if part.kind == PartKind::Buzzer {
@@ -1236,5 +1475,75 @@ mod tests {
         let out = run(&[bar], &wires, &[("D2", true)]);
         assert_eq!(out.outputs["bar"].values[0], 1);
         assert_eq!(out.outputs["bar"].values[1], 0);
+    }
+
+    #[test]
+    fn dht22_reports_its_clamped_reading_on_the_data_pin() {
+        let mut dht = EvalPart::new("dht", PartKind::Dht22);
+        dht.attrs.insert("temperature".into(), "30".into());
+        dht.attrs.insert("humidity".into(), "60".into());
+        let wires = [
+            wire(at("uno", "5V"), at("dht", "VCC")),
+            wire(at("dht", "GND"), at("uno", "GND.2")),
+            wire(at("dht", "SDA"), at("uno", "2")),
+        ];
+        let out = run(&[dht], &wires, &[]);
+        assert_eq!(out.dht_sensors["dht"].pin, "D2");
+        assert_eq!(out.dht_sensors["dht"].temperature, 30.0);
+        assert_eq!(out.dht_sensors["dht"].humidity, 60.0);
+    }
+
+    #[test]
+    fn ir_receiver_reports_its_data_pin() {
+        let ir = EvalPart::new("ir", PartKind::IrReceiver);
+        let wires = [
+            wire(at("uno", "5V"), at("ir", "VCC")),
+            wire(at("ir", "GND"), at("uno", "GND.2")),
+            wire(at("ir", "DAT"), at("uno", "2")),
+        ];
+        let out = run(&[ir], &wires, &[]);
+        assert_eq!(out.ir_receivers["ir"].pin, "D2");
+    }
+
+    #[test]
+    fn ultrasonic_sensor_builds_an_echo_from_its_distance() {
+        let mut sonar = EvalPart::new("sonar", PartKind::HcSr04);
+        sonar.attrs.insert("distance".into(), "100".into());
+        let wires = [
+            wire(at("uno", "5V"), at("sonar", "VCC")),
+            wire(at("sonar", "GND"), at("uno", "GND.2")),
+            wire(at("sonar", "TRIG"), at("uno", "2")),
+            wire(at("sonar", "ECHO"), at("uno", "3")),
+        ];
+        let out = run(&[sonar], &wires, &[]);
+        assert_eq!(out.echoes[0].trigger, ('D', 2));
+        assert_eq!(out.echoes[0].echo, ('D', 3));
+        assert_eq!(out.echoes[0].width_us, 5800);
+    }
+
+    #[test]
+    fn stepper_wiring_and_lcd_pins_are_exposed() {
+        let mut stepper = EvalPart::new("step", PartKind::StepperMotor);
+        stepper.attrs.insert("steps".into(), "200".into());
+        let lcd = EvalPart::new("lcd", PartKind::Lcd1602);
+        let wires = [
+            wire(at("uno", "2"), at("step", "A-")),
+            wire(at("uno", "3"), at("step", "A+")),
+            wire(at("uno", "4"), at("step", "B+")),
+            wire(at("uno", "5"), at("step", "B-")),
+            wire(at("uno", "5V"), at("lcd", "VDD")),
+            wire(at("lcd", "VSS"), at("uno", "GND.2")),
+            wire(at("uno", "6"), at("lcd", "RS")),
+            wire(at("uno", "7"), at("lcd", "E")),
+            wire(at("uno", "8"), at("lcd", "D4")),
+            wire(at("uno", "9"), at("lcd", "D5")),
+            wire(at("uno", "10"), at("lcd", "D6")),
+            wire(at("uno", "11"), at("lcd", "D7")),
+        ];
+        let out = run(&[stepper, lcd], &wires, &[]);
+        assert_eq!(out.stepper_wiring["step"].pins.len(), 4);
+        assert!((out.stepper_wiring["step"].step_angle - 1.8).abs() < 1e-9);
+        assert!(out.lcd_wiring["lcd"].powered);
+        assert_eq!(out.lcd_wiring["lcd"].pins.rs, "D6");
     }
 }
