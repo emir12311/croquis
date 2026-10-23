@@ -61,10 +61,10 @@
         <filter id="ledFilter" x="-0.8" y="-0.8" height="5.2" width="5.8">
           <feGaussianBlur stdDeviation="2"></feGaussianBlur>
         </filter>
-        <!--?lit$505831870$-->false
+        <!--?lit$512290874$-->false
         <rect x="145" y="48.3" width="16.7" height="5.52" fill="#dae3eb"></rect>
         <rect x="149" y="48.1" width="8.43" height="5.9" fill="#fffefe"></rect>
-        <!--?lit$505831870$-->false
+        <!--?lit$512290874$-->false
 
         <path d="m134 53.8v-16.7h-5.52v16.7z" fill="#dae3eb"></path>
         <path d="m134 49.7v-8.43h-5.9v8.43z" fill="#29261c"></path>

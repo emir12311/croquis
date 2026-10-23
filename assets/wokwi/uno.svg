@@ -10,7 +10,7 @@
           <feGaussianBlur stdDeviation="0.5"></feGaussianBlur>
         </filter>
 
-        <!--?lit$505831870$-->
+        <!--?lit$512290874$-->
   <pattern id="pins-female" width="2.54" height="2.54" patternUnits="userSpaceOnUse">
     <rect x="0" y="0" width="2.54" height="2.54" fill="#333"></rect>
     <rect x="1.079" y="0.896" width="0.762" height="0.762" style="fill: #191919"></rect>
@@ -110,7 +110,7 @@
         <!-- LEDs -->
         <g transform="translate(57.3, 16.21)">
           <use xlink:href="#led-body"></use>
-          <!--?lit$505831870$-->false
+          <!--?lit$512290874$-->false
         </g>
 
         <text fill="#fff">
@@ -119,24 +119,24 @@
 
         <g transform="translate(26.87,11.69)">
           <use xlink:href="#led-body"></use>
-          <!--?lit$505831870$-->false
+          <!--?lit$512290874$-->false
         </g>
 
         <g transform="translate(26.9, 16.2)">
           <use xlink:href="#led-body"></use>
-          <!--?lit$505831870$-->false
+          <!--?lit$512290874$-->false
         </g>
 
         <g transform="translate(26.9, 18.5)">
           <use xlink:href="#led-body"></use>
-          <!--?lit$505831870$-->false
+          <!--?lit$512290874$-->false
         </g>
 
         <text fill="#fff" style="text-anchor: end">
           <tspan x="26.5" y="13">L</tspan>
           <tspan x="26.5" y="17.5">TX</tspan>
           <tspan x="26.5" y="19.8">RX</tspan>
-          <tspan x="26.5" y="20">&nbsp;</tspan>
+          <tspan x="26.5" y="20">&#160;</tspan>
         </text>
 
         <!-- Pin Labels -->
@@ -161,7 +161,7 @@
           <tspan x="0" dy="2.54">2</tspan>
           <tspan x="0" dy="2.54">TX→1</tspan>
           <tspan x="0" dy="2.54">RX←0</tspan>
-          <tspan x="0" dy="2.54">&nbsp;</tspan>
+          <tspan x="0" dy="2.54">&#160;</tspan>
         </text>
 
         <rect x="33.90" y="42.76" width="12.84" height="0.16" fill="#fff"></rect>

@@ -19,7 +19,13 @@ pub const SPIKE_LED_SVG: &str = r##"
 /// Rasterise an SVG to a premultiplied RGBA image, fitted into the requested
 /// box without changing its aspect ratio.
 pub fn rasterize(svg: &str, width: u32, height: u32) -> Option<egui::ColorImage> {
-    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default()).ok()?;
+    let tree = match resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default()) {
+        Ok(tree) => tree,
+        Err(error) => {
+            eprintln!("SVG parse failed: {error}");
+            return None;
+        }
+    };
     let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
     let size = tree.size();
     let scale = (width as f32 / size.width()).min(height as f32 / size.height());

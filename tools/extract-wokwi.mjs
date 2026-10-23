@@ -81,7 +81,7 @@ try {
       console.warn(`  no SVG for ${part.kind} (${part.tag})`)
       continue
     }
-    await writeFile(join(OUT, `${part.kind}.svg`), `${part.svg}\n`)
+    await writeFile(join(OUT, `${part.kind}.svg`), `${part.svg.replaceAll('&nbsp;', '&#160;')}\n`)
     manifest.push({
       kind: part.kind,
       tag: part.tag,
