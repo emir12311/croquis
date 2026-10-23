@@ -9,6 +9,8 @@ use serde::Deserialize;
 
 use croquis_core::catalogue::{parse_kind, part_by_kind, CATALOGUE};
 use croquis_core::diagram::parse_diagram;
+use croquis_core::document::PinRef as CorePinRef;
+use croquis_core::netlist::{evaluate_circuit, EvalPart, EvalWire, LedState};
 
 #[derive(Clone)]
 pub struct Pin {
@@ -25,6 +27,7 @@ pub struct Part {
     pub size: Vec2,
     pub color: Color32,
     pub pins: Vec<Pin>,
+    pub attrs: HashMap<String, String>,
     pub svg: String,
 }
 
@@ -121,6 +124,7 @@ pub fn load_blink() -> (Vec<Part>, Vec<Wire>) {
                     offset: Vec2::new(pin.x - def.width / 2.0, pin.y - def.height / 2.0),
                 })
                 .collect(),
+            attrs: source.attrs.clone(),
             svg,
         });
     }
@@ -151,4 +155,45 @@ pub fn load_blink() -> (Vec<Part>, Vec<Wire>) {
         });
     }
     (parts, wires)
+}
+
+/// Evaluate the Blink preset with the AVR's pin 13 high.
+pub fn evaluate_blink() -> HashMap<String, LedState> {
+    let (parts, wires) = load_blink();
+    let eval_parts: Vec<EvalPart> = parts
+        .iter()
+        .filter_map(|part| {
+            let kind = parse_kind(&part.kind)?;
+            Some(EvalPart {
+                id: part.id.clone(),
+                kind,
+                pins: Vec::new(),
+                attrs: part.attrs.clone(),
+            })
+        })
+        .collect();
+    let eval_wires: Vec<EvalWire> = wires
+        .iter()
+        .filter_map(|wire| {
+            Some(EvalWire {
+                a: CorePinRef {
+                    instance_id: parts[wire.a.0].id.clone(),
+                    pin: parts[wire.a.0].pins[wire.a.1].name.clone(),
+                },
+                b: CorePinRef {
+                    instance_id: parts[wire.b.0].id.clone(),
+                    pin: parts[wire.b.0].pins[wire.b.1].name.clone(),
+                },
+            })
+        })
+        .collect();
+    let avr = HashMap::from([("B5".into(), true)]);
+    evaluate_circuit(
+        &eval_parts,
+        &eval_wires,
+        &HashMap::new(),
+        &avr,
+        &HashMap::new(),
+    )
+    .leds
 }
