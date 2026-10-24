@@ -159,6 +159,8 @@ struct Spike {
     hovered_pin: Option<PinRef>,
     textures: HashMap<String, egui::TextureHandle>,
     led_states: HashMap<String, LedState>,
+    /// How hard each LED is being driven, 0 to 1, so a PWM fade is visible.
+    led_brightness: HashMap<String, f64>,
     outputs: HashMap<String, OutputState>,
     rgb_leds: HashMap<String, RgbState>,
     sensors: HashMap<String, SensorState>,
@@ -180,6 +182,8 @@ struct Spike {
     lcd_states: HashMap<String, lcd::LcdState>,
     buzzer: buzzer::BuzzerAudio,
     pin_pulses: HashMap<String, f64>,
+    /// The duty cycle measured on each PWM pin, 0 to 1.
+    pin_duty: HashMap<String, f64>,
     segment_memory: HashMap<String, Vec<u8>>,
     seven_pending: HashMap<String, (Vec<u8>, Instant)>,
     seven_stable: HashMap<String, Vec<u8>>,
@@ -220,6 +224,7 @@ impl Default for Spike {
             hovered_pin: None,
             textures: HashMap::new(),
             led_states: HashMap::new(),
+            led_brightness: HashMap::new(),
             outputs: HashMap::new(),
             rgb_leds: HashMap::new(),
             sensors: HashMap::new(),
@@ -235,6 +240,7 @@ impl Default for Spike {
             lcd_states: HashMap::new(),
             buzzer: buzzer::BuzzerAudio::default(),
             pin_pulses: HashMap::new(),
+            pin_duty: HashMap::new(),
             segment_memory: HashMap::new(),
             seven_pending: HashMap::new(),
             seven_stable: HashMap::new(),
@@ -280,9 +286,20 @@ fn texture_key(
     part: &Part,
     lit: bool,
     outputs: &HashMap<String, OutputState>,
+    led_brightness: &HashMap<String, f64>,
 ) -> String {
     if part.kind == "led" {
-        return format!("led:{lit}");
+        // A PWM LED is as bright as its duty cycle, so the art has to follow it.
+        // Sixteen levels keep the cache small and the ramp smooth enough to read
+        // as a fade rather than as steps.
+        let colour = part.attrs.get("color").map(String::as_str).unwrap_or("red");
+        let brightness = if lit {
+            led_brightness.get(&part.id).copied().unwrap_or(1.0)
+        } else {
+            0.0
+        };
+        let level = (brightness.clamp(0.0, 1.0) * 16.0).round() as u8;
+        return format!("led:{colour}:{lit}:{level}");
     }
     if part.kind == "led-bar-graph" {
         let values = outputs
@@ -325,23 +342,29 @@ fn ensure_textures(
     ctx: &egui::Context,
     textures: &mut HashMap<String, egui::TextureHandle>,
     parts: &[Part],
+    led_states: &HashMap<String, LedState>,
     outputs: &HashMap<String, OutputState>,
+    led_brightness: &HashMap<String, f64>,
 ) {
     for part in parts {
-        let variants: Vec<(String, bool)> = if part.kind == "led" {
-            vec![("led:false".into(), false), ("led:true".into(), true)]
-        } else {
-            vec![(texture_key(part, false, outputs), false)]
-        };
-        for (key, lit) in variants {
+        let lit = led_states
+            .get(&part.id)
+            .is_some_and(|state| !matches!(state, LedState::Off));
+        let key = texture_key(part, lit, outputs, led_brightness);
+        {
             if textures.contains_key(&key) {
                 continue;
             }
             let svg = if part.kind == "led" {
+                let brightness = if lit {
+                    led_brightness.get(&part.id).copied().unwrap_or(1.0)
+                } else {
+                    0.0
+                };
                 scene::led_state_svg(
                     &part.svg,
                     part.attrs.get("color").map(String::as_str).unwrap_or("red"),
-                    if lit { 1.0 } else { 0.0 },
+                    brightness,
                     lit,
                 )
             } else if part.kind == "led-bar-graph" {
@@ -387,6 +410,7 @@ impl Spike {
         self.selected = None;
         self.wire_start = None;
         self.led_states.clear();
+        self.led_brightness.clear();
         self.outputs.clear();
         self.rgb_leds.clear();
         self.sensors.clear();
@@ -414,7 +438,14 @@ impl Spike {
         }
         // Rasterise the new scene before swapping it in. Otherwise the canvas
         // paints the blue fallback for a frame while textures load.
-        ensure_textures(ctx, &mut self.textures, &parts, &HashMap::new());
+        ensure_textures(
+            ctx,
+            &mut self.textures,
+            &parts,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
         self.parts = parts;
         self.wires = wires;
         self.sketch = sketch;
@@ -431,6 +462,7 @@ impl Spike {
                 &self.wires,
                 &self.pressed,
                 &HashMap::new(),
+                &self.pin_duty,
                 &self.pin_pulses,
                 &self.keypad_keys,
             );
@@ -479,6 +511,7 @@ impl Spike {
     fn store_eval(&mut self, eval: CircuitEval) {
         self.apply_drives(&eval.drives, &eval.analogs);
         self.led_states = eval.leds;
+        self.led_brightness = eval.led_brightness;
         self.outputs = eval.outputs;
         self.rgb_leds = eval.rgb_leds;
         self.sensors = eval.sensors;
@@ -489,7 +522,9 @@ impl Spike {
     /// One enable pulse ended: hand the four data lines to every LCD that uses
     /// this pin, in whichever register its RS line selects.
     fn latch_lcds(&mut self, enable_key: &str) {
-        let level = |pins: &HashMap<String, bool>, key: &str| pins.get(key).copied().unwrap_or(false);
+        let level = |pins: &HashMap<String, bool>, key: &str| {
+            pins.get(key).copied().unwrap_or(false)
+        };
         for (id, wiring) in &self.lcd_wiring {
             if wiring.pins.e != enable_key {
                 continue;
@@ -593,6 +628,31 @@ impl Spike {
         }
     }
 
+    /// Take a press on a part: hold a button, tap a key, grab the stick, or
+    /// start dragging everything else. `screen` is where the pointer was, for
+    /// the stick's movement threshold.
+    fn press_control(&mut self, index: usize, world: Pos2, screen: Pos2) {
+        let id = self.parts[index].id.clone();
+        match self.parts[index].kind.as_str() {
+            "pushbutton" => {
+                self.pressed.insert(id, true);
+            }
+            "membrane-keypad" => {
+                if let Some(key) = keypad_key(&self.parts[index], world) {
+                    self.keypad_keys.insert(id.clone(), Some(key));
+                    self.keypad_until.insert(id, Instant::now() + KEY_HOLD);
+                }
+            }
+            "analog-joystick" => {
+                self.joystick = Some(index);
+                self.joystick_moved = false;
+                self.joystick_start = Some(screen);
+                self.pressed.insert(id, true);
+            }
+            _ => self.dragging = Some(index),
+        }
+    }
+
     /// Drop every held input and any pending keypad tap.
     fn forget_input(&mut self) {
         self.release_input();
@@ -642,6 +702,7 @@ impl Spike {
             &self.wires,
             &self.pressed,
             &self.avr_pins,
+            &self.pin_duty,
             &self.pin_pulses,
             &self.keypad_keys,
         );
@@ -678,6 +739,7 @@ impl Spike {
         self.forget_input();
         self.avr_pins.clear();
         self.pin_pulses.clear();
+        self.pin_duty.clear();
         self.segment_memory.clear();
         self.seven_pending.clear();
         self.seven_stable.clear();
@@ -688,6 +750,7 @@ impl Spike {
                 &self.wires,
                 &self.pressed,
                 &self.avr_pins,
+                &self.pin_duty,
                 &self.pin_pulses,
                 &self.keypad_keys,
             );
@@ -726,12 +789,22 @@ impl Spike {
                 SimEvent::Timing {
                     port,
                     pin,
+                    duty_per_mille,
                     high_micros,
                     ..
                 } => {
+                    let key = format!("{}{}", port as char, pin);
                     if high_micros > 0 {
-                        self.pin_pulses
-                            .insert(format!("{}{}", port as char, pin), high_micros as f64);
+                        self.pin_pulses.insert(key.clone(), high_micros as f64);
+                        changed = true;
+                    }
+                    // Without this the netlist reads every pin as fully on, so a
+                    // PWM fade never dims anything.
+                    if duty_per_mille > 0 {
+                        self.pin_duty.insert(
+                            key,
+                            (f64::from(duty_per_mille) / 1000.0).clamp(0.0, 1.0),
+                        );
                         changed = true;
                     }
                 }
@@ -743,6 +816,7 @@ impl Spike {
                 &self.wires,
                 &self.pressed,
                 &self.avr_pins,
+                &self.pin_duty,
                 &self.pin_pulses,
                 &self.keypad_keys,
             );
@@ -761,7 +835,14 @@ impl eframe::App for Spike {
         }
         self.tick_input();
         self.buzzer.update(&self.outputs);
-        ensure_textures(&ctx, &mut self.textures, &self.parts, &self.outputs);
+        ensure_textures(
+            &ctx,
+            &mut self.textures,
+            &self.parts,
+            &self.led_states,
+            &self.outputs,
+            &self.led_brightness,
+        );
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.wire_start = None;
@@ -981,32 +1062,22 @@ impl eframe::App for Spike {
                 }
             }
 
-            if response.drag_started_by(PointerButton::Primary) {
-                if let Some(world) = world_pointer {
-                    if hit_pin(&self.parts, world, PIN_HIT_RADIUS / self.camera.zoom).is_none() {
-                        self.selected = hit_part(&self.parts, world);
-                        if let Some(index) = self.selected {
-                            let id = self.parts[index].id.clone();
-                            match self.parts[index].kind.as_str() {
-                                // A button is held while the pointer is down.
-                                "pushbutton" => {
-                                    self.pressed.insert(id, true);
-                                }
-                                // A key is tapped: the matrix needs time to see it.
-                                "membrane-keypad" => {
-                                    if let Some(key) = keypad_key(&self.parts[index], world) {
-                                        self.keypad_keys.insert(id.clone(), Some(key));
-                                        self.keypad_until.insert(id, Instant::now() + KEY_HOLD);
-                                    }
-                                }
-                                // The stick is dragged, and its centre is a button.
-                                "analog-joystick" => {
-                                    self.joystick = Some(index);
-                                    self.joystick_moved = false;
-                                    self.joystick_start = pointer;
-                                    self.pressed.insert(id, true);
-                                }
-                                _ => self.dragging = Some(index),
+            // A press picks up whatever control is under the pointer. This is
+            // the pointer's own press, not a drag start: egui only reports a
+            // drag once the pointer has moved, and a button that only reacts
+            // after the pointer has travelled somewhere is a button that does
+            // not work on a click.
+            let pressed_now = ctx.input(|input| input.pointer.primary_pressed());
+            let released_now = ctx.input(|input| input.pointer.primary_released());
+            if pressed_now {
+                if let Some(pos) = ctx.input(|input| input.pointer.interact_pos()) {
+                    if rect.contains(pos) {
+                        let world = self.camera.screen_to_world(rect, pos);
+                        if hit_pin(&self.parts, world, PIN_HIT_RADIUS / self.camera.zoom).is_none()
+                        {
+                            self.selected = hit_part(&self.parts, world);
+                            if let Some(index) = self.selected {
+                                self.press_control(index, world, pos);
                             }
                         }
                     }
@@ -1041,7 +1112,7 @@ impl eframe::App for Spike {
                     self.parts[index].center += response.drag_delta() / self.camera.zoom;
                 }
             }
-            if response.drag_stopped() {
+            if released_now || response.drag_stopped() {
                 self.dragging = None;
                 self.release_input();
             }
@@ -1076,11 +1147,20 @@ impl eframe::App for Spike {
                         part,
                         self.led_states
                             .get(&part.id)
-                            .is_some_and(|state| *state == LedState::Lit),
+                            .is_some_and(|state| !matches!(state, LedState::Off)),
                         &self.outputs,
+                        &self.led_brightness,
                     )),
                     self.rgb_leds.get(&part.id).copied(),
-                    self.outputs.get(&part.id).map(|out| out.values.as_slice()),
+                    // Segments are a display's business. The LED bar carries ten
+                    // values of its own, and handing those to draw_segments drew
+                    // a seven-segment digit on top of it.
+                    match part.kind.as_str() {
+                        "seven-segment" | "seven-segment-4" => {
+                            self.outputs.get(&part.id).map(|out| out.values.as_slice())
+                        }
+                        _ => None,
+                    },
                 );
                 if shows_active(part, &self.outputs, &self.sensors) {
                     draw_active_dot(&painter, rect, self.camera, part);
@@ -1764,6 +1844,22 @@ mod tests {
     }
 
     #[test]
+    fn tmp_led_art_follows_brightness() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi/led.svg");
+        let svg = std::fs::read_to_string(path).expect("led asset");
+        for brightness in [1.0, 0.5, 0.16, 0.0] {
+            let patched = scene::led_state_svg(&svg, "red", brightness, brightness > 0.0);
+            let image = art::rasterize(&patched, 202, 136).expect("rasterise");
+            let energy: u64 = image
+                .pixels
+                .iter()
+                .map(|pixel| u64::from(pixel.r()) + u64::from(pixel.g()) + u64::from(pixel.b()))
+                .sum();
+            println!("brightness {brightness}: energy {energy}");
+        }
+    }
+
+    #[test]
     fn blink_netlist_lights_its_led() {
         let leds = scene::evaluate_blink();
         assert_eq!(leds.get("led1"), Some(&LedState::Lit));
@@ -1920,6 +2016,53 @@ mod tests {
     }
 
     #[test]
+    fn a_press_picks_up_the_control_under_it() {
+        use croquis_core::catalogue::PartKind;
+        let mut spike = Spike::default();
+        let button =
+            scene::part_from_kind(PartKind::Pushbutton, Pos2::ZERO, "b".into()).expect("button");
+        let pad = scene::part_from_kind(PartKind::MembraneKeypad, Pos2::new(400.0, 0.0), "pad".into())
+            .expect("pad");
+        let stick = scene::part_from_kind(
+            PartKind::AnalogJoystick,
+            Pos2::new(900.0, 0.0),
+            "s".into(),
+        )
+        .expect("stick");
+        let led = scene::part_from_kind(PartKind::Led, Pos2::new(1200.0, 0.0), "led".into())
+            .expect("led");
+        spike.parts = vec![button, pad, stick, led];
+
+        // A button is held by id, and a release lets go of it.
+        spike.press_control(0, Pos2::ZERO, Pos2::ZERO);
+        assert_eq!(spike.pressed.get("b"), Some(&true));
+        spike.release_input();
+        assert!(spike.pressed.is_empty());
+
+        // A keypad taps the key under the pointer, with its minimum hold.
+        let bounds = spike.parts[1].bounds();
+        let unit = bounds.width() / KEYPAD_VIEW.x;
+        let first_key = bounds.min + Vec2::new(12.0, 16.0) * unit;
+        spike.press_control(1, first_key, Pos2::ZERO);
+        assert_eq!(
+            spike.keypad_keys.get("pad"),
+            Some(&Some(KeyPosition { row: 0, column: 0 }))
+        );
+        assert!(spike.keypad_until.contains_key("pad"));
+
+        // The stick is grabbed and its centre button held until it moves.
+        let centre = spike.parts[2].bounds().center();
+        spike.press_control(2, centre, Pos2::ZERO);
+        assert_eq!(spike.joystick, Some(2));
+        assert_eq!(spike.pressed.get("s"), Some(&true));
+
+        // Everything else is dragged.
+        let led_centre = spike.parts[3].bounds().center();
+        spike.press_control(3, led_centre, Pos2::ZERO);
+        assert_eq!(spike.dragging, Some(3));
+    }
+
+    #[test]
     fn a_held_button_pulls_its_pin_for_the_sketch() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/button.json");
         let (parts, wires, _) = scene::load_diagram_file(&path);
@@ -1929,6 +2072,7 @@ mod tests {
                 &parts,
                 &wires,
                 pressed,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
@@ -2129,6 +2273,7 @@ mod tests {
             &wires,
             &HashMap::new(),
             &avr,
+            &HashMap::new(),
             &pulses,
             &HashMap::new(),
         );
@@ -2165,6 +2310,7 @@ mod tests {
                 &spike.wires,
                 &HashMap::new(),
                 &avr,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
             );

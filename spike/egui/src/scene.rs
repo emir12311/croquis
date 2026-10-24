@@ -268,6 +268,7 @@ pub fn evaluate_scene(
     wires: &[Wire],
     pressed: &HashMap<String, bool>,
     avr: &HashMap<String, bool>,
+    pin_duty: &HashMap<String, f64>,
     pin_pulse: &HashMap<String, f64>,
     keypad_keys: &HashMap<String, Option<KeyPosition>>,
 ) -> CircuitEval {
@@ -303,7 +304,7 @@ pub fn evaluate_scene(
         &eval_wires,
         pressed,
         avr,
-        &HashMap::new(),
+        pin_duty,
         pin_pulse,
         keypad_keys,
         &HashMap::new(),
@@ -321,6 +322,7 @@ pub fn evaluate_with(
         wires,
         &HashMap::new(),
         avr,
+        &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
     )
