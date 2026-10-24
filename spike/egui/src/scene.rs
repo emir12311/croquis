@@ -10,7 +10,7 @@ use serde::Deserialize;
 use croquis_core::catalogue::{parse_kind, part_by_kind, PartKind, CATALOGUE};
 use croquis_core::diagram::{build_diagram, parse_diagram, PlacedPart, RoutedWire};
 use croquis_core::document::PinRef as CorePinRef;
-use croquis_core::netlist::{evaluate_circuit, EvalPart, EvalWire, LedState};
+use croquis_core::netlist::{evaluate_circuit, CircuitEval, EvalPart, EvalWire, LedState};
 
 #[derive(Clone)]
 pub struct Pin {
@@ -260,12 +260,12 @@ pub fn evaluate_blink() -> HashMap<String, LedState> {
     evaluate_blink_with(&avr)
 }
 
-/// Evaluate any loaded circuit from the simulator's current AVR pin levels.
-pub fn evaluate_with(
+/// Evaluate any loaded circuit and return the full state.
+pub fn evaluate_scene(
     parts: &[Part],
     wires: &[Wire],
     avr: &HashMap<String, bool>,
-) -> HashMap<String, LedState> {
+) -> CircuitEval {
     let eval_parts: Vec<EvalPart> = parts
         .iter()
         .filter_map(|part| {
@@ -300,7 +300,15 @@ pub fn evaluate_with(
         avr,
         &HashMap::new(),
     )
-    .leds
+}
+
+/// The LED states from a loaded circuit.
+pub fn evaluate_with(
+    parts: &[Part],
+    wires: &[Wire],
+    avr: &HashMap<String, bool>,
+) -> HashMap<String, LedState> {
+    evaluate_scene(parts, wires, avr).leds
 }
 
 /// Evaluate Blink from the simulator's current AVR pin levels.
@@ -403,4 +411,42 @@ pub fn part_from_kind(kind: PartKind, center: Pos2, id: String) -> Option<Part> 
         attrs: meta.attrs.clone(),
         svg,
     })
+}
+
+/// Apply the LED bar element's segment fills.
+pub fn led_bar_svg(svg: &str, values: &[u8], color: &str) -> String {
+    let needle = "x=\"2.5\" width=\"5\" height=\"1.74\"";
+    let mut out = String::new();
+    let mut rest = svg;
+    let mut index = 0;
+    while let Some(position) = rest.find(needle) {
+        let after = &rest[position + needle.len()..];
+        out.push_str(&rest[..position + needle.len()]);
+        if let Some(fill) = after.find("fill=\"#444\"") {
+            out.push_str(&after[..fill]);
+            let lit = values.get(index).copied().unwrap_or(0) != 0;
+            let fill_color = if lit { bar_colour(color, index) } else { "#444".into() };
+            out.push_str(&format!("fill=\"{fill_color}\""));
+            rest = &after[fill + "fill=\"#444\"".len()..];
+        } else {
+            out.push_str(after);
+            rest = "";
+        }
+        index += 1;
+    }
+    out.push_str(rest);
+    out
+}
+
+fn bar_colour(color: &str, index: usize) -> String {
+    match color {
+        "GYR" => ["#9eff3c", "#9eff3c", "#9eff3c", "#9eff3c", "#9eff3c", "#f1d73c", "#f1d73c", "#f1d73c", "#dc012d", "#dc012d"][index.min(9)].into(),
+        "BCYR" => ["#2c95fa", "#6cf9dc", "#6cf9dc", "#6cf9dc", "#6cf9dc", "#f1d73c", "#f1d73c", "#f1d73c", "#dc012d", "#dc012d"][index.min(9)].into(),
+        "green" => "#9eff3c".into(),
+        "blue" => "#2c95fa".into(),
+        "cyan" => "#6cf9dc".into(),
+        "yellow" => "#f1d73c".into(),
+        "red" => "#dc012d".into(),
+        other => other.into(),
+    }
 }
