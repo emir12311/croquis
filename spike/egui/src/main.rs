@@ -32,6 +32,7 @@ mod editor;
 mod generated;
 mod lcd;
 mod lcd_font;
+mod knobs;
 mod properties;
 mod remote;
 mod stepper;
@@ -177,6 +178,8 @@ struct Spike {
     joystick: Option<usize>,
     joystick_moved: bool,
     joystick_start: Option<Pos2>,
+    /// The potentiometer or slide pot whose knob is being dragged.
+    knob: Option<usize>,
     /// The levels and voltages last pushed into the simulator, so an unchanged
     /// drive is not re-sent every frame.
     last_drives: HashMap<(char, u8), bool>,
@@ -250,6 +253,7 @@ impl Default for Spike {
             joystick: None,
             joystick_moved: false,
             joystick_start: None,
+            knob: None,
             last_drives: HashMap::new(),
             last_analogs: HashMap::new(),
             lcd_wiring: HashMap::new(),
@@ -350,6 +354,14 @@ fn texture_key(
             .unwrap_or(0.0);
         return format!("{}-{:.1}", part.kind, angle);
     }
+    if part.kind == "potentiometer" {
+        let value = attr_number(part, "value", 0.0);
+        return format!("pot:{:.0}", knobs::pot_angle(value));
+    }
+    if part.kind == "slide-potentiometer" {
+        let value = attr_number(part, "value", 0.0);
+        return format!("slide:{value:.0}");
+    }
     if part.kind == "seven-segment" || part.kind == "seven-segment-4" {
         // The lit segments are drawn live in draw_segments over the base art,
         // so the texture must not depend on the state. Keying it on the
@@ -399,6 +411,10 @@ fn ensure_textures(
                     values,
                     part.attrs.get("color").map(String::as_str).unwrap_or("red"),
                 )
+            } else if part.kind == "potentiometer" {
+                scene::potentiometer_svg(&part.svg, attr_number(part, "value", 0.0))
+            } else if part.kind == "slide-potentiometer" {
+                scene::slide_pot_svg(&part.svg, attr_number(part, "value", 0.0))
             } else if part.kind == "rgb-led" {
                 part.svg.clone()
             } else if part.kind == "analog-joystick" {
@@ -610,6 +626,31 @@ impl Spike {
         }
     }
 
+    /// Follow the pointer with a knob: the potentiometer's angle or the slide
+    /// pot's position, written into its attribute — where the netlist reads it.
+    fn drag_knob(&mut self, index: usize, world: Pos2) {
+        let part = &self.parts[index];
+        let value = match part.kind.as_str() {
+            "potentiometer" => knobs::pot_value(part, world),
+            "slide-potentiometer" => Some(knobs::slide_value(part, world)),
+            _ => None,
+        };
+        let Some(value) = value else {
+            return;
+        };
+        let text = if (value - value.round()).abs() < 1e-9 {
+            format!("{}", value.round() as i64)
+        } else {
+            format!("{value}")
+        };
+        if self.parts[index].attrs.get("value") == Some(&text) {
+            return;
+        }
+        self.parts[index].attrs.insert("value".into(), text);
+        // The netlist reads the attribute, so a turn has to be solved for.
+        self.reevaluate = true;
+    }
+
     /// Put each stepper's remembered angle on its part, which is what the art
     /// is drawn from.
     fn apply_stepper_angles(&mut self) {
@@ -743,6 +784,11 @@ impl Spike {
                 self.joystick_start = Some(screen);
                 self.pressed.insert(id, true);
             }
+            // A knob is grabbed where it is and follows the pointer.
+            "potentiometer" | "slide-potentiometer" => {
+                self.knob = Some(index);
+                self.drag_knob(index, world);
+            }
             // The remote is a transmitter, not a switch: pressing a button sends
             // one NEC frame to every receiver in the circuit.
             "ir-remote" => {
@@ -767,6 +813,7 @@ impl Spike {
     fn release_input(&mut self) {
         self.pressed.clear();
         self.remote_hold = None;
+        self.knob = None;
         if let Some(index) = self.joystick.take() {
             // A stick is a momentary input, not a positioned part.
             self.parts[index].attrs.insert("x".into(), "50".into());
@@ -1259,6 +1306,10 @@ impl eframe::App for Spike {
                                 .attrs
                                 .insert("y".into(), y.to_string());
                         }
+                    }
+                } else if let Some(index) = self.knob {
+                    if let Some(world) = world_pointer {
+                        self.drag_knob(index, world);
                     }
                 } else if let Some(index) = self.dragging {
                     self.parts[index].center += response.drag_delta() / self.camera.zoom;
@@ -1777,6 +1828,14 @@ fn draw_joystick_knob(painter: &egui::Painter, rect: Rect, camera: Camera, part:
     );
 }
 
+/// A part's numeric attribute, or a default when it has not been set.
+fn attr_number(part: &Part, name: &str, fallback: f64) -> f64 {
+    part.attrs
+        .get(name)
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(fallback)
+}
+
 /// The LCD element's drawing, and its character grid inside it: 16x2 cells of
 /// 3.55 x 5.95 from (12.45, 12.55), each glyph five by eight dots of 0.55 x
 /// 0.65 spaced 0.6 across and 0.7 down.
@@ -2256,6 +2315,32 @@ mod tests {
         let hard = disc_bands(10.0, 0.0, Color32::WHITE, 1.0);
         assert_eq!(hard.len(), 2, "no blur means one hard edge");
         assert_eq!(hard[1].0, 10.0);
+    }
+
+    #[test]
+    fn the_potentiometers_draw_their_values() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi");
+
+        let pot = std::fs::read_to_string(root.join("potentiometer.svg")).expect("pot asset");
+        let low = scene::potentiometer_svg(&pot, 0.0);
+        let high = scene::potentiometer_svg(&pot, 1023.0);
+        assert!(
+            low.contains("rotate(-135 9.91 8.18)"),
+            "a knob at zero points down-left"
+        );
+        assert!(
+            high.contains("rotate(135 9.91 8.18)"),
+            "and at full, down-right"
+        );
+        assert_ne!(low, high);
+
+        let slide =
+            std::fs::read_to_string(root.join("slide-potentiometer.svg")).expect("slide asset");
+        let low = scene::slide_pot_svg(&slide, 0.0);
+        let high = scene::slide_pot_svg(&slide, 100.0);
+        assert!(low.contains("translate(-15 0)"), "the tip starts at the low end");
+        assert!(high.contains("translate(15 0)"), "and ends at the high one");
+        assert_ne!(low, high);
     }
 
     #[test]

@@ -531,6 +531,40 @@ pub fn servo_svg(svg: &str, angle: f64) -> String {
     svg.replacen("rotate(0)", &format!("rotate({angle})"), 1)
 }
 
+/// Turn the potentiometer's knob to the angle its value asks for.
+///
+/// The element drives the knob with a CSS variable rather than an SVG
+/// transform, so this replaces that variable in its own style attribute.
+pub fn potentiometer_svg(svg: &str, value: f64) -> String {
+    let degrees = tidy(crate::knobs::pot_angle(value));
+    // The element rotates the knob with `transform: rotate(var(--knob-angle))`
+    // in its own CSS. resvg does not resolve custom properties, so the value
+    // goes onto the ellipse as a real transform, about the knob's centre.
+    svg.replacen(
+        "--knob-angle:-135deg",
+        &format!("--knob-angle:{degrees}deg"),
+        1,
+    )
+    .replacen(
+        "<ellipse id=\"knob\"",
+        &format!("<ellipse transform=\"rotate({degrees} 9.91 8.18)\" id=\"knob\""),
+        1,
+    )
+}
+
+/// Slide the potentiometer's tip to where its value sits on the track.
+pub fn slide_pot_svg(svg: &str, value: f64) -> String {
+    let offset = crate::knobs::slide_offset(value);
+    svg.replacen(
+        "id=\"tip\" transform=\"translate(-15 0)\"",
+        &format!(
+            "id=\"tip\" transform=\"translate({} 0)\"",
+            tidy(f64::from(offset))
+        ),
+        1,
+    )
+}
+
 /// Rotate the stepper's shaft and rotor arrow to an angle.
 ///
 /// The element draws both, in its own two forms: the arrow is
