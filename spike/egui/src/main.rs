@@ -171,11 +171,21 @@ struct Spike {
     path: Option<PathBuf>,
     file_error: Option<String>,
     presets: Vec<(String, PathBuf)>,
+    auto_run: bool,
+    fit_requested: bool,
 }
 
 impl Default for Spike {
     fn default() -> Self {
-        let (parts, wires) = scene::load_blink();
+        let preset = std::env::var("CROQUIS_UI_PRESET").ok().map(PathBuf::from);
+        let (parts, wires, sketch, path) = if let Some(path) = preset {
+            let (parts, wires, sketch) = scene::load_diagram_file(&path);
+            (parts, wires, sketch, Some(path))
+        } else {
+            let (parts, wires) = scene::load_blink();
+            (parts, wires, scene::blink_sketch(), None)
+        };
+        let auto_run = std::env::var("CROQUIS_UI_AUTORUN").is_ok();
         Self {
             camera: Camera::default(),
             parts,
@@ -193,7 +203,7 @@ impl Default for Spike {
             seven_pending: HashMap::new(),
             seven_stable: HashMap::new(),
             servo_angles: HashMap::new(),
-            sketch: scene::blink_sketch(),
+            sketch,
             next_id: 0,
             sim: None,
             events: None,
@@ -201,9 +211,11 @@ impl Default for Spike {
             avr_pins: HashMap::new(),
             serial: String::new(),
             run_error: None,
-            path: None,
+            path,
             file_error: None,
             presets: scene::presets(),
+            auto_run,
+            fit_requested: true,
         }
     }
 }
@@ -583,6 +595,10 @@ impl eframe::App for Spike {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         self.poll_engine();
+        if self.auto_run && !self.running {
+            self.auto_run = false;
+            self.start_sim(&ctx);
+        }
         ensure_textures(
             &ctx,
             &mut self.textures,
@@ -776,6 +792,10 @@ impl eframe::App for Spike {
             });
 
         egui::CentralPanel::default().show(root, |ui| {
+            if self.fit_requested {
+                self.camera = fit_camera(ui.available_rect_before_wrap(), &self.parts);
+                self.fit_requested = false;
+            }
             let (response, painter) =
                 ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
             let rect = response.rect;
@@ -906,6 +926,24 @@ impl eframe::App for Spike {
                 }
             }
         });
+    }
+}
+
+fn fit_camera(rect: Rect, parts: &[Part]) -> Camera {
+    let mut bounds = Rect::NOTHING;
+    for part in parts {
+        bounds = bounds.union(part.bounds());
+    }
+    if parts.is_empty() || !bounds.is_finite() {
+        return Camera::default();
+    }
+    let margin = 32.0;
+    let zoom = ((rect.width() - margin * 2.0) / bounds.width().max(1.0))
+        .min((rect.height() - margin * 2.0) / bounds.height().max(1.0))
+        .clamp(0.1, 1.5);
+    Camera {
+        zoom,
+        pan: -bounds.center().to_vec2() * zoom,
     }
 }
 
