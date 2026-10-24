@@ -24,6 +24,7 @@ use croquis_sim::engine::{self, SimEvent};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod art;
+mod buzzer;
 mod editor;
 mod scene;
 
@@ -156,6 +157,7 @@ struct Spike {
     outputs: HashMap<String, OutputState>,
     rgb_leds: HashMap<String, RgbState>,
     sensors: HashMap<String, SensorState>,
+    buzzer: buzzer::BuzzerAudio,
     pin_pulses: HashMap<String, f64>,
     segment_memory: HashMap<String, Vec<u8>>,
     seven_pending: HashMap<String, (Vec<u8>, Instant)>,
@@ -200,6 +202,7 @@ impl Default for Spike {
             outputs: HashMap::new(),
             rgb_leds: HashMap::new(),
             sensors: HashMap::new(),
+            buzzer: buzzer::BuzzerAudio::default(),
             pin_pulses: HashMap::new(),
             segment_memory: HashMap::new(),
             seven_pending: HashMap::new(),
@@ -597,6 +600,7 @@ impl eframe::App for Spike {
             self.auto_run = false;
             self.start_sim(&ctx);
         }
+        self.buzzer.update(&self.outputs);
         ensure_textures(&ctx, &mut self.textures, &self.parts, &self.outputs);
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
