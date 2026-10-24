@@ -955,9 +955,15 @@ impl eframe::App for Spike {
                         for def in parts() {
                             if ui.button(def.label).clicked() {
                                 let id = format!("{}-{}", def.kind.as_str(), self.next_id);
-                                if let Some(part) =
-                                    scene::part_from_kind(def.kind, Pos2::new(0.0, 0.0), id)
-                                {
+                                // Drop it where the view is looking, stepped a little
+                                // so two adds do not land on each other. The origin
+                                // used to put every new part on top of the Arduino.
+                                let step = 12.0 * (self.next_id % 5) as f32;
+                                let at = Pos2::new(
+                                    -self.camera.pan.x / self.camera.zoom + step,
+                                    -self.camera.pan.y / self.camera.zoom + step,
+                                );
+                                if let Some(part) = scene::part_from_kind(def.kind, at, id) {
                                     self.parts.push(part);
                                     self.next_id += 1;
                                 }
