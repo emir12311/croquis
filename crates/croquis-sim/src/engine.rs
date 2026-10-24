@@ -526,7 +526,49 @@ struct PulseTrainReq {
     durations: Vec<u64>,
 }
 
+/// A cheap handle for answering a sensor from the thread that sees its edge.
+///
+/// A DHT read gives up after about a millisecond, and the answer has to go out
+/// within it. That is far sooner than a frame, so the reply cannot be sent from
+/// the UI loop: it goes out from the thread that receives the pin change.
+#[derive(Clone)]
+pub struct PulseHandle {
+    pulses: Sender<PulseReq>,
+    pulse_trains: Sender<PulseTrainReq>,
+}
+
+impl PulseHandle {
+    /// Drive a pin with a timed pulse, in simulated microseconds.
+    pub fn pulse(&self, port: u8, pin: u8, delay_us: u64, width_us: u64) {
+        let _ = self.pulses.send(PulseReq {
+            port,
+            pin,
+            delay_us,
+            width_us,
+        });
+    }
+
+    /// Play a scripted edge train: the line goes low after `delay_us`, holds
+    /// each duration in turn, then ends high.
+    pub fn script(&self, port: u8, pin: u8, delay_us: u64, durations: Vec<u64>) {
+        let _ = self.pulse_trains.send(PulseTrainReq {
+            port,
+            pin,
+            delay_us,
+            durations,
+        });
+    }
+}
+
 impl Simulator {
+    /// A handle for answering sensors from the event thread.
+    pub fn pulse_handle(&self) -> PulseHandle {
+        PulseHandle {
+            pulses: self.pulses.clone(),
+            pulse_trains: self.pulse_trains.clone(),
+        }
+    }
+
     /// Load `elf` and start running it, calling `emit` for pin changes and serial.
     /// With `bounce`, a pressed switch chatters the way a real contact does; without
     /// it the level changes cleanly, the way firmware wishes switches behaved.
