@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use croquis_core::catalogue::parts;
 use croquis_core::netlist::{
@@ -185,7 +185,9 @@ struct Spike {
     /// The duty cycle measured on each PWM pin, 0 to 1.
     pin_duty: HashMap<String, f64>,
     segment_memory: HashMap<String, Vec<u8>>,
-    seven_pending: HashMap<String, (Vec<u8>, Instant)>,
+    /// When each single 7-segment display last changed, for the settle guard.
+    seven_changed_at: HashMap<String, Instant>,
+    /// The pattern each single display is showing.
     seven_stable: HashMap<String, Vec<u8>>,
     servo_angles: HashMap<String, f64>,
     sketch: String,
@@ -242,7 +244,7 @@ impl Default for Spike {
             pin_pulses: HashMap::new(),
             pin_duty: HashMap::new(),
             segment_memory: HashMap::new(),
-            seven_pending: HashMap::new(),
+            seven_changed_at: HashMap::new(),
             seven_stable: HashMap::new(),
             servo_angles: HashMap::new(),
             sketch,
@@ -418,7 +420,7 @@ impl Spike {
         self.forget_input();
         self.pin_pulses.clear();
         self.segment_memory.clear();
-        self.seven_pending.clear();
+        self.seven_changed_at.clear();
         self.seven_stable.clear();
         self.servo_angles.clear();
         self.serial.clear();
@@ -592,27 +594,21 @@ impl Spike {
                 };
                 let values = state.values.clone();
                 let now = Instant::now();
-                let stable = match self.seven_pending.get(&part.id) {
-                    Some((pending, at))
-                        if *pending == values && now.duration_since(*at).as_millis() >= 8 =>
-                    {
-                        self.seven_stable.insert(part.id.clone(), values.clone());
-                        true
-                    }
+                let shown = self.seven_stable.get(&part.id).cloned();
+                let since = self
+                    .seven_changed_at
+                    .get(&part.id)
+                    .map(|at| now.duration_since(*at));
+                let next = match &shown {
+                    Some(shown) if !segment_settled(shown, &values, since) => shown.clone(),
                     _ => {
-                        self.seven_pending
-                            .insert(part.id.clone(), (values.clone(), now));
-                        false
+                        self.seven_changed_at.insert(part.id.clone(), now);
+                        self.seven_stable.insert(part.id.clone(), values.clone());
+                        values
                     }
                 };
-                if stable {
-                    if let Some(out) = self.outputs.get_mut(&part.id) {
-                        out.values = values;
-                    }
-                } else if let Some(stable) = self.seven_stable.get(&part.id) {
-                    if let Some(out) = self.outputs.get_mut(&part.id) {
-                        out.values = stable.clone();
-                    }
+                if let Some(out) = self.outputs.get_mut(&part.id) {
+                    out.values = next;
                 }
             } else if part.kind == "servo" {
                 if let Some(state) = self.outputs.get(&part.id) {
@@ -741,7 +737,7 @@ impl Spike {
         self.pin_pulses.clear();
         self.pin_duty.clear();
         self.segment_memory.clear();
-        self.seven_pending.clear();
+        self.seven_changed_at.clear();
         self.seven_stable.clear();
         self.servo_angles.clear();
         let eval =
@@ -1692,6 +1688,27 @@ fn joystick_axes(part: &Part, world: Pos2) -> (u8, u8) {
     )
 }
 
+/// Whether a display should take a new pattern.
+///
+/// A sketch writes its seven segments one at a time, so one frame can catch a
+/// half-written digit. That is what the settle window is for, and it is short
+/// on purpose: a frame that arrives later than that is a real change, and a
+/// display that sits on an old pattern is worse than one that shows a digit a
+/// frame early. The old rule here held every pattern until it had been seen
+/// twice, which froze the display on whatever it happened to see first.
+fn segment_settled(shown: &[u8], values: &[u8], since_change: Option<Duration>) -> bool {
+    if shown == values {
+        return false;
+    }
+    match since_change {
+        Some(since) => since >= SEGMENT_SETTLE,
+        None => true,
+    }
+}
+
+/// How soon after one change a second one is treated as half a write.
+const SEGMENT_SETTLE: Duration = Duration::from_millis(8);
+
 /// Which parts the oracle marks as doing something: an energised relay, a
 /// tilted tilt switch, a PIR that sees motion.
 fn shows_active(
@@ -1939,6 +1956,28 @@ mod tests {
         let patched = scene::seven_segment_svg(&svg, &[1, 0, 0, 0, 0, 0, 0, 0], "red");
         assert_eq!(patched.matches("#dc012d").count(), 1);
         assert_eq!(patched.matches("#444").count(), 7);
+    }
+
+    #[test]
+    fn a_display_takes_a_new_pattern_unless_it_arrived_mid_write() {
+        let shown = [1u8, 0, 0, 0, 0, 0, 0, 0];
+        let values = [0u8, 1, 0, 0, 0, 0, 0, 0];
+        assert!(
+            !segment_settled(&shown, &shown, None),
+            "an unchanged pattern is not a change"
+        );
+        assert!(
+            segment_settled(&shown, &values, None),
+            "the first pattern is always taken"
+        );
+        assert!(
+            segment_settled(&shown, &values, Some(SEGMENT_SETTLE)),
+            "a change a settle window later is a real digit"
+        );
+        assert!(
+            !segment_settled(&shown, &values, Some(Duration::from_millis(2))),
+            "a change 2 ms after the last one is half a write"
+        );
     }
 
     #[test]
