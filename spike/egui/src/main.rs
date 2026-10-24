@@ -358,12 +358,12 @@ fn texture_key(
         return format!("{}-{:.1}", part.kind, angle);
     }
     if part.kind == "potentiometer" {
-        let value = attr_number(part, "value", 0.0);
-        return format!("pot:{:.0}", knobs::pot_angle(value));
+        // The tick turns live, so the art does not depend on the value: baking
+        // it per value cost ~40 ms a state, measured, on every step of a drag.
+        return "pot".into();
     }
     if part.kind == "slide-potentiometer" {
-        let value = attr_number(part, "value", 0.0);
-        return format!("slide:{value:.0}");
+        return "slide".into();
     }
     if part.kind == "seven-segment" || part.kind == "seven-segment-4" {
         // The lit segments are drawn live in draw_segments over the base art,
@@ -415,9 +415,9 @@ fn ensure_textures(
                     part.attrs.get("color").map(String::as_str).unwrap_or("red"),
                 )
             } else if part.kind == "potentiometer" {
-                scene::potentiometer_svg(&part.svg, attr_number(part, "value", 0.0))
+                scene::potentiometer_svg(&part.svg)
             } else if part.kind == "slide-potentiometer" {
-                scene::slide_pot_svg(&part.svg, attr_number(part, "value", 0.0))
+                scene::slide_pot_svg(&part.svg)
             } else if part.kind == "rgb-led" {
                 part.svg.clone()
             } else if part.kind == "analog-joystick" {
@@ -1406,6 +1406,12 @@ impl eframe::App for Spike {
                 if part.kind == "analog-joystick" {
                     draw_joystick_knob(&painter, rect, self.camera, part);
                 }
+                if part.kind == "potentiometer" {
+                    draw_pot_tick(&painter, rect, self.camera, part);
+                }
+                if part.kind == "slide-potentiometer" {
+                    draw_slide_tip(&painter, rect, self.camera, part);
+                }
                 if let Some((_, button)) = self.remote_hold.filter(|(held, _)| *held == index) {
                     if let Some(centre) = remote::button_centre(part, button) {
                         let at = self.camera.world_to_screen(rect, centre);
@@ -1829,6 +1835,83 @@ fn with_alpha(colour: Color32, alpha: f32) -> Color32 {
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// The potentiometer's tick, at the angle its value asks for.
+///
+/// This is the art's own `<rect id="rotating">`, drawn here so the texture can
+/// stay one image: the element turns it about (10, 8) with CSS, and resvg does
+/// not resolve the custom property that drives it.
+fn draw_pot_tick(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part) {
+    const VIEW_WIDTH: f32 = 20.0;
+    let bounds = part.bounds();
+    let screen = Rect::from_min_max(
+        camera.world_to_screen(rect, bounds.min),
+        camera.world_to_screen(rect, bounds.max),
+    );
+    let unit = screen.width() / VIEW_WIDTH;
+    let corners = knobs::pot_tick(attr_number(part, "value", 0.0));
+    painter.add(egui::Shape::convex_polygon(
+        corners
+            .iter()
+            .map(|corner| screen.min + Vec2::new(corner.0, corner.1) * unit)
+            .collect(),
+        Color32::from_rgb(0x1a, 0x1a, 0x1a),
+        Stroke::NONE,
+    ));
+}
+
+/// The slide pot's tip, at the position its value asks for.
+///
+/// Same reason as the tick: the handle is a gradient inside `<g id="tip">`, and
+/// baking it per value costs ~36 ms a state.
+fn draw_slide_tip(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part) {
+    const VIEW_WIDTH: f32 = 55.0;
+    let bounds = part.bounds();
+    let screen = Rect::from_min_max(
+        camera.world_to_screen(rect, bounds.min),
+        camera.world_to_screen(rect, bounds.max),
+    );
+    let unit = screen.width() / VIEW_WIDTH;
+    let offset = knobs::slide_tip_x(attr_number(part, "value", 0.0));
+    let at = |x: f32, y: f32| screen.min + Vec2::new(x + offset, y) * unit;
+    let quad = |left: f32, top: f32, right: f32, bottom: f32| {
+        Rect::from_min_max(at(left, top), at(right, bottom))
+    };
+
+    // The handle: dark at both edges, lighter through the middle — the element's
+    // `tipGradient`, which runs along x.
+    let dark = Color32::from_rgb(0x1a, 0x1a, 0x1a);
+    let light = Color32::from_rgb(0x59, 0x59, 0x59);
+    let left = at(16.5, 0.0).x;
+    let right = at(28.5, 0.0).x;
+    let top = at(16.5, 0.0).y;
+    let bottom = at(16.5, 19.0).y;
+    let mut mesh = egui::Mesh::default();
+    for (index, colour) in [dark, light, dark].into_iter().enumerate() {
+        let x = egui::lerp(left..=right, index as f32 / 2.0);
+        let first = (index * 2) as u32;
+        mesh.colored_vertex(egui::pos2(x, top), colour);
+        mesh.colored_vertex(egui::pos2(x, bottom), colour);
+        debug_assert_eq!(first, mesh.vertices.len() as u32 - 2);
+    }
+    mesh.add_triangle(0, 1, 3);
+    mesh.add_triangle(0, 3, 2);
+    mesh.add_triangle(2, 3, 5);
+    mesh.add_triangle(2, 5, 4);
+    painter.add(egui::Shape::mesh(mesh));
+
+    // The light strip down its right side, and the dark band across it.
+    painter.rect_filled(
+        quad(22.2, 0.0, 22.8, 19.0),
+        0.0,
+        Color32::from_rgb(0xef, 0xef, 0xef),
+    );
+    painter.rect_filled(
+        quad(19.75, 8.6, 25.25, 10.4),
+        0.0,
+        dark,
+    );
 }
 
 /// The joystick's ball, drawn where its axes say it is.
@@ -2353,29 +2436,22 @@ mod tests {
     }
 
     #[test]
-    fn the_potentiometers_draw_their_values() {
+    fn the_potentiometers_base_art_leaves_out_the_moving_part() {
+        // The tick and the tip are drawn live, at about 40 ms a state cheaper
+        // than rasterising them per value, so the base art must not carry them:
+        // one of each, and both costing nothing on a drag.
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi");
 
         let pot = std::fs::read_to_string(root.join("potentiometer.svg")).expect("pot asset");
-        let low = scene::potentiometer_svg(&pot, 0.0);
-        let high = scene::potentiometer_svg(&pot, 1023.0);
-        assert!(
-            low.contains("rotate(-135 10 8)"),
-            "the art's own tick at zero points down-left"
-        );
-        assert!(
-            high.contains("rotate(135 10 8)"),
-            "and at full, down-right"
-        );
-        assert_ne!(low, high);
+        let base = scene::potentiometer_svg(&pot);
+        assert!(!base.contains("id=\"rotating\""), "the tick is drawn live");
+        assert_ne!(base, pot, "and the art is otherwise untouched");
 
         let slide =
             std::fs::read_to_string(root.join("slide-potentiometer.svg")).expect("slide asset");
-        let low = scene::slide_pot_svg(&slide, 0.0);
-        let high = scene::slide_pot_svg(&slide, 100.0);
-        assert!(low.contains("translate(-15 0)"), "the tip starts at the low end");
-        assert!(high.contains("translate(15 0)"), "and ends at the high one");
-        assert_ne!(low, high);
+        let base = scene::slide_pot_svg(&slide);
+        assert!(!base.contains("id=\"tip\""), "the tip is drawn live");
+        assert_ne!(base, slide);
     }
 
     #[test]

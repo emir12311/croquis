@@ -12,6 +12,10 @@ use croquis_core::catalogue::{parse_kind, part_by_kind, FieldControl, PartField}
 
 use crate::scene::Part;
 
+/// What the strip is allowed to use. The panel it lives in is 220 wide; this
+/// leaves the margins and keeps every control inside it.
+const STRIP_WIDTH: f32 = 196.0;
+
 /// What an editor currently shows for a field.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EditorValue {
@@ -98,10 +102,12 @@ pub fn show(ui: &mut egui::Ui, part: &mut Part) -> bool {
         ui.weak("This part has nothing to set.");
         return false;
     }
-    // Every control is sized to the panel, and each one sits under its own
-    // label. A row of "label + slider" is wider than the strip, and a panel
-    // whose content overflows its width makes the canvas beside it shift.
-    ui.spacing_mut().slider_width = (ui.available_width() - 12.0).max(40.0);
+    // Fixed widths, not `available_width`: inside a scroll area that reads as
+    // far more than the strip has, so a slider was built wider than the panel
+    // and the panel grew to fit it — which narrowed the canvas beside it and
+    // shifted every part when a part was selected.
+    ui.set_max_width(STRIP_WIDTH);
+    ui.spacing_mut().slider_width = 110.0;
     let mut changed = false;
     for field in &fields {
         changed |= edit(ui, part, field);
@@ -143,7 +149,7 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
                 .range(min..=max)
                 .speed(speed)
                 .suffix(" Ω");
-            if ui.add_sized([ui.available_width(), 18.0], drag).changed() {
+            if ui.add_sized([140.0, 18.0], drag).changed() {
                 return field_commit(part, field, EditorValue::Number(number));
             }
             false
@@ -160,7 +166,7 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
             ui.label(field.label);
             let mut chosen = current.clone();
             ComboBox::from_id_salt(format!("field-{}-{}", part.id, field.name))
-                .width(ui.available_width() - 8.0)
+                .width(140.0)
                 .selected_text(label)
                 .show_ui(ui, |ui| {
                     for option in &options {
