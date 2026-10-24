@@ -35,6 +35,7 @@ mod lcd_font;
 mod knobs;
 mod properties;
 mod remote;
+mod sensors;
 mod stepper;
 mod scene;
 
@@ -169,6 +170,12 @@ struct Spike {
     outputs: HashMap<String, OutputState>,
     rgb_leds: HashMap<String, RgbState>,
     sensors: HashMap<String, SensorState>,
+    /// Each ultrasonic's trigger pin, and the echo to play back: echo port,
+    /// echo pin, delay in microseconds, width in microseconds.
+    echoes: HashMap<String, (u8, u8, u64, u64)>,
+    /// Each DHT's data pin, and the reading to answer with.
+    dht_sensors: HashMap<String, (f64, f64)>,
+    dht_busy: HashMap<String, Instant>,
     /// Which parts the pointer is holding down, by part id.
     pressed: HashMap<String, bool>,
     /// The key held on each keypad, and when its minimum hold ends.
@@ -249,6 +256,9 @@ impl Default for Spike {
             outputs: HashMap::new(),
             rgb_leds: HashMap::new(),
             sensors: HashMap::new(),
+            echoes: HashMap::new(),
+            dht_sensors: HashMap::new(),
+            dht_busy: HashMap::new(),
             pressed: HashMap::new(),
             keypad_keys: HashMap::new(),
             keypad_until: HashMap::new(),
@@ -463,6 +473,9 @@ impl Spike {
         self.outputs.clear();
         self.rgb_leds.clear();
         self.sensors.clear();
+        self.echoes.clear();
+        self.dht_sensors.clear();
+        self.dht_busy.clear();
         self.lcd_states.clear();
         self.forget_input();
         self.pin_pulses.clear();
@@ -566,6 +579,26 @@ impl Spike {
         self.outputs = eval.outputs;
         self.rgb_leds = eval.rgb_leds;
         self.sensors = eval.sensors;
+        self.echoes = eval
+            .echoes
+            .iter()
+            .map(|echo| {
+                (
+                    format!("{}{}", echo.trigger.0, echo.trigger.1),
+                    (
+                        echo.echo.0 as u8,
+                        echo.echo.1,
+                        u64::from(echo.delay_us),
+                        u64::from(echo.width_us),
+                    ),
+                )
+            })
+            .collect();
+        self.dht_sensors = eval
+            .dht_sensors
+            .values()
+            .map(|sensor| (sensor.pin.clone(), (sensor.humidity, sensor.temperature)))
+            .collect();
         self.lcd_wiring = eval.lcd_wiring;
         self.ir_receivers = eval.ir_receivers;
         self.stepper_wiring = eval.stepper_wiring;
@@ -961,6 +994,43 @@ impl Spike {
                     // a pulse puts every later byte half a nibble out of step.
                     if !high && previous == Some(true) {
                         self.latch_lcds(&key);
+                    }
+                    // An ultrasonic is asked by a trigger pulse, and answers on
+                    // its falling edge with an echo timed on the sketch's clock.
+                    if !high && previous == Some(true) {
+                        if let Some(&(echo_port, echo_pin, delay, width)) =
+                            self.echoes.get(&key)
+                        {
+                            if let Some(sim) = &self.sim {
+                                sim.pulse(echo_port, echo_pin, delay, width);
+                            }
+                        }
+                    }
+                    // A DHT is not triggered by a pulse but by the line being let
+                    // go: the sketch pulls it low, releases it, and waits. So the
+                    // answer goes out on the rising edge, and not again until the
+                    // sensor would have finished talking.
+                    if high {
+                        if let Some(&(humidity, temperature)) = self.dht_sensors.get(&key) {
+                            let ready = self
+                                .dht_busy
+                                .get(&key)
+                                .is_none_or(|until| *until <= Instant::now());
+                            if ready {
+                                self.dht_busy.insert(
+                                    key.clone(),
+                                    Instant::now() + Duration::from_millis(1000),
+                                );
+                                if let Some(sim) = &self.sim {
+                                    sim.pulse_script(
+                                        port as u8,
+                                        pin,
+                                        30,
+                                        sensors::dht_durations(humidity, temperature),
+                                    );
+                                }
+                            }
+                        }
                     }
                     // A stepper steps on its coil edges, and a sketch writes
                     // dozens of those between two repaints.
