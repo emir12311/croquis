@@ -13,6 +13,7 @@ use croquis_core::document::PinRef as CorePinRef;
 use croquis_core::netlist::{
     evaluate_circuit_with_state, CircuitEval, EvalPart, EvalWire, KeyPosition, LedState, PinPoint,
 };
+use croquis_core::shift_register::ShiftState;
 
 #[derive(Clone)]
 pub struct Pin {
@@ -258,6 +259,7 @@ pub fn evaluate_scene(
     pin_duty: &HashMap<String, f64>,
     pin_pulse: &HashMap<String, f64>,
     keypad_keys: &HashMap<String, Option<KeyPosition>>,
+    previous_shift: &HashMap<String, ShiftState>,
 ) -> CircuitEval {
     let eval_parts: Vec<EvalPart> = parts
         .iter()
@@ -309,7 +311,7 @@ pub fn evaluate_scene(
         pin_duty,
         pin_pulse,
         keypad_keys,
-        &HashMap::new(),
+        previous_shift,
     )
 }
 
@@ -324,6 +326,7 @@ pub fn evaluate_with(
         wires,
         &HashMap::new(),
         avr,
+        &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
