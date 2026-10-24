@@ -952,4 +952,15 @@ mod tests {
         assert_eq!(reloaded_sketch, sketch);
         let _ = std::fs::remove_file(path);
     }
+
+    #[test]
+    fn the_led_bar_patches_lit_and_off_segments() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/wokwi/led-bar-graph.svg");
+        let svg = std::fs::read_to_string(path).expect("led bar asset");
+        let values = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let patched = scene::led_bar_svg(&svg, &values, "red");
+        assert_eq!(patched.matches("#dc012d").count(), 1);
+        assert_eq!(patched.matches("#444").count(), 9);
+    }
 }
