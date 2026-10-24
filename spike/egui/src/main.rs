@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
+use std::time::Instant;
 
 use croquis_core::catalogue::parts;
 use croquis_core::netlist::{LedState, OutputState, RgbState};
@@ -154,6 +155,11 @@ struct Spike {
     led_states: HashMap<String, LedState>,
     outputs: HashMap<String, OutputState>,
     rgb_leds: HashMap<String, RgbState>,
+    pin_pulses: HashMap<String, f64>,
+    segment_memory: HashMap<String, Vec<u8>>,
+    seven_pending: HashMap<String, (Vec<u8>, Instant)>,
+    seven_stable: HashMap<String, Vec<u8>>,
+    servo_angles: HashMap<String, f64>,
     sketch: String,
     next_id: usize,
     sim: Option<engine::Simulator>,
@@ -182,6 +188,11 @@ impl Default for Spike {
             led_states: HashMap::new(),
             outputs: HashMap::new(),
             rgb_leds: HashMap::new(),
+            pin_pulses: HashMap::new(),
+            segment_memory: HashMap::new(),
+            seven_pending: HashMap::new(),
+            seven_stable: HashMap::new(),
+            servo_angles: HashMap::new(),
             sketch: scene::blink_sketch(),
             next_id: 0,
             sim: None,
@@ -217,18 +228,20 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
     None
 }
 
-
 fn texture_key(
     part: &Part,
     lit: bool,
     outputs: &HashMap<String, OutputState>,
-    rgb_leds: &HashMap<String, RgbState>,
+    _rgb_leds: &HashMap<String, RgbState>,
 ) -> String {
     if part.kind == "led" {
         return format!("led:{lit}");
     }
     if part.kind == "led-bar-graph" {
-        let values = outputs.get(&part.id).map(|out| out.values.as_slice()).unwrap_or(&[]);
+        let values = outputs
+            .get(&part.id)
+            .map(|out| out.values.as_slice())
+            .unwrap_or(&[]);
         let bits: String = values
             .iter()
             .map(|value| if *value != 0 { '1' } else { '0' })
@@ -237,13 +250,8 @@ fn texture_key(
         return format!("bar:{color}:{bits}");
     }
     if part.kind == "rgb-led" {
-        let value = rgb_leds.get(&part.id);
-        return format!(
-            "rgb:{:.2}:{:.2}:{:.2}",
-            value.map(|v| v.r).unwrap_or(0.0),
-            value.map(|v| v.g).unwrap_or(0.0),
-            value.map(|v| v.b).unwrap_or(0.0)
-        );
+        // RGB glows are drawn live in draw_part; the texture stays the base art.
+        return "rgb".into();
     }
     if part.kind == "servo" || part.kind == "stepper-motor" {
         let angle = outputs
@@ -253,7 +261,10 @@ fn texture_key(
         return format!("{}-{:.1}", part.kind, angle);
     }
     if part.kind == "seven-segment" || part.kind == "seven-segment-4" {
-        let values = outputs.get(&part.id).map(|out| out.values.as_slice()).unwrap_or(&[]);
+        let values = outputs
+            .get(&part.id)
+            .map(|out| out.values.as_slice())
+            .unwrap_or(&[]);
         let bits: String = values
             .iter()
             .map(|value| if *value != 0 { '1' } else { '0' })
@@ -298,13 +309,7 @@ fn ensure_textures(
                     part.attrs.get("color").map(String::as_str).unwrap_or("red"),
                 )
             } else if part.kind == "rgb-led" {
-                let value = rgb_leds.get(&part.id);
-                scene::rgb_svg(
-                    &part.svg,
-                    value.map(|v| v.r).unwrap_or(0.0),
-                    value.map(|v| v.g).unwrap_or(0.0),
-                    value.map(|v| v.b).unwrap_or(0.0),
-                )
+                part.svg.clone()
             } else if part.kind == "servo" || part.kind == "stepper-motor" {
                 let angle = outputs
                     .get(&part.id)
@@ -327,11 +332,8 @@ fn ensure_textures(
             let width = (part.size.x * 3.0).max(1.0) as u32;
             let height = (part.size.y * 3.0).max(1.0) as u32;
             if let Some(image) = art::rasterize(&svg, width, height) {
-                let texture = ctx.load_texture(
-                    format!("part-{key}"),
-                    image,
-                    egui::TextureOptions::LINEAR,
-                );
+                let texture =
+                    ctx.load_texture(format!("part-{key}"), image, egui::TextureOptions::LINEAR);
                 textures.insert(key, texture);
             }
         }
@@ -349,6 +351,11 @@ impl Spike {
         self.led_states.clear();
         self.outputs.clear();
         self.rgb_leds.clear();
+        self.pin_pulses.clear();
+        self.segment_memory.clear();
+        self.seven_pending.clear();
+        self.seven_stable.clear();
+        self.servo_angles.clear();
         self.serial.clear();
         self.run_error = None;
         self.file_error = None;
@@ -366,7 +373,13 @@ impl Spike {
         }
         // Rasterise the new scene before swapping it in. Otherwise the canvas
         // paints the blue fallback for a frame while textures load.
-        ensure_textures(ctx, &mut self.textures, &parts, &HashMap::new(), &HashMap::new());
+        ensure_textures(
+            ctx,
+            &mut self.textures,
+            &parts,
+            &HashMap::new(),
+            &HashMap::new(),
+        );
         self.parts = parts;
         self.wires = wires;
         self.sketch = sketch;
@@ -377,10 +390,12 @@ impl Spike {
         self.run_error = None;
         self.file_error = None;
         self.camera = Camera::default();
-        let eval = scene::evaluate_scene(&self.parts, &self.wires, &HashMap::new());
+        let eval =
+            scene::evaluate_scene(&self.parts, &self.wires, &HashMap::new(), &self.pin_pulses);
         self.led_states = eval.leds;
         self.outputs = eval.outputs;
         self.rgb_leds = eval.rgb_leds;
+        self.apply_output_memory();
     }
 
     fn open_dialog(&mut self, ctx: &egui::Context) {
@@ -420,6 +435,70 @@ impl Spike {
         }
     }
 
+    fn apply_output_memory(&mut self) {
+        for part in &self.parts {
+            if part.kind == "seven-segment-4" {
+                let memory = self
+                    .segment_memory
+                    .entry(part.id.clone())
+                    .or_insert_with(|| vec![0; 32]);
+                if let Some(state) = self.outputs.get(&part.id) {
+                    if state.active {
+                        if let Some(digit) = state.digit {
+                            let start = digit as usize * 8;
+                            if start + 8 <= memory.len() && state.values.len() >= 8 {
+                                memory[start..start + 8].copy_from_slice(&state.values[..8]);
+                            }
+                        }
+                    }
+                }
+                let values = memory.clone();
+                if let Some(out) = self.outputs.get_mut(&part.id) {
+                    out.values = values;
+                    out.active = out.values.iter().any(|value| *value != 0);
+                }
+            } else if part.kind == "seven-segment" {
+                let Some(state) = self.outputs.get(&part.id) else {
+                    continue;
+                };
+                let values = state.values.clone();
+                let now = Instant::now();
+                let stable = match self.seven_pending.get(&part.id) {
+                    Some((pending, at))
+                        if *pending == values && now.duration_since(*at).as_millis() >= 8 =>
+                    {
+                        self.seven_stable.insert(part.id.clone(), values.clone());
+                        true
+                    }
+                    _ => {
+                        self.seven_pending
+                            .insert(part.id.clone(), (values.clone(), now));
+                        false
+                    }
+                };
+                if stable {
+                    if let Some(out) = self.outputs.get_mut(&part.id) {
+                        out.values = values;
+                    }
+                } else if let Some(stable) = self.seven_stable.get(&part.id) {
+                    if let Some(out) = self.outputs.get_mut(&part.id) {
+                        out.values = stable.clone();
+                    }
+                }
+            } else if part.kind == "servo" {
+                if let Some(state) = self.outputs.get(&part.id) {
+                    if let Some(angle) = state.angle {
+                        self.servo_angles.insert(part.id.clone(), angle);
+                    } else if let Some(angle) = self.servo_angles.get(&part.id).copied() {
+                        if let Some(out) = self.outputs.get_mut(&part.id) {
+                            out.angle = Some(angle);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn start_sim(&mut self, ctx: &egui::Context) {
         self.run_error = None;
         self.serial.clear();
@@ -455,10 +534,17 @@ impl Spike {
         self.events = None;
         self.running = false;
         self.avr_pins.clear();
-        let eval = scene::evaluate_scene(&self.parts, &self.wires, &self.avr_pins);
+        self.pin_pulses.clear();
+        self.segment_memory.clear();
+        self.seven_pending.clear();
+        self.seven_stable.clear();
+        self.servo_angles.clear();
+        let eval =
+            scene::evaluate_scene(&self.parts, &self.wires, &self.avr_pins, &self.pin_pulses);
         self.led_states = eval.leds;
         self.outputs = eval.outputs;
         self.rgb_leds = eval.rgb_leds;
+        self.apply_output_memory();
     }
 
     fn poll_engine(&mut self) {
@@ -475,15 +561,28 @@ impl Spike {
                         self.serial.push(byte as char);
                         changed = true;
                     }
-                    SimEvent::Timing { .. } => {}
+                    SimEvent::Timing {
+                        port,
+                        pin,
+                        high_micros,
+                        ..
+                    } => {
+                        if high_micros > 0 {
+                            self.pin_pulses
+                                .insert(format!("{}{}", port as char, pin), high_micros as f64);
+                            changed = true;
+                        }
+                    }
                 }
             }
         }
         if changed {
-            let eval = scene::evaluate_scene(&self.parts, &self.wires, &self.avr_pins);
+            let eval =
+                scene::evaluate_scene(&self.parts, &self.wires, &self.avr_pins, &self.pin_pulses);
             self.led_states = eval.leds;
             self.outputs = eval.outputs;
             self.rgb_leds = eval.rgb_leds;
+            self.apply_output_memory();
         }
     }
 }
@@ -492,7 +591,13 @@ impl eframe::App for Spike {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         self.poll_engine();
-        ensure_textures(&ctx, &mut self.textures, &self.parts, &self.outputs, &self.rgb_leds);
+        ensure_textures(
+            &ctx,
+            &mut self.textures,
+            &self.parts,
+            &self.outputs,
+            &self.rgb_leds,
+        );
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.wire_start = None;
@@ -759,6 +864,7 @@ impl eframe::App for Spike {
                         &self.outputs,
                         &self.rgb_leds,
                     )),
+                    self.rgb_leds.get(&part.id).copied(),
                 );
             }
 
@@ -846,6 +952,7 @@ fn draw_part(
     selected: bool,
     hovered_pin: Option<PinRef>,
     texture: Option<&egui::TextureHandle>,
+    rgb: Option<RgbState>,
 ) {
     let min = camera.world_to_screen(rect, part.bounds().min);
     let max = camera.world_to_screen(rect, part.bounds().max);
@@ -859,6 +966,39 @@ fn draw_part(
         );
     } else {
         painter.rect_filled(screen, 4.0, part.color);
+    }
+    if let Some(rgb) = rgb {
+        let scale = screen.width() / 37.3425;
+        let at = |x: f32, y: f32| {
+            screen.min
+                + egui::vec2(
+                    (x + 17.0) / 37.3425 * screen.width(),
+                    (y + 10.0) / 57.5115 * screen.height(),
+                )
+        };
+        let max = rgb.r.max(rgb.g).max(rgb.b).clamp(0.0, 1.0);
+        let glow = 0.2 + max * 0.6;
+        let red = (rgb.r * 255.0).round().clamp(0.0, 255.0) as u8;
+        let green = (rgb.g * 255.0 + rgb.b * 90.0).round().clamp(0.0, 255.0) as u8;
+        let blue = (rgb.b * 255.0).round().clamp(0.0, 255.0) as u8;
+        painter.circle_filled(
+            at(1.7, 4.0),
+            10.0 * scale,
+            Color32::from_rgba_unmultiplied(red, green, blue, (glow * 255.0) as u8),
+        );
+        for (x, y, r, g, b, channel) in [
+            (1.7, 3.0, 255u8, 0u8, 0u8, rgb.r),
+            (2.7, 5.0, 0, 255, 0, rgb.g),
+            (0.7, 5.0, 1, 85, 253, rgb.b),
+        ] {
+            let alpha = (channel * 20.0).min(0.3) * 255.0;
+            let radius = (channel as f32 * 5.0 + 2.0) * scale;
+            painter.circle_filled(
+                at(x, y),
+                radius,
+                Color32::from_rgba_unmultiplied(r, g, b, alpha as u8),
+            );
+        }
     }
     let border = if selected {
         Color32::from_rgb(217, 164, 65)
@@ -1016,8 +1156,8 @@ mod tests {
 
     #[test]
     fn the_led_bar_patches_lit_and_off_segments() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../assets/wokwi/led-bar-graph.svg");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi/led-bar-graph.svg");
         let svg = std::fs::read_to_string(path).expect("led bar asset");
         let values = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let patched = scene::led_bar_svg(&svg, &values, "red");
@@ -1027,11 +1167,84 @@ mod tests {
 
     #[test]
     fn seven_segment_patches_lit_segments() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../assets/wokwi/seven-segment.svg");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi/seven-segment.svg");
         let svg = std::fs::read_to_string(path).expect("7-segment asset");
         let patched = scene::seven_segment_svg(&svg, &[1, 0, 0, 0, 0, 0, 0, 0], "red");
         assert_eq!(patched.matches("#dc012d").count(), 1);
         assert_eq!(patched.matches("#444").count(), 7);
+    }
+
+    #[test]
+    fn multiplexed_display_memory_keeps_all_digits() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/four-digit.json");
+        let (parts, _, _) = scene::load_diagram_file(&path);
+        let display = parts
+            .iter()
+            .find(|part| part.kind == "seven-segment-4")
+            .expect("four-digit part")
+            .id
+            .clone();
+        let mut spike = Spike::default();
+        spike.parts = parts;
+        spike.outputs.insert(
+            display.clone(),
+            OutputState {
+                active: true,
+                digit: Some(0),
+                values: vec![1, 0, 0, 0, 0, 0, 0, 0],
+                ..Default::default()
+            },
+        );
+        spike.apply_output_memory();
+        spike.outputs.insert(
+            display.clone(),
+            OutputState {
+                active: true,
+                digit: Some(1),
+                values: vec![0, 1, 0, 0, 0, 0, 0, 0],
+                ..Default::default()
+            },
+        );
+        spike.apply_output_memory();
+        let values = &spike.outputs[&display].values;
+        assert_eq!(values.len(), 32);
+        assert_eq!(values[0], 1, "values={values:?}");
+        assert_eq!(values[9], 1, "values={values:?}");
+    }
+
+    #[test]
+    fn a_servo_holds_its_last_angle_without_a_pulse() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/servo.json");
+        let (parts, _, _) = scene::load_diagram_file(&path);
+        let servo = parts
+            .iter()
+            .find(|part| part.kind == "servo")
+            .expect("servo part")
+            .id
+            .clone();
+        let mut spike = Spike::default();
+        spike.parts = parts;
+        spike.outputs.insert(
+            servo.clone(),
+            OutputState {
+                active: true,
+                values: vec![],
+                angle: Some(90.0),
+                ..Default::default()
+            },
+        );
+        spike.apply_output_memory();
+        spike.outputs.insert(
+            servo.clone(),
+            OutputState {
+                active: false,
+                values: vec![],
+                angle: None,
+                ..Default::default()
+            },
+        );
+        spike.apply_output_memory();
+        assert_eq!(spike.outputs[&servo].angle, Some(90.0));
     }
 }
