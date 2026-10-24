@@ -31,18 +31,89 @@ use scene::{Part, PinRef, Wire};
 const GRID: f32 = 24.0;
 const PIN_HIT_RADIUS: f32 = 9.0;
 
+fn configure_style(ctx: &egui::Context) {
+    use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
+
+    let bg = Color32::from_rgb(0x1a, 0x1a, 0x1c);
+    let surface = Color32::from_rgb(0x21, 0x21, 0x24);
+    let raised = Color32::from_rgb(0x2a, 0x2a, 0x2e);
+    let border = Color32::from_rgb(0x35, 0x35, 0x3a);
+    let text = Color32::from_rgb(0xe6, 0xe4, 0xe0);
+    let muted = Color32::from_rgb(0xa6, 0xa4, 0xa0);
+    let accent = Color32::from_rgb(0xd9, 0xa4, 0x41);
+
+    let mut visuals = egui::Visuals::dark();
+    visuals.panel_fill = bg;
+    visuals.window_fill = surface;
+    visuals.extreme_bg_color = Color32::from_rgb(0x16, 0x16, 0x18);
+    visuals.faint_bg_color = surface;
+    visuals.window_stroke = Stroke::new(1.0, border);
+    visuals.window_corner_radius = CornerRadius::same(4);
+    visuals.menu_corner_radius = CornerRadius::same(4);
+    visuals.override_text_color = Some(text);
+    visuals.selection.bg_fill = accent;
+    visuals.selection.stroke = Stroke::new(1.0, accent);
+    visuals.hyperlink_color = accent;
+
+    visuals.widgets.noninteractive.bg_fill = surface;
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, border);
+    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, muted);
+    visuals.widgets.noninteractive.corner_radius = CornerRadius::same(2);
+    visuals.widgets.inactive.bg_fill = raised;
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, border);
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, text);
+    visuals.widgets.inactive.corner_radius = CornerRadius::same(2);
+    visuals.widgets.hovered.bg_fill = Color32::from_rgb(0x35, 0x33, 0x2e);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, accent);
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, text);
+    visuals.widgets.hovered.corner_radius = CornerRadius::same(2);
+    visuals.widgets.active.bg_fill = accent;
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0, accent);
+    visuals.widgets.active.fg_stroke = Stroke::new(1.0, bg);
+    visuals.widgets.active.corner_radius = CornerRadius::same(2);
+
+    let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
+    style.visuals = visuals;
+    style.spacing.item_spacing = Vec2::new(8.0, 6.0);
+    style.spacing.button_padding = Vec2::new(10.0, 4.0);
+    style
+        .text_styles
+        .insert(TextStyle::Body, FontId::new(13.0, FontFamily::Proportional));
+    style.text_styles.insert(
+        TextStyle::Button,
+        FontId::new(13.0, FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        TextStyle::Small,
+        FontId::new(11.0, FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        TextStyle::Heading,
+        FontId::new(15.0, FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        TextStyle::Monospace,
+        FontId::new(12.5, FontFamily::Monospace),
+    );
+    ctx.set_theme(egui::ThemePreference::Dark);
+    ctx.set_style_of(egui::Theme::Dark, style);
+}
+
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
             .with_min_inner_size([800.0, 500.0])
-            .with_title("Croquis — egui spike A"),
+            .with_title("Croquis"),
         ..Default::default()
     };
     eframe::run_native(
         "croquis-egui-spike",
         options,
-        Box::new(|_cc| Ok(Box::new(Spike::default()))),
+        Box::new(|cc| {
+            configure_style(&cc.egui_ctx);
+            Ok(Box::new(Spike::default()))
+        }),
     )
 }
 
@@ -137,6 +208,20 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
 }
 
 impl Spike {
+    fn new_document(&mut self) {
+        self.stop_sim();
+        self.parts.clear();
+        self.wires.clear();
+        self.sketch.clear();
+        self.selected = None;
+        self.wire_start = None;
+        self.led_states.clear();
+        self.serial.clear();
+        self.run_error = None;
+        self.textures.clear();
+        self.camera = Camera::default();
+    }
+
     fn start_sim(&mut self, ctx: &egui::Context) {
         self.run_error = None;
         self.serial.clear();
@@ -238,22 +323,53 @@ impl eframe::App for Spike {
             self.wire_start = None;
         }
 
-        egui::Panel::top("run-bar").show(root, |ui| {
-            ui.horizontal(|ui| {
-                if self.running {
-                    if ui.button("Stop").clicked() {
-                        self.stop_sim();
-                    }
-                } else if ui.button("Run").clicked() {
-                    self.start_sim(&ctx);
-                }
-                ui.label(if self.running { "Running" } else { "Stopped" });
-                if let Some(error) = &self.run_error {
-                    ui.colored_label(Color32::from_rgb(230, 120, 100), "Compile/run failed");
-                    ui.label(error.lines().next().unwrap_or(""));
-                }
+        egui::Panel::top("topbar")
+            .exact_size(38.0)
+            .show(root, |ui| {
+                ui.horizontal(|ui| {
+                    ui.menu_button("File", |ui| {
+                        if ui.button("New").clicked() {
+                            self.new_document();
+                        }
+                        if ui.button("Quit").clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
+                    ui.menu_button("Edit", |ui| {
+                        if ui.button("Clear sketch").clicked() {
+                            self.sketch.clear();
+                        }
+                    });
+                    ui.menu_button("View", |ui| {
+                        if ui.button("Reset view").clicked() {
+                            self.camera = Camera::default();
+                        }
+                        if ui.button("Clear wires").clicked() {
+                            self.wires.clear();
+                            self.wire_start = None;
+                        }
+                    });
+                    ui.menu_button("Run", |ui| {
+                        if self.running {
+                            if ui.button("Stop").clicked() {
+                                self.stop_sim();
+                            }
+                        } else if ui.button("Run").clicked() {
+                            self.start_sim(&ctx);
+                        }
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(if self.running { "Running" } else { "Stopped" });
+                        if let Some(error) = &self.run_error {
+                            ui.colored_label(
+                                Color32::from_rgb(0xe5, 0x48, 0x4d),
+                                "Compile/run failed",
+                            );
+                            ui.label(error.lines().next().unwrap_or(""));
+                        }
+                    });
+                });
             });
-        });
 
         egui::Panel::bottom("serial")
             .resizable(true)
