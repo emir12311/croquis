@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use croquis_core::catalogue::parts;
 use croquis_core::netlist::{
     AnalogReading, CircuitEval, Drive, IrReceiver, KeyPosition, LcdWiring, LedState, OutputState,
-    RgbState, SensorState,
+    RgbState, SensorState, StepperWiring,
 };
 use croquis_core::route::{expand_path, Point as CorePoint};
 use croquis_sim::engine::{self, SimEvent};
@@ -34,6 +34,7 @@ mod lcd;
 mod lcd_font;
 mod properties;
 mod remote;
+mod stepper;
 mod scene;
 
 use scene::{Part, PinRef, Wire};
@@ -189,6 +190,10 @@ struct Spike {
     /// Where the IR receivers listen, and which remote button is being held.
     ir_receivers: HashMap<String, IrReceiver>,
     remote_hold: Option<(usize, &'static str)>,
+    /// The steppers' coil wiring, the phase each is in, and how far it has turned.
+    stepper_wiring: HashMap<String, StepperWiring>,
+    stepper_phases: HashMap<String, usize>,
+    stepper_angles: HashMap<String, f64>,
     buzzer: buzzer::BuzzerAudio,
     pin_pulses: HashMap<String, f64>,
     /// The duty cycle measured on each PWM pin, 0 to 1.
@@ -252,6 +257,9 @@ impl Default for Spike {
             reevaluate: false,
             ir_receivers: HashMap::new(),
             remote_hold: None,
+            stepper_wiring: HashMap::new(),
+            stepper_phases: HashMap::new(),
+            stepper_angles: HashMap::new(),
             buzzer: buzzer::BuzzerAudio::default(),
             pin_pulses: HashMap::new(),
             pin_duty: HashMap::new(),
@@ -395,12 +403,18 @@ fn ensure_textures(
                 part.svg.clone()
             } else if part.kind == "analog-joystick" {
                 scene::joystick_svg(&part.svg)
-            } else if part.kind == "servo" || part.kind == "stepper-motor" {
+            } else if part.kind == "servo" {
                 let angle = outputs
                     .get(&part.id)
                     .and_then(|out| out.angle)
                     .unwrap_or(0.0);
                 scene::servo_svg(&part.svg, angle)
+            } else if part.kind == "stepper-motor" {
+                let angle = outputs
+                    .get(&part.id)
+                    .and_then(|out| out.angle)
+                    .unwrap_or(0.0);
+                scene::stepper_svg(&part.svg, angle)
             } else if part.kind == "seven-segment" || part.kind == "seven-segment-4" {
                 part.svg.clone()
             } else {
@@ -436,6 +450,8 @@ impl Spike {
         self.segment_memory.clear();
         self.seven_changed_at.clear();
         self.seven_stable.clear();
+        self.stepper_phases.clear();
+        self.stepper_angles.clear();
         self.servo_angles.clear();
         self.serial.clear();
         self.run_error = None;
@@ -533,7 +549,9 @@ impl Spike {
         self.sensors = eval.sensors;
         self.lcd_wiring = eval.lcd_wiring;
         self.ir_receivers = eval.ir_receivers;
+        self.stepper_wiring = eval.stepper_wiring;
         self.apply_output_memory();
+        self.apply_stepper_angles();
     }
 
     /// One enable pulse ended: hand the four data lines to every LCD that uses
@@ -555,6 +573,52 @@ impl Spike {
             let rs = level(&self.avr_pins, &wiring.pins.rs);
             let state = self.lcd_states.entry(id.clone()).or_default();
             lcd::latch(state, rs, data);
+        }
+    }
+
+    /// Turn each stepper by the step its coils just moved to.
+    ///
+    /// The core reports the wiring and the step angle and leaves the shaft
+    /// alone, so the angle is remembered here — one step of `360 / steps` per
+    /// phase change, the way the driver would turn it.
+    fn advance_steppers(&mut self) {
+        for (id, wiring) in &self.stepper_wiring {
+            if wiring.pins.len() < 4 {
+                continue;
+            }
+            let levels = [
+                self.avr_pins.get(&wiring.pins[0]).copied().unwrap_or(false),
+                self.avr_pins.get(&wiring.pins[1]).copied().unwrap_or(false),
+                self.avr_pins.get(&wiring.pins[2]).copied().unwrap_or(false),
+                self.avr_pins.get(&wiring.pins[3]).copied().unwrap_or(false),
+            ];
+            let Some(phase) = stepper::phase_of(levels) else {
+                continue;
+            };
+            match self.stepper_phases.get(id).copied() {
+                None => {
+                    self.stepper_phases.insert(id.clone(), phase);
+                }
+                Some(previous) if previous == phase => {}
+                Some(previous) => {
+                    let step = stepper::step_degrees(previous, phase, wiring.step_angle);
+                    let angle = self.stepper_angles.get(id).copied().unwrap_or(0.0) + step;
+                    self.stepper_angles.insert(id.clone(), angle);
+                    self.stepper_phases.insert(id.clone(), phase);
+                }
+            }
+        }
+    }
+
+    /// Put each stepper's remembered angle on its part, which is what the art
+    /// is drawn from.
+    fn apply_stepper_angles(&mut self) {
+        for (id, angle) in &self.stepper_angles {
+            if !self.stepper_wiring.contains_key(id) {
+                continue;
+            }
+            let out = self.outputs.entry(id.clone()).or_default();
+            out.angle = Some(*angle);
         }
     }
 
@@ -782,6 +846,8 @@ impl Spike {
         self.segment_memory.clear();
         self.seven_changed_at.clear();
         self.seven_stable.clear();
+        self.stepper_phases.clear();
+        self.stepper_angles.clear();
         self.servo_angles.clear();
         let eval =
             scene::evaluate_scene(
@@ -819,6 +885,15 @@ impl Spike {
                     // a pulse puts every later byte half a nibble out of step.
                     if !high && previous == Some(true) {
                         self.latch_lcds(&key);
+                    }
+                    // A stepper steps on its coil edges, and a sketch writes
+                    // dozens of those between two repaints.
+                    if self
+                        .stepper_wiring
+                        .values()
+                        .any(|wiring| wiring.pins.iter().any(|pin| pin == &key))
+                    {
+                        self.advance_steppers();
                     }
                 }
                 SimEvent::Serial(byte) => {

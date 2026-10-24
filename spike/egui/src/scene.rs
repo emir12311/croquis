@@ -531,6 +531,36 @@ pub fn servo_svg(svg: &str, angle: f64) -> String {
     svg.replacen("rotate(0)", &format!("rotate({angle})"), 1)
 }
 
+/// Rotate the stepper's shaft and rotor arrow to an angle.
+///
+/// The element draws both, in its own two forms: the arrow is
+/// `rotate(0, 28.65,28.65)` about the centre, the shaft is
+/// `translate(28.65, 28.65) rotate(0)`. `servo_svg` cannot be used here — its
+/// `rotate(0)` replacement lands inside the first of those and leaves
+/// `rotate(<angle>), 28.65,28.65)`, which is not a transform at all.
+pub fn stepper_svg(svg: &str, angle: f64) -> String {
+    svg.replacen(
+        "rotate(0, 28.65,28.65)",
+        &format!("rotate({}, 28.65,28.65)", tidy(angle)),
+        1,
+    )
+    .replacen(
+        "rotate(0)",
+        &format!("rotate({})", tidy(angle)),
+        1,
+    )
+}
+
+/// An angle as SVG wants it: short, and never `-0`.
+fn tidy(value: f64) -> String {
+    let rounded = (value * 10.0).round() / 10.0;
+    if rounded == 0.0 {
+        "0".into()
+    } else {
+        format!("{rounded}")
+    }
+}
+
 /// Apply the 7-segment element's segment/DP fills.
 pub fn seven_segment_svg(svg: &str, values: &[u8], color: &str) -> String {
     let lit = match color {
