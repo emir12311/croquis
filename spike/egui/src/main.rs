@@ -779,15 +779,32 @@ impl Spike {
                 }
             }
             "analog-joystick" => {
-                self.joystick = Some(index);
-                self.joystick_moved = false;
-                self.joystick_start = Some(screen);
-                self.pressed.insert(id, true);
+                if knobs::on_stick(&self.parts[index], world) {
+                    self.joystick = Some(index);
+                    self.joystick_moved = false;
+                    self.joystick_start = Some(screen);
+                    self.pressed.insert(id, true);
+                } else {
+                    // The stick is the thing that moves; the body is a part.
+                    self.dragging = Some(index);
+                }
             }
             // A knob is grabbed where it is and follows the pointer.
-            "potentiometer" | "slide-potentiometer" => {
-                self.knob = Some(index);
-                self.drag_knob(index, world);
+            "potentiometer" => {
+                if knobs::on_pot_knob(&self.parts[index], world) {
+                    self.knob = Some(index);
+                    self.drag_knob(index, world);
+                } else {
+                    self.dragging = Some(index);
+                }
+            }
+            "slide-potentiometer" => {
+                if knobs::on_slide_handle(&self.parts[index], world) {
+                    self.knob = Some(index);
+                    self.drag_knob(index, world);
+                } else {
+                    self.dragging = Some(index);
+                }
             }
             // The remote is a transmitter, not a switch: pressing a button sends
             // one NEC frame to every receiver in the circuit.
@@ -1337,6 +1354,17 @@ impl eframe::App for Spike {
                 }
             }
 
+            // A grab can change a part's art (a knob, a slider). Refresh the
+            // textures once more after the input, so the frame that draws it
+            // does not fall back to a plain rectangle for one frame.
+            ensure_textures(
+                &ctx,
+                &mut self.textures,
+                &self.parts,
+                &self.led_states,
+                &self.outputs,
+                &self.led_brightness,
+            );
             for (index, part) in self.parts.iter().enumerate() {
                 draw_part(
                     &painter,
@@ -1370,6 +1398,9 @@ impl eframe::App for Spike {
                 }
                 if part.kind == "analog-joystick" {
                     draw_joystick_knob(&painter, rect, self.camera, part);
+                }
+                if part.kind == "potentiometer" {
+                    draw_pot_pointer(&painter, rect, self.camera, part);
                 }
                 if let Some((_, button)) = self.remote_hold.filter(|(held, _)| *held == index) {
                     if let Some(centre) = remote::button_centre(part, button) {
@@ -1794,6 +1825,32 @@ fn with_alpha(colour: Color32, alpha: f32) -> Color32 {
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// A pointer on the potentiometer's knob.
+///
+/// The element rotates the knob itself, but its knob is a nearly circular
+/// ellipse (rx 7.27, ry 7.43) with no notch in the artwork, so turning it is
+/// almost invisible. This draws the notch the eye needs: a short line from the
+/// centre at the angle the value asks for.
+fn draw_pot_pointer(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part) {
+    const VIEW_WIDTH: f32 = 20.0;
+    const CENTRE: Vec2 = Vec2::new(9.91, 8.18);
+    let bounds = part.bounds();
+    let screen = Rect::from_min_max(
+        camera.world_to_screen(rect, bounds.min),
+        camera.world_to_screen(rect, bounds.max),
+    );
+    let unit = screen.width() / VIEW_WIDTH;
+    let centre = screen.min + CENTRE * unit;
+    let degrees = knobs::pot_angle(attr_number(part, "value", 0.0)) as f32;
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    // The element measures from twelve o'clock, clockwise.
+    let direction = Vec2::new(sin, -cos);
+    painter.line_segment(
+        [centre + direction * 2.0 * unit, centre + direction * 6.0 * unit],
+        Stroke::new(1.2 * unit, Color32::from_rgb(0x1a, 0x3a, 0x4a)),
+    );
 }
 
 /// The joystick's ball, drawn where its axes say it is.
