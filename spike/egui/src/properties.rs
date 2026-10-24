@@ -98,12 +98,13 @@ pub fn show(ui: &mut egui::Ui, part: &mut Part) -> bool {
         ui.weak("This part has nothing to set.");
         return false;
     }
+    // Every control is sized to the panel, and each one sits under its own
+    // label. A row of "label + slider" is wider than the strip, and a panel
+    // whose content overflows its width makes the canvas beside it shift.
+    ui.spacing_mut().slider_width = (ui.available_width() - 12.0).max(40.0);
     let mut changed = false;
     for field in &fields {
-        ui.horizontal(|ui| {
-            ui.label(field.label);
-            changed |= edit(ui, part, field);
-        });
+        changed |= edit(ui, part, field);
     }
     changed
 }
@@ -112,7 +113,7 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
     match field.control.clone() {
         FieldControl::Toggle => {
             let mut on = field_editor(part, field) == EditorValue::Toggle(true);
-            if ui.checkbox(&mut on, "").changed() {
+            if ui.checkbox(&mut on, field.label).changed() {
                 return field_commit(part, field, EditorValue::Toggle(on));
             }
             false
@@ -121,6 +122,7 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
             let EditorValue::Number(mut number) = field_editor(part, field) else {
                 return false;
             };
+            ui.label(field.label);
             let slider = Slider::new(&mut number, min..=max)
                 .step_by(step.max(f64::EPSILON))
                 .max_decimals(0);
@@ -133,6 +135,7 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
             let EditorValue::Number(mut number) = field_editor(part, field) else {
                 return false;
             };
+            ui.label(field.label);
             // A resistance spans twelve decades, so a slider is useless: type it,
             // and let the drag speed grow with the value.
             let speed = number.max(1.0) / 50.0;
@@ -140,7 +143,7 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
                 .range(min..=max)
                 .speed(speed)
                 .suffix(" Ω");
-            if ui.add(drag).changed() {
+            if ui.add_sized([ui.available_width(), 18.0], drag).changed() {
                 return field_commit(part, field, EditorValue::Number(number));
             }
             false
@@ -154,8 +157,10 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
                 .find(|option| option.value == current)
                 .map(|option| option.label.clone())
                 .unwrap_or_else(|| current.clone());
+            ui.label(field.label);
             let mut chosen = current.clone();
             ComboBox::from_id_salt(format!("field-{}-{}", part.id, field.name))
+                .width(ui.available_width() - 8.0)
                 .selected_text(label)
                 .show_ui(ui, |ui| {
                     for option in &options {
