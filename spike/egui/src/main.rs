@@ -317,15 +317,7 @@ fn ensure_textures(
                     .unwrap_or(0.0);
                 scene::servo_svg(&part.svg, angle)
             } else if part.kind == "seven-segment" || part.kind == "seven-segment-4" {
-                let values = outputs
-                    .get(&part.id)
-                    .map(|out| out.values.as_slice())
-                    .unwrap_or(&[]);
-                scene::seven_segment_svg(
-                    &part.svg,
-                    values,
-                    part.attrs.get("color").map(String::as_str).unwrap_or("red"),
-                )
+                part.svg.clone()
             } else {
                 part.svg.clone()
             };
@@ -865,6 +857,7 @@ impl eframe::App for Spike {
                         &self.rgb_leds,
                     )),
                     self.rgb_leds.get(&part.id).copied(),
+                    self.outputs.get(&part.id).map(|out| out.values.as_slice()),
                 );
             }
 
@@ -944,6 +937,118 @@ fn draw_grid(painter: &egui::Painter, rect: Rect, camera: Camera) {
     }
 }
 
+fn segment_color(color: &str) -> Color32 {
+    match color {
+        "green" => Color32::from_rgb(0x9e, 0xff, 0x3c),
+        "blue" => Color32::from_rgb(0x2c, 0x95, 0xfa),
+        "cyan" => Color32::from_rgb(0x6c, 0xf9, 0xdc),
+        "yellow" => Color32::from_rgb(0xf1, 0xd7, 0x3c),
+        "white" => Color32::WHITE,
+        _ => Color32::from_rgb(0xdc, 0x01, 0x2d),
+    }
+}
+
+fn draw_segments(painter: &egui::Painter, screen: Rect, part: &Part, values: &[u8]) {
+    const DIGITS: [[(f32, f32); 6]; 7] = [
+        [
+            (2.0, 0.0),
+            (8.0, 0.0),
+            (9.0, 1.0),
+            (8.0, 2.0),
+            (2.0, 2.0),
+            (1.0, 1.0),
+        ],
+        [
+            (10.0, 2.0),
+            (10.0, 8.0),
+            (9.0, 9.0),
+            (8.0, 8.0),
+            (8.0, 2.0),
+            (9.0, 1.0),
+        ],
+        [
+            (10.0, 10.0),
+            (10.0, 16.0),
+            (9.0, 17.0),
+            (8.0, 16.0),
+            (8.0, 10.0),
+            (9.0, 9.0),
+        ],
+        [
+            (8.0, 18.0),
+            (2.0, 18.0),
+            (1.0, 17.0),
+            (2.0, 16.0),
+            (8.0, 16.0),
+            (9.0, 17.0),
+        ],
+        [
+            (0.0, 16.0),
+            (0.0, 10.0),
+            (1.0, 9.0),
+            (2.0, 10.0),
+            (2.0, 16.0),
+            (1.0, 17.0),
+        ],
+        [
+            (0.0, 8.0),
+            (0.0, 2.0),
+            (1.0, 1.0),
+            (2.0, 2.0),
+            (2.0, 8.0),
+            (1.0, 9.0),
+        ],
+        [
+            (2.0, 8.0),
+            (8.0, 8.0),
+            (9.0, 9.0),
+            (8.0, 10.0),
+            (2.0, 10.0),
+            (1.0, 9.0),
+        ],
+    ];
+    let four = part.kind == "seven-segment-4";
+    let view_width = if four { 50.2 } else { 12.55 };
+    let scale_x = screen.width() / view_width;
+    let scale_y = screen.height() / 22.0;
+    let tan = (-8.0f32).to_radians().tan();
+    let color = segment_color(part.attrs.get("color").map(String::as_str).unwrap_or("red"));
+    let digits = if four { 4 } else { 1 };
+    for digit in 0..digits {
+        let base = digit * 8;
+        let Some(bits) = values.get(base..base + 8) else {
+            break;
+        };
+        let tx = 3.5 + digit as f32 * 12.7;
+        let point = |x: f32, y: f32| {
+            let sx = x * 0.81 + tx;
+            let sy = y * 0.81 + 2.4;
+            egui::pos2(
+                screen.left() + (sx + sy * tan) * scale_x,
+                screen.top() + sy * scale_y,
+            )
+        };
+        for (index, shape) in DIGITS.iter().enumerate() {
+            if bits.get(index).copied().unwrap_or(0) == 0 {
+                continue;
+            }
+            let points = shape.iter().map(|(x, y)| point(*x, *y)).collect();
+            painter.add(egui::Shape::convex_polygon(
+                points,
+                color,
+                egui::Stroke::NONE,
+            ));
+        }
+        if bits.get(7).copied().unwrap_or(0) != 0 {
+            let center = egui::pos2(
+                screen.left() + (tx + 7.4) * scale_x,
+                screen.top() + 16.0 * scale_y,
+            );
+            painter.circle_filled(center, 0.89 * scale_x.min(scale_y), color);
+        }
+    }
+}
+
 fn draw_part(
     painter: &egui::Painter,
     rect: Rect,
@@ -953,6 +1058,7 @@ fn draw_part(
     hovered_pin: Option<PinRef>,
     texture: Option<&egui::TextureHandle>,
     rgb: Option<RgbState>,
+    segments: Option<&[u8]>,
 ) {
     let min = camera.world_to_screen(rect, part.bounds().min);
     let max = camera.world_to_screen(rect, part.bounds().max);
@@ -999,6 +1105,9 @@ fn draw_part(
                 Color32::from_rgba_unmultiplied(r, g, b, alpha as u8),
             );
         }
+    }
+    if let Some(values) = segments {
+        draw_segments(painter, screen, part, values);
     }
     let border = if selected {
         Color32::from_rgb(217, 164, 65)
