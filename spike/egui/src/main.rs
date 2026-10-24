@@ -1873,8 +1873,9 @@ fn draw_slide_tip(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Pa
         camera.world_to_screen(rect, bounds.max),
     );
     let unit = screen.width() / VIEW_WIDTH;
-    let offset = knobs::slide_tip_x(attr_number(part, "value", 0.0));
-    let at = |x: f32, y: f32| screen.min + Vec2::new(x + offset, y) * unit;
+    let (origin_x, origin_y) = knobs::slide_tip_origin(attr_number(part, "value", 0.0));
+    let at =
+        |x: f32, y: f32| screen.min + Vec2::new(origin_x + x, origin_y + y) * unit;
     let quad = |left: f32, top: f32, right: f32, bottom: f32| {
         Rect::from_min_max(at(left, top), at(right, bottom))
     };
