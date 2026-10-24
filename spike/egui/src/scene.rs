@@ -159,6 +159,12 @@ pub fn load_blink() -> (Vec<Part>, Vec<Wire>) {
 
 /// Evaluate the Blink preset with the AVR's pin 13 high.
 pub fn evaluate_blink() -> HashMap<String, LedState> {
+    let avr = HashMap::from([("B5".into(), true)]);
+    evaluate_blink_with(&avr)
+}
+
+/// Evaluate Blink from the simulator's current AVR pin levels.
+pub fn evaluate_blink_with(avr: &HashMap<String, bool>) -> HashMap<String, LedState> {
     let (parts, wires) = load_blink();
     let eval_parts: Vec<EvalPart> = parts
         .iter()
@@ -187,12 +193,11 @@ pub fn evaluate_blink() -> HashMap<String, LedState> {
             })
         })
         .collect();
-    let avr = HashMap::from([("B5".into(), true)]);
     evaluate_circuit(
         &eval_parts,
         &eval_wires,
         &HashMap::new(),
-        &avr,
+        avr,
         &HashMap::new(),
     )
     .leds
