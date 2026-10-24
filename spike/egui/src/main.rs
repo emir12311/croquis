@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 
 use croquis_core::catalogue::parts;
 use croquis_core::netlist::{
-    AnalogReading, CircuitEval, Drive, KeyPosition, LcdWiring, LedState, OutputState, RgbState,
-    SensorState,
+    AnalogReading, CircuitEval, Drive, IrReceiver, KeyPosition, LcdWiring, LedState, OutputState,
+    RgbState, SensorState,
 };
 use croquis_core::route::{expand_path, Point as CorePoint};
 use croquis_sim::engine::{self, SimEvent};
@@ -33,6 +33,7 @@ mod generated;
 mod lcd;
 mod lcd_font;
 mod properties;
+mod remote;
 mod scene;
 
 use scene::{Part, PinRef, Wire};
@@ -185,6 +186,9 @@ struct Spike {
     /// Set when a property was edited, so the circuit is solved again even
     /// though no pin changed.
     reevaluate: bool,
+    /// Where the IR receivers listen, and which remote button is being held.
+    ir_receivers: HashMap<String, IrReceiver>,
+    remote_hold: Option<(usize, &'static str)>,
     buzzer: buzzer::BuzzerAudio,
     pin_pulses: HashMap<String, f64>,
     /// The duty cycle measured on each PWM pin, 0 to 1.
@@ -246,6 +250,8 @@ impl Default for Spike {
             lcd_wiring: HashMap::new(),
             lcd_states: HashMap::new(),
             reevaluate: false,
+            ir_receivers: HashMap::new(),
+            remote_hold: None,
             buzzer: buzzer::BuzzerAudio::default(),
             pin_pulses: HashMap::new(),
             pin_duty: HashMap::new(),
@@ -526,6 +532,7 @@ impl Spike {
         self.rgb_leds = eval.rgb_leds;
         self.sensors = eval.sensors;
         self.lcd_wiring = eval.lcd_wiring;
+        self.ir_receivers = eval.ir_receivers;
         self.apply_output_memory();
     }
 
@@ -548,6 +555,25 @@ impl Spike {
             let rs = level(&self.avr_pins, &wiring.pins.rs);
             let state = self.lcd_states.entry(id.clone()).or_default();
             lcd::latch(state, rs, data);
+        }
+    }
+
+    /// Send one NEC frame down every wired receiver's pin, the way pressing the
+    /// button on the remote does.
+    fn send_ir(&mut self, command: u8) {
+        let durations = remote::nec_durations(command);
+        let Some(sim) = self.sim.as_ref() else {
+            return;
+        };
+        for receiver in self.ir_receivers.values() {
+            let mut parts = receiver.pin.chars();
+            let Some(port) = parts.next() else {
+                continue;
+            };
+            let Ok(pin) = parts.as_str().parse::<u8>() else {
+                continue;
+            };
+            sim.pulse_script(port as u8, pin, 0, durations.clone());
         }
     }
 
@@ -653,6 +679,14 @@ impl Spike {
                 self.joystick_start = Some(screen);
                 self.pressed.insert(id, true);
             }
+            // The remote is a transmitter, not a switch: pressing a button sends
+            // one NEC frame to every receiver in the circuit.
+            "ir-remote" => {
+                if let Some((button, command)) = remote::button_at(&self.parts[index], world) {
+                    self.remote_hold = Some((index, button));
+                    self.send_ir(command);
+                }
+            }
             _ => self.dragging = Some(index),
         }
     }
@@ -668,6 +702,7 @@ impl Spike {
     /// momentary. A keypad key keeps its minimum hold, so `tick_input` ends it.
     fn release_input(&mut self) {
         self.pressed.clear();
+        self.remote_hold = None;
         if let Some(index) = self.joystick.take() {
             // A stick is a momentary input, not a positioned part.
             self.parts[index].attrs.insert("x".into(), "50".into());
@@ -844,6 +879,7 @@ impl eframe::App for Spike {
             self.auto_run = false;
             self.start_sim(&ctx);
         }
+        // Temporary: press one remote button so the IR chain can be checked.
         if self.reevaluate {
             self.reevaluate = false;
             self.evaluate_now();
@@ -1208,6 +1244,19 @@ impl eframe::App for Spike {
                 }
                 if part.kind == "analog-joystick" {
                     draw_joystick_knob(&painter, rect, self.camera, part);
+                }
+                if let Some((_, button)) = self.remote_hold.filter(|(held, _)| *held == index) {
+                    if let Some(centre) = remote::button_centre(part, button) {
+                        let at = self.camera.world_to_screen(rect, centre);
+                        // The button radius is in the element's pixels; scale it
+                        // the same way the part itself is scaled.
+                        let unit = self.camera.zoom * part.size.x / remote::VIEW.x;
+                        painter.circle_stroke(
+                            at,
+                            17.6 * unit,
+                            Stroke::new(2.0, Color32::from_rgb(217, 164, 65)),
+                        );
+                    }
                 }
                 if part.kind == "lcd1602" {
                     if let Some(state) = self.lcd_states.get(&part.id) {
