@@ -23,6 +23,7 @@ use croquis_core::netlist::{
     RgbState, SensorState, StepperWiring,
 };
 use croquis_core::route::{expand_path, Point as CorePoint};
+use croquis_core::shift_register::{step_shift_register, ShiftState, ShiftWiring};
 use croquis_sim::engine::{self, SimEvent};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 
@@ -172,6 +173,11 @@ struct Spike {
     sensors: HashMap<String, SensorState>,
     /// Each ultrasonic's trigger pin, and the echo to play back: echo port,
     /// echo pin, delay in microseconds, width in microseconds.
+    /// Each 74HC595's clocked and latched bits, and how its inputs are wired.
+    /// A `shiftOut` burst is several clock edges in a few microseconds, so the
+    /// register is stepped per edge rather than once per evaluation.
+    shift_states: HashMap<String, ShiftState>,
+    shift_wiring: HashMap<String, ShiftWiring>,
     echoes: HashMap<String, (u8, u8, u64, u64)>,
     /// Each DHT's data pin, and the reading to answer with.
     dht_sensors: HashMap<String, (f64, f64)>,
@@ -256,6 +262,8 @@ impl Default for Spike {
             outputs: HashMap::new(),
             rgb_leds: HashMap::new(),
             sensors: HashMap::new(),
+            shift_states: HashMap::new(),
+            shift_wiring: HashMap::new(),
             echoes: HashMap::new(),
             dht_sensors: HashMap::new(),
             dht_busy: HashMap::new(),
@@ -473,6 +481,8 @@ impl Spike {
         self.outputs.clear();
         self.rgb_leds.clear();
         self.sensors.clear();
+        self.shift_states.clear();
+        self.shift_wiring.clear();
         self.echoes.clear();
         self.dht_sensors.clear();
         self.dht_busy.clear();
@@ -529,6 +539,7 @@ impl Spike {
                 &self.pin_duty,
                 &self.pin_pulses,
                 &self.keypad_keys,
+                &self.shift_states,
             );
         self.store_eval(eval);
     }
@@ -573,12 +584,13 @@ impl Spike {
     /// Take one evaluation: hold its inputs for the sketch, then keep the
     /// states the canvas draws from.
     fn store_eval(&mut self, eval: CircuitEval) {
-        self.apply_drives(&eval.drives, &eval.analogs);
         self.led_states = eval.leds;
         self.led_brightness = eval.led_brightness;
         self.outputs = eval.outputs;
         self.rgb_leds = eval.rgb_leds;
         self.sensors = eval.sensors;
+        self.shift_states = eval.shift_registers.clone();
+        self.shift_wiring = eval.shift_wiring.clone();
         self.echoes = eval
             .echoes
             .iter()
@@ -917,6 +929,7 @@ impl Spike {
             &self.pin_duty,
             &self.pin_pulses,
             &self.keypad_keys,
+            &self.shift_states,
         );
         self.store_eval(eval);
         let workdir = std::env::temp_dir().join(format!("croquis-egui-{}", std::process::id()));
@@ -967,6 +980,7 @@ impl Spike {
                 &self.pin_duty,
                 &self.pin_pulses,
                 &self.keypad_keys,
+                &self.shift_states,
             );
         self.store_eval(eval);
     }
@@ -1032,6 +1046,17 @@ impl Spike {
                             }
                         }
                     }
+                    // A shift register clocks on its clock line and latches on
+                    // its latch line, and `shiftOut` makes those edges far
+                    // faster than a frame, so they are taken as they arrive.
+                    for (part_id, wiring) in &self.shift_wiring {
+                        if !wiring.pins.values().any(|pin| pin == &key) {
+                            continue;
+                        }
+                        let state = self.shift_states.get(part_id).copied().unwrap_or_default();
+                        let stepped = step_shift_register(state, wiring, &self.avr_pins);
+                        self.shift_states.insert(part_id.clone(), stepped);
+                    }
                     // A stepper steps on its coil edges, and a sketch writes
                     // dozens of those between two repaints.
                     if self
@@ -1087,6 +1112,7 @@ impl Spike {
             &self.pin_duty,
             &self.pin_pulses,
             &self.keypad_keys,
+            &self.shift_states,
         );
         self.store_eval(eval);
     }
@@ -2687,6 +2713,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
+                &HashMap::new(),
             );
             // No resistor here, so a connected LED is over-driven rather than
             // merely lit. Both mean the strip carried the current.
@@ -2764,6 +2791,7 @@ mod tests {
                 &parts,
                 &wires,
                 pressed,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
@@ -2968,6 +2996,7 @@ mod tests {
             &HashMap::new(),
             &pulses,
             &HashMap::new(),
+            &HashMap::new(),
         );
         let angle = eval.outputs[&servo].angle.expect("servo angle");
         assert!((85.0..=95.0).contains(&angle), "angle={angle}");
@@ -3002,6 +3031,7 @@ mod tests {
                 &spike.wires,
                 &HashMap::new(),
                 &avr,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
