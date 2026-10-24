@@ -1247,4 +1247,61 @@ mod tests {
         spike.apply_output_memory();
         assert_eq!(spike.outputs[&servo].angle, Some(90.0));
     }
+
+    #[test]
+    fn the_servo_preset_turns_from_a_pin_pulse() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/servo.json");
+        let (parts, wires, _) = scene::load_diagram_file(&path);
+        let servo = parts
+            .iter()
+            .find(|part| part.kind == "servo")
+            .expect("servo part")
+            .id
+            .clone();
+        let avr = HashMap::from([("B1".to_string(), true)]);
+        let pulses = HashMap::from([("B1".to_string(), 1472.0)]);
+        let eval = scene::evaluate_scene(&parts, &wires, &avr, &pulses);
+        let angle = eval.outputs[&servo].angle.expect("servo angle");
+        assert!((85.0..=95.0).contains(&angle), "angle={angle}");
+    }
+
+    #[test]
+    fn all_four_digits_survive_the_real_preset_pins() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/four-digit.json");
+        let (parts, wires, _) = scene::load_diagram_file(&path);
+        let display = parts
+            .iter()
+            .find(|part| part.kind == "seven-segment-4")
+            .expect("four-digit part")
+            .id
+            .clone();
+        let mut spike = Spike::default();
+        spike.parts = parts;
+        spike.wires = wires;
+        for digit in 0..4u8 {
+            let mut avr = HashMap::new();
+            // D2-D7 are port D; D8 is PB0. D9-D12 are PB1-PB4.
+            for pin in 2..=7 {
+                avr.insert(format!("D{pin}"), true);
+            }
+            avr.insert("B0".to_string(), true);
+            for common in 1..=4 {
+                avr.insert(format!("B{common}"), true);
+            }
+            avr.insert(format!("B{}", 1 + digit), false);
+            let eval = scene::evaluate_scene(&spike.parts, &spike.wires, &avr, &HashMap::new());
+            spike.outputs = eval.outputs;
+            spike.apply_output_memory();
+        }
+        let values = &spike.outputs[&display].values;
+        assert_eq!(values.len(), 32);
+        for digit in 0..4 {
+            assert!(
+                values[digit * 8..digit * 8 + 7]
+                    .iter()
+                    .all(|value| *value == 1),
+                "digit {digit} missing: {values:?}"
+            );
+        }
+    }
 }
