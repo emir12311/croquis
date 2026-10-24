@@ -11,7 +11,7 @@ use croquis_core::catalogue::{parse_kind, part_by_kind, PartKind, CATALOGUE};
 use croquis_core::diagram::{build_diagram, parse_diagram, PlacedPart, RoutedWire};
 use croquis_core::document::PinRef as CorePinRef;
 use croquis_core::netlist::{
-    evaluate_circuit_with_state, CircuitEval, EvalPart, EvalWire, LedState,
+    evaluate_circuit_with_state, CircuitEval, EvalPart, EvalWire, KeyPosition, LedState,
 };
 
 #[derive(Clone)]
@@ -266,8 +266,10 @@ pub fn evaluate_blink() -> HashMap<String, LedState> {
 pub fn evaluate_scene(
     parts: &[Part],
     wires: &[Wire],
+    pressed: &HashMap<String, bool>,
     avr: &HashMap<String, bool>,
     pin_pulse: &HashMap<String, f64>,
+    keypad_keys: &HashMap<String, Option<KeyPosition>>,
 ) -> CircuitEval {
     let eval_parts: Vec<EvalPart> = parts
         .iter()
@@ -299,11 +301,11 @@ pub fn evaluate_scene(
     evaluate_circuit_with_state(
         &eval_parts,
         &eval_wires,
-        &HashMap::new(),
+        pressed,
         avr,
         &HashMap::new(),
         pin_pulse,
-        &HashMap::new(),
+        keypad_keys,
         &HashMap::new(),
     )
 }
@@ -314,7 +316,15 @@ pub fn evaluate_with(
     wires: &[Wire],
     avr: &HashMap<String, bool>,
 ) -> HashMap<String, LedState> {
-    evaluate_scene(parts, wires, avr, &HashMap::new()).leds
+    evaluate_scene(
+        parts,
+        wires,
+        &HashMap::new(),
+        avr,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .leds
 }
 
 /// Evaluate Blink from the simulator's current AVR pin levels.

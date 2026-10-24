@@ -18,7 +18,9 @@ use std::sync::{mpsc, Arc};
 use std::time::Instant;
 
 use croquis_core::catalogue::parts;
-use croquis_core::netlist::{LedState, OutputState, RgbState, SensorState};
+use croquis_core::netlist::{
+    AnalogReading, CircuitEval, Drive, KeyPosition, LedState, OutputState, RgbState, SensorState,
+};
 use croquis_core::route::{expand_path, Point as CorePoint};
 use croquis_sim::engine::{self, SimEvent};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
@@ -157,6 +159,19 @@ struct Spike {
     outputs: HashMap<String, OutputState>,
     rgb_leds: HashMap<String, RgbState>,
     sensors: HashMap<String, SensorState>,
+    /// Which parts the pointer is holding down, by part id.
+    pressed: HashMap<String, bool>,
+    /// The key held on each keypad, and when its minimum hold ends.
+    keypad_keys: HashMap<String, Option<KeyPosition>>,
+    keypad_until: HashMap<String, Instant>,
+    /// The joystick being dragged, whether it has moved, and where the press was.
+    joystick: Option<usize>,
+    joystick_moved: bool,
+    joystick_start: Option<Pos2>,
+    /// The levels and voltages last pushed into the simulator, so an unchanged
+    /// drive is not re-sent every frame.
+    last_drives: HashMap<(char, u8), bool>,
+    last_analogs: HashMap<u8, u16>,
     buzzer: buzzer::BuzzerAudio,
     pin_pulses: HashMap<String, f64>,
     segment_memory: HashMap<String, Vec<u8>>,
@@ -202,6 +217,14 @@ impl Default for Spike {
             outputs: HashMap::new(),
             rgb_leds: HashMap::new(),
             sensors: HashMap::new(),
+            pressed: HashMap::new(),
+            keypad_keys: HashMap::new(),
+            keypad_until: HashMap::new(),
+            joystick: None,
+            joystick_moved: false,
+            joystick_start: None,
+            last_drives: HashMap::new(),
+            last_analogs: HashMap::new(),
             buzzer: buzzer::BuzzerAudio::default(),
             pin_pulses: HashMap::new(),
             segment_memory: HashMap::new(),
@@ -359,6 +382,7 @@ impl Spike {
         self.outputs.clear();
         self.rgb_leds.clear();
         self.sensors.clear();
+        self.forget_input();
         self.pin_pulses.clear();
         self.segment_memory.clear();
         self.seven_pending.clear();
@@ -393,12 +417,15 @@ impl Spike {
         self.file_error = None;
         self.camera = Camera::default();
         let eval =
-            scene::evaluate_scene(&self.parts, &self.wires, &HashMap::new(), &self.pin_pulses);
-        self.led_states = eval.leds;
-        self.outputs = eval.outputs;
-        self.rgb_leds = eval.rgb_leds;
-        self.sensors = eval.sensors;
-        self.apply_output_memory();
+            scene::evaluate_scene(
+                &self.parts,
+                &self.wires,
+                &self.pressed,
+                &HashMap::new(),
+                &self.pin_pulses,
+                &self.keypad_keys,
+            );
+        self.store_eval(eval);
     }
 
     fn open_dialog(&mut self, ctx: &egui::Context) {
@@ -435,6 +462,40 @@ impl Spike {
             .save_file()
         {
             self.save_to(path);
+        }
+    }
+
+    /// Take one evaluation: hold its inputs for the sketch, then keep the
+    /// states the canvas draws from.
+    fn store_eval(&mut self, eval: CircuitEval) {
+        self.apply_drives(&eval.drives, &eval.analogs);
+        self.led_states = eval.leds;
+        self.outputs = eval.outputs;
+        self.rgb_leds = eval.rgb_leds;
+        self.sensors = eval.sensors;
+        self.apply_output_memory();
+    }
+
+    /// Push what the netlist makes of the input into the simulator: a held
+    /// button pulls its pin, a sensor's comparator drives its output.
+    fn apply_drives(&mut self, drives: &[Drive], analogs: &[AnalogReading]) {
+        let Some(sim) = self.sim.as_ref() else {
+            return;
+        };
+        for drive in drives {
+            let key = (drive.port, drive.pin);
+            if self.last_drives.get(&key) == Some(&drive.high) {
+                continue;
+            }
+            sim.set_pin(drive.port as u8, drive.pin, drive.high);
+            self.last_drives.insert(key, drive.high);
+        }
+        for reading in analogs {
+            if self.last_analogs.get(&reading.channel) == Some(&reading.millivolts) {
+                continue;
+            }
+            sim.set_analog(reading.channel, reading.millivolts);
+            self.last_analogs.insert(reading.channel, reading.millivolts);
         }
     }
 
@@ -502,10 +563,47 @@ impl Spike {
         }
     }
 
+    /// Drop every held input and any pending keypad tap.
+    fn forget_input(&mut self) {
+        self.release_input();
+        self.keypad_keys.clear();
+        self.keypad_until.clear();
+    }
+
+    /// Nothing stays held once the pointer lifts: buttons and the stick are
+    /// momentary. A keypad key keeps its minimum hold, so `tick_input` ends it.
+    fn release_input(&mut self) {
+        self.pressed.clear();
+        if let Some(index) = self.joystick.take() {
+            // A stick is a momentary input, not a positioned part.
+            self.parts[index].attrs.insert("x".into(), "50".into());
+            self.parts[index].attrs.insert("y".into(), "50".into());
+        }
+        self.joystick_moved = false;
+        self.joystick_start = None;
+    }
+
+    /// End keypad taps whose minimum hold has passed.
+    fn tick_input(&mut self) {
+        let now = Instant::now();
+        let expired: Vec<String> = self
+            .keypad_until
+            .iter()
+            .filter(|(_, until)| **until <= now)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in expired {
+            self.keypad_until.remove(&id);
+            self.keypad_keys.insert(id, None);
+        }
+    }
+
     fn start_sim(&mut self, ctx: &egui::Context) {
         self.run_error = None;
         self.serial.clear();
         self.avr_pins.clear();
+        self.last_drives.clear();
+        self.last_analogs.clear();
         self.led_states = scene::evaluate_with(&self.parts, &self.wires, &self.avr_pins);
         let workdir = std::env::temp_dir().join(format!("croquis-egui-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&workdir);
@@ -536,6 +634,7 @@ impl Spike {
         }
         self.events = None;
         self.running = false;
+        self.forget_input();
         self.avr_pins.clear();
         self.pin_pulses.clear();
         self.segment_memory.clear();
@@ -543,12 +642,15 @@ impl Spike {
         self.seven_stable.clear();
         self.servo_angles.clear();
         let eval =
-            scene::evaluate_scene(&self.parts, &self.wires, &self.avr_pins, &self.pin_pulses);
-        self.led_states = eval.leds;
-        self.outputs = eval.outputs;
-        self.rgb_leds = eval.rgb_leds;
-        self.sensors = eval.sensors;
-        self.apply_output_memory();
+            scene::evaluate_scene(
+                &self.parts,
+                &self.wires,
+                &self.pressed,
+                &self.avr_pins,
+                &self.pin_pulses,
+                &self.keypad_keys,
+            );
+        self.store_eval(eval);
     }
 
     fn poll_engine(&mut self) {
@@ -582,12 +684,15 @@ impl Spike {
         }
         if changed {
             let eval =
-                scene::evaluate_scene(&self.parts, &self.wires, &self.avr_pins, &self.pin_pulses);
-            self.led_states = eval.leds;
-            self.outputs = eval.outputs;
-            self.rgb_leds = eval.rgb_leds;
-            self.sensors = eval.sensors;
-            self.apply_output_memory();
+                scene::evaluate_scene(
+                &self.parts,
+                &self.wires,
+                &self.pressed,
+                &self.avr_pins,
+                &self.pin_pulses,
+                &self.keypad_keys,
+            );
+            self.store_eval(eval);
         }
     }
 }
@@ -600,6 +705,7 @@ impl eframe::App for Spike {
             self.auto_run = false;
             self.start_sim(&ctx);
         }
+        self.tick_input();
         self.buzzer.update(&self.outputs);
         ensure_textures(&ctx, &mut self.textures, &self.parts, &self.outputs);
 
@@ -824,18 +930,66 @@ impl eframe::App for Spike {
             if response.drag_started_by(PointerButton::Primary) {
                 if let Some(world) = world_pointer {
                     if hit_pin(&self.parts, world, PIN_HIT_RADIUS / self.camera.zoom).is_none() {
-                        self.dragging = hit_part(&self.parts, world);
-                        self.selected = self.dragging;
+                        self.selected = hit_part(&self.parts, world);
+                        if let Some(index) = self.selected {
+                            let id = self.parts[index].id.clone();
+                            match self.parts[index].kind.as_str() {
+                                // A button is held while the pointer is down.
+                                "pushbutton" => {
+                                    self.pressed.insert(id, true);
+                                }
+                                // A key is tapped: the matrix needs time to see it.
+                                "membrane-keypad" => {
+                                    if let Some(key) = keypad_key(&self.parts[index], world) {
+                                        self.keypad_keys.insert(id.clone(), Some(key));
+                                        self.keypad_until.insert(id, Instant::now() + KEY_HOLD);
+                                    }
+                                }
+                                // The stick is dragged, and its centre is a button.
+                                "analog-joystick" => {
+                                    self.joystick = Some(index);
+                                    self.joystick_moved = false;
+                                    self.joystick_start = pointer;
+                                    self.pressed.insert(id, true);
+                                }
+                                _ => self.dragging = Some(index),
+                            }
+                        }
                     }
                 }
             }
             if response.dragged_by(PointerButton::Primary) {
-                if let Some(index) = self.dragging {
+                if let Some(index) = self.joystick {
+                    if !self.joystick_moved {
+                        let moved = self
+                            .joystick_start
+                            .zip(pointer)
+                            .is_some_and(|(start, now)| now.distance(start) > 4.0);
+                        if moved {
+                            // A moved stick is not a click on its button.
+                            self.joystick_moved = true;
+                            let id = self.parts[index].id.clone();
+                            self.pressed.insert(id, false);
+                        }
+                    }
+                    if self.joystick_moved {
+                        if let Some(world) = world_pointer {
+                            let (x, y) = joystick_axes(&self.parts[index], world);
+                            self.parts[index]
+                                .attrs
+                                .insert("x".into(), x.to_string());
+                            self.parts[index]
+                                .attrs
+                                .insert("y".into(), y.to_string());
+                        }
+                    }
+                } else if let Some(index) = self.dragging {
                     self.parts[index].center += response.drag_delta() / self.camera.zoom;
                 }
             }
             if response.drag_stopped() {
                 self.dragging = None;
+                self.release_input();
             }
 
             if response.clicked_by(PointerButton::Primary) {
@@ -1277,6 +1431,45 @@ fn smoothstep(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// The keypad element's key grid, in its own 70.336 x 91 units: each key is an
+/// 11.2 x 11 rect whose corner sits at (column, row) in these lists.
+const KEYPAD_VIEW: Vec2 = Vec2::new(70.336, 91.0);
+const KEYPAD_COLUMNS: [f32; 4] = [7.0, 22.0, 37.0, 52.0];
+const KEYPAD_ROWS: [f32; 4] = [10.7, 25.0, 39.3, 53.6];
+const KEYPAD_KEY: Vec2 = Vec2::new(11.2, 11.0);
+
+/// The stick's travel as a fraction of its 27.2 x 31.8 drawing, as v0.2 has it.
+const JOYSTICK_TRAVEL_X: f32 = 10.6 / 27.2;
+const JOYSTICK_TRAVEL_Y: f32 = 10.6 / 31.8;
+
+/// A tap has to outlive one scan of the keypad matrix to be seen at all.
+const KEY_HOLD: std::time::Duration = std::time::Duration::from_millis(80);
+
+/// The keypad key under a canvas point, if the point is on one.
+fn keypad_key(part: &Part, world: Pos2) -> Option<KeyPosition> {
+    let bounds = part.bounds();
+    let local = (world - bounds.min) / (bounds.width() / KEYPAD_VIEW.x);
+    let column = KEYPAD_COLUMNS
+        .iter()
+        .position(|start| local.x >= *start && local.x <= *start + KEYPAD_KEY.x)?;
+    let row = KEYPAD_ROWS
+        .iter()
+        .position(|start| local.y >= *start && local.y <= *start + KEYPAD_KEY.y)?;
+    Some(KeyPosition { row, column })
+}
+
+/// The joystick's axes for a canvas point, as the percentages the netlist reads.
+fn joystick_axes(part: &Part, world: Pos2) -> (u8, u8) {
+    let bounds = part.bounds();
+    let local = ((world - bounds.min) / bounds.size()).clamp(Vec2::ZERO, Vec2::splat(1.0));
+    let x = 50.0 + ((local.x - 0.5) / JOYSTICK_TRAVEL_X) * 50.0;
+    let y = 50.0 - ((local.y - 0.5) / JOYSTICK_TRAVEL_Y) * 50.0;
+    (
+        x.round().clamp(0.0, 100.0) as u8,
+        y.round().clamp(0.0, 100.0) as u8,
+    )
+}
+
 /// Which parts the oracle marks as doing something: an energised relay, a
 /// tilted tilt switch, a PIR that sees motion.
 fn shows_active(
@@ -1585,6 +1778,78 @@ mod tests {
     }
 
     #[test]
+    fn a_held_button_pulls_its_pin_for_the_sketch() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/button.json");
+        let (parts, wires, _) = scene::load_diagram_file(&path);
+        let held = HashMap::from([("b1".to_string(), true)]);
+        let pressed_low = |pressed: &HashMap<String, bool>| {
+            scene::evaluate_scene(
+                &parts,
+                &wires,
+                pressed,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+            )
+            .drives
+            .iter()
+            .any(|drive| drive.port == 'D' && drive.pin == 2 && !drive.high)
+        };
+        assert!(
+            !pressed_low(&HashMap::new()),
+            "nothing held: the pull-up stands, so the pin is not pulled low"
+        );
+        assert!(
+            pressed_low(&held),
+            "a press is a drive on pin 2, which is what reaches the simulator"
+        );
+    }
+
+    #[test]
+    fn a_keypad_key_is_found_where_the_elements_key_rect_is() {
+        use croquis_core::catalogue::PartKind;
+        let pad =
+            scene::part_from_kind(PartKind::MembraneKeypad, Pos2::ZERO, "pad".into()).expect("pad");
+        let bounds = pad.bounds();
+        let unit = bounds.width() / KEYPAD_VIEW.x;
+        let at = |x: f32, y: f32| bounds.min + Vec2::new(x, y) * unit;
+
+        // The element puts the first key's corner at (7, 10.7) and its rect is
+        // 11.2 x 11, so the middle of it is a press.
+        assert_eq!(
+            keypad_key(&pad, at(12.0, 16.0)),
+            Some(KeyPosition { row: 0, column: 0 })
+        );
+        assert_eq!(
+            keypad_key(&pad, at(52.0 + 5.0, 53.6 + 5.0)),
+            Some(KeyPosition { row: 3, column: 3 })
+        );
+        // Column 1 starts at 22, so 20 is the gap between two keys.
+        assert_eq!(keypad_key(&pad, at(20.0, 16.0)), None);
+        // Outside the grid entirely.
+        assert_eq!(keypad_key(&pad, at(2.0, 2.0)), None);
+    }
+
+    #[test]
+    fn the_joystick_reads_centre_in_the_middle_and_clamps_at_the_edges() {
+        use croquis_core::catalogue::PartKind;
+        let stick = scene::part_from_kind(PartKind::AnalogJoystick, Pos2::ZERO, "stick".into())
+            .expect("joystick");
+        let bounds = stick.bounds();
+        assert_eq!(joystick_axes(&stick, bounds.center()), (50, 50));
+        assert_eq!(
+            joystick_axes(&stick, bounds.min),
+            (0, 100),
+            "top-left is full left, full up"
+        );
+        assert_eq!(
+            joystick_axes(&stick, bounds.max),
+            (100, 0),
+            "bottom-right is full right, full down"
+        );
+    }
+
+    #[test]
     fn the_oracle_marks_only_relays_and_on_off_sensors() {
         use croquis_core::catalogue::PartKind;
         let relay =
@@ -1717,7 +1982,14 @@ mod tests {
             .clone();
         let avr = HashMap::from([("B1".to_string(), true)]);
         let pulses = HashMap::from([("B1".to_string(), 1472.0)]);
-        let eval = scene::evaluate_scene(&parts, &wires, &avr, &pulses);
+        let eval = scene::evaluate_scene(
+            &parts,
+            &wires,
+            &HashMap::new(),
+            &avr,
+            &pulses,
+            &HashMap::new(),
+        );
         let angle = eval.outputs[&servo].angle.expect("servo angle");
         assert!((85.0..=95.0).contains(&angle), "angle={angle}");
     }
@@ -1746,7 +2018,14 @@ mod tests {
                 avr.insert(format!("B{common}"), true);
             }
             avr.insert(format!("B{}", 1 + digit), false);
-            let eval = scene::evaluate_scene(&spike.parts, &spike.wires, &avr, &HashMap::new());
+            let eval = scene::evaluate_scene(
+                &spike.parts,
+                &spike.wires,
+                &HashMap::new(),
+                &avr,
+                &HashMap::new(),
+                &HashMap::new(),
+            );
             spike.outputs = eval.outputs;
             spike.apply_output_memory();
         }
