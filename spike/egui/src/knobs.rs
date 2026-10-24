@@ -112,6 +112,32 @@ pub fn pot_value(part: &Part, world: Pos2) -> Option<f64> {
     Some((((degrees + POT_SWEEP) / (2.0 * POT_SWEEP)) * POT_MAX).round())
 }
 
+/// The potentiometer's tick corners at a value, in the drawing's own units.
+///
+/// The tick is the art's `<rect id="rotating" x="10" y="2" width=".42"
+/// height="3.1">`, turned about (10, 8) — the element's `transform-origin`.
+pub fn pot_tick(value: f64) -> [(f32, f32); 4] {
+    const ORIGIN: (f32, f32) = (10.0, 8.0);
+    // The art's tick is 0.42 wide, which is under two pixels on screen — and the
+    // owner could not see the knob move. Drawn at 0.8 it is the same dash, one
+    // marker, and readable.
+    const CORNERS: [(f32, f32); 4] = [(9.81, 2.0), (10.61, 2.0), (10.61, 5.1), (9.81, 5.1)];
+    let radians = (pot_angle(value) as f32).to_radians();
+    let (sin, cos) = radians.sin_cos();
+    CORNERS.map(|(x, y)| {
+        let (dx, dy) = (x - ORIGIN.0, y - ORIGIN.1);
+        (
+            ORIGIN.0 + dx * cos - dy * sin,
+            ORIGIN.1 + dx * sin + dy * cos,
+        )
+    })
+}
+
+/// Where the slide pot's tip group sits, in the drawing's own units.
+pub fn slide_tip_x(value: f64) -> f32 {
+    SLIDE_ORIGIN + slide_offset(value)
+}
+
 /// The tip offset a value shows, in the element's units.
 pub fn slide_offset(value: f64) -> f32 {
     SLIDE_BASE + (value / SLIDE_MAX).clamp(0.0, 1.0) as f32 * SLIDE_TRAVEL
@@ -153,6 +179,28 @@ mod tests {
 
     fn part(kind: PartKind) -> Part {
         crate::scene::part_from_kind(kind, Pos2::ZERO, "p".into()).expect("part")
+    }
+
+    #[test]
+    fn the_tick_turns_about_the_shaft() {
+        // At zero the tick points down-left, at full down-right, and at half it
+        // stands up: its far end is above the shaft, which is where it rests.
+        let middle = |value: f64| {
+            let corners = pot_tick(value);
+            (
+                corners.iter().map(|c| c.0).sum::<f32>() / 4.0,
+                corners.iter().map(|c| c.1).sum::<f32>() / 4.0,
+            )
+        };
+        let (low_x, low_y) = middle(0.0);
+        assert!(low_x < 10.0 && low_y > 8.0, "zero points down-left, got ({low_x}, {low_y})");
+        let (high_x, high_y) = middle(1023.0);
+        assert!(
+            high_x > 10.0 && high_y > 8.0,
+            "full points down-right, got ({high_x}, {high_y})"
+        );
+        let (up_x, up_y) = middle(511.5);
+        assert!((up_x - 10.2).abs() < 0.4 && up_y < 8.0, "half stands up, got ({up_x}, {up_y})");
     }
 
     #[test]

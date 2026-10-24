@@ -531,45 +531,34 @@ pub fn servo_svg(svg: &str, angle: f64) -> String {
     svg.replacen("rotate(0)", &format!("rotate({angle})"), 1)
 }
 
-/// Turn the potentiometer's knob to the angle its value asks for.
+/// The potentiometer's base art: everything except the tick that moves.
 ///
-/// The element drives the knob with a CSS variable rather than an SVG
-/// transform, so this replaces that variable in its own style attribute.
-pub fn potentiometer_svg(svg: &str, value: f64) -> String {
-    let degrees = tidy(crate::knobs::pot_angle(value));
-    // The element rotates the knob with `transform: rotate(var(--knob-angle))`
-    // in its own CSS. resvg does not resolve custom properties, so the value
-    // goes onto the ellipse as a real transform, about the knob's centre.
-    svg.replacen(
-        "--knob-angle:-135deg",
-        &format!("--knob-angle:{degrees}deg"),
-        1,
-    )
-    // The tick that shows the position is the art's own `#rotating` rect, and
-    // the element turns it with `transform-origin: 10px 8px`. Rotating the knob
-    // ellipse instead leaves that tick standing still, which is what drew a
-    // second marker on top of it.
-    .replacen(
-        "<rect id=\"rotating\"",
-        &format!("<rect transform=\"rotate({degrees} 10 8)\" id=\"rotating\""),
-        1,
-    )
+/// The tick is `<rect id="rotating">`, which the element turns itself. Baking it
+/// into a texture per angle cost about 40 ms a state — measured — which is far
+/// too much to pay on every step of a drag, so the art keeps still and the tick
+/// is drawn live (`draw_pot_tick`).
+pub fn potentiometer_svg(svg: &str) -> String {
+    let Some(start) = svg.find("<rect id=\"rotating\"") else {
+        return svg.to_string();
+    };
+    let Some(length) = svg[start..].find("></rect>") else {
+        return svg.to_string();
+    };
+    format!("{}{}", &svg[..start], &svg[start + length + "></rect>".len()..])
 }
 
-/// Slide the potentiometer's tip to where its value sits on the track.
-pub fn slide_pot_svg(svg: &str, value: f64) -> String {
-    let offset = crate::knobs::slide_offset(value);
-    svg.replacen(
-        "id=\"tip\" transform=\"translate(-15 0)\"",
-        &format!(
-            "id=\"tip\" transform=\"translate({} 0)\"",
-            tidy(f64::from(offset))
-        ),
-        1,
-    )
+/// The slide pot's base art: everything except the tip that slides.
+pub fn slide_pot_svg(svg: &str) -> String {
+    let Some(start) = svg.find("<g id=\"tip\"") else {
+        return svg.to_string();
+    };
+    let Some(length) = svg[start..].find("</g>") else {
+        return svg.to_string();
+    };
+    format!("{}{}", &svg[..start], &svg[start + length + "</g>".len()..])
 }
 
-/// Rotate the stepper's shaft and rotor arrow to an angle.
+/// Rotate the stepper's shaft and rotor arrow to an angle./// Rotate the stepper's shaft and rotor arrow to an angle.
 ///
 /// The element draws both, in its own two forms: the arrow is
 /// `rotate(0, 28.65,28.65)` about the centre, the shaft is
