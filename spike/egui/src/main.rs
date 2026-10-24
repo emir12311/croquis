@@ -18,7 +18,7 @@ use std::sync::{mpsc, Arc};
 use std::time::Instant;
 
 use croquis_core::catalogue::parts;
-use croquis_core::netlist::{LedState, OutputState, RgbState};
+use croquis_core::netlist::{LedState, OutputState, RgbState, SensorState};
 use croquis_core::route::{expand_path, Point as CorePoint};
 use croquis_sim::engine::{self, SimEvent};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
@@ -155,6 +155,7 @@ struct Spike {
     led_states: HashMap<String, LedState>,
     outputs: HashMap<String, OutputState>,
     rgb_leds: HashMap<String, RgbState>,
+    sensors: HashMap<String, SensorState>,
     pin_pulses: HashMap<String, f64>,
     segment_memory: HashMap<String, Vec<u8>>,
     seven_pending: HashMap<String, (Vec<u8>, Instant)>,
@@ -198,6 +199,7 @@ impl Default for Spike {
             led_states: HashMap::new(),
             outputs: HashMap::new(),
             rgb_leds: HashMap::new(),
+            sensors: HashMap::new(),
             pin_pulses: HashMap::new(),
             segment_memory: HashMap::new(),
             seven_pending: HashMap::new(),
@@ -353,6 +355,7 @@ impl Spike {
         self.led_states.clear();
         self.outputs.clear();
         self.rgb_leds.clear();
+        self.sensors.clear();
         self.pin_pulses.clear();
         self.segment_memory.clear();
         self.seven_pending.clear();
@@ -391,6 +394,7 @@ impl Spike {
         self.led_states = eval.leds;
         self.outputs = eval.outputs;
         self.rgb_leds = eval.rgb_leds;
+        self.sensors = eval.sensors;
         self.apply_output_memory();
     }
 
@@ -540,6 +544,7 @@ impl Spike {
         self.led_states = eval.leds;
         self.outputs = eval.outputs;
         self.rgb_leds = eval.rgb_leds;
+        self.sensors = eval.sensors;
         self.apply_output_memory();
     }
 
@@ -578,6 +583,7 @@ impl Spike {
             self.led_states = eval.leds;
             self.outputs = eval.outputs;
             self.rgb_leds = eval.rgb_leds;
+            self.sensors = eval.sensors;
             self.apply_output_memory();
         }
     }
@@ -864,6 +870,9 @@ impl eframe::App for Spike {
                     self.rgb_leds.get(&part.id).copied(),
                     self.outputs.get(&part.id).map(|out| out.values.as_slice()),
                 );
+                if shows_active(part, &self.outputs, &self.sensors) {
+                    draw_active_dot(&painter, rect, self.camera, part);
+                }
             }
 
             for wire in &self.wires {
@@ -1264,6 +1273,34 @@ fn smoothstep(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Which parts the oracle marks as doing something: an energised relay, a
+/// tilted tilt switch, a PIR that sees motion.
+fn shows_active(
+    part: &Part,
+    outputs: &HashMap<String, OutputState>,
+    sensors: &HashMap<String, SensorState>,
+) -> bool {
+    match part.kind.as_str() {
+        "relay" => outputs.get(&part.id).is_some_and(|out| out.active),
+        "tilt-switch" | "pir-motion-sensor" => {
+            sensors.get(&part.id).is_some_and(|state| state.active)
+        }
+        _ => false,
+    }
+}
+
+/// The oracle's `drawActive`: a five-unit dot just inside the top-left corner.
+fn draw_active_dot(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part) {
+    let centre = camera.world_to_screen(rect, part.bounds().min + Vec2::new(4.0, 4.0));
+    let radius = 5.0 * camera.zoom;
+    painter.circle_filled(centre, radius, Color32::from_rgb(108, 203, 123));
+    painter.circle_stroke(
+        centre,
+        radius,
+        Stroke::new(1.0, Color32::from_rgb(26, 26, 28)),
+    );
+}
+
 fn draw_part(
     painter: &egui::Painter,
     rect: Rect,
@@ -1541,6 +1578,55 @@ mod tests {
         let hard = disc_bands(10.0, 0.0, Color32::WHITE, 1.0);
         assert_eq!(hard.len(), 2, "no blur means one hard edge");
         assert_eq!(hard[1].0, 10.0);
+    }
+
+    #[test]
+    fn the_oracle_marks_only_relays_and_on_off_sensors() {
+        use croquis_core::catalogue::PartKind;
+        let relay =
+            scene::part_from_kind(PartKind::Relay, Pos2::ZERO, "relay".into()).expect("relay part");
+        let tilt = scene::part_from_kind(PartKind::TiltSwitch, Pos2::ZERO, "tilt".into())
+            .expect("tilt part");
+        let pir = scene::part_from_kind(PartKind::PirMotionSensor, Pos2::ZERO, "pir".into())
+            .expect("pir part");
+        let led = scene::part_from_kind(PartKind::Led, Pos2::ZERO, "led".into()).expect("led part");
+
+        let mut outputs = HashMap::new();
+        let mut sensors = HashMap::new();
+        assert!(
+            !shows_active(&relay, &outputs, &sensors),
+            "a relay at rest draws nothing"
+        );
+        outputs.insert(
+            "relay".into(),
+            OutputState {
+                active: true,
+                ..Default::default()
+            },
+        );
+        assert!(
+            shows_active(&relay, &outputs, &sensors),
+            "an energised relay is marked"
+        );
+        assert!(
+            !shows_active(&tilt, &outputs, &sensors),
+            "an upright tilt switch is not"
+        );
+        for id in ["tilt", "pir"] {
+            sensors.insert(
+                id.into(),
+                SensorState {
+                    powered: true,
+                    active: true,
+                },
+            );
+        }
+        assert!(shows_active(&tilt, &outputs, &sensors));
+        assert!(shows_active(&pir, &outputs, &sensors));
+        assert!(
+            !shows_active(&led, &outputs, &sensors),
+            "no other part gets a dot"
+        );
     }
 
     #[test]
