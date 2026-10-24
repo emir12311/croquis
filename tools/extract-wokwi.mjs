@@ -52,6 +52,7 @@ try {
         }
         return area(b) - area(a)
       })[0]
+      const svgBox = svg?.getBoundingClientRect()
       // The element's text styling lives in its shadow-root CSS, not in the
       // SVG. Inline the computed values or every label renders at the SVG
       // default size.
@@ -87,8 +88,11 @@ try {
         kind: part.kind,
         tag: part.tag,
         attrs: part.attrs ?? {},
-        width: el.offsetWidth || el.getBoundingClientRect().width,
-        height: el.offsetHeight || el.getBoundingClientRect().height,
+        // pinInfo coordinates are in the SVG's pixel space. The element box can
+        // be taller than the SVG (labels/padding), which shifts the bottom pins
+        // when the drawing is stretched to the element size.
+        width: svgBox?.width || el.offsetWidth || el.getBoundingClientRect().width,
+        height: svgBox?.height || el.offsetHeight || el.getBoundingClientRect().height,
         svg: svg?.outerHTML ?? null,
         pins,
       })

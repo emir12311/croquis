@@ -10,7 +10,7 @@
           <feGaussianBlur stdDeviation="0.5"></feGaussianBlur>
         </filter>
 
-        <!--?lit$358190898$-->
+        <!--?lit$325995789$-->
   <pattern id="pins-female" width="2.54" height="2.54" patternUnits="userSpaceOnUse">
     <rect x="0" y="0" width="2.54" height="2.54" fill="#333"></rect>
     <rect x="1.079" y="0.896" width="0.762" height="0.762" style="fill: #191919"></rect>
@@ -110,7 +110,7 @@
         <!-- LEDs -->
         <g transform="translate(57.3, 16.21)">
           <use xlink:href="#led-body"></use>
-          <!--?lit$358190898$-->false
+          <!--?lit$325995789$-->false
         </g>
 
         <text fill="rgb(255, 255, 255)" font-size="2px" font-family="monospace" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
@@ -119,17 +119,17 @@
 
         <g transform="translate(26.87,11.69)">
           <use xlink:href="#led-body"></use>
-          <!--?lit$358190898$-->false
+          <!--?lit$325995789$-->false
         </g>
 
         <g transform="translate(26.9, 16.2)">
           <use xlink:href="#led-body"></use>
-          <!--?lit$358190898$-->false
+          <!--?lit$325995789$-->false
         </g>
 
         <g transform="translate(26.9, 18.5)">
           <use xlink:href="#led-body"></use>
-          <!--?lit$358190898$-->false
+          <!--?lit$325995789$-->false
         </g>
 
         <text fill="rgb(255, 255, 255)" style="text-anchor: end" font-size="2px" font-family="monospace" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="end" letter-spacing="normal" opacity="1">

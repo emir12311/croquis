@@ -36,10 +36,10 @@
 
         <rect style="opacity:1;fill:#999999;stroke-width:1.5747;paint-order:stroke markers fill" id="rect17" width="8.5262499" height="3.8281121" x="81.321793" y="5.8179226"></rect>
         <rect style="opacity:1;fill:#e6e6e6;stroke-width:2.05589;paint-order:stroke markers fill" id="rect18" width="4.8444595" height="3.8281121" x="83.162689" y="5.8179226"></rect>
-        <!--?lit$358190898$-->false
+        <!--?lit$325995789$-->false
         <rect style="fill:#999999;stroke-width:1.5747;paint-order:stroke markers fill" id="rect17-9" width="8.5262499" height="3.8281121" x="81.018036" y="48.700188"></rect>
         <rect style="fill:#e6e6e6;stroke-width:2.05589;paint-order:stroke markers fill" id="rect18-0" width="4.8444595" height="3.8281121" x="82.858932" y="48.700188"></rect>
-        <!--?lit$358190898$-->false
+        <!--?lit$325995789$-->false
         <text fill="rgb(255, 255, 255)" font-family="sans-serif" font-size="3px" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
           <tspan x="80.213432" y="4.7265162" font-size="3px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">PWR LED</tspan>
           <tspan x="80.463821" y="55.852409" font-size="3px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D0 LED</tspan>

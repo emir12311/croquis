@@ -12,8 +12,8 @@
         <rect x="4.95" y="5.7" width="71.2" height="25.2"></rect>
         <rect x="7.55" y="10.3" rx="1.5" ry="1.5" width="66" height="16" fill="#6cb201"></rect>
         <rect x="7.55" y="10.3" rx="1.5" ry="1.5" width="66" height="16" opacity="0"></rect>
-        <!--?lit$358190898$-->
-        <!--?lit$358190898$-->
+        <!--?lit$325995789$-->
+        <!--?lit$325995789$-->
       <g transform="translate(0, 32.6)">
         <rect x="7.55" y="1" height="2.5" width="40.64" fill="url(#pins)"></rect>
         <text fill="rgb(255, 255, 255)" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
@@ -40,5 +40,5 @@
     
         <rect fill="url(#characters)" x="12.45" y="12.55" width="56.2" height="11.5"></rect>
         <path d="" transform="translate(12.45, 12.55)" fill="black"></path>
-        <!--?lit$358190898$-->
+        <!--?lit$325995789$-->
       </svg>
