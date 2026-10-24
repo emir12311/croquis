@@ -19,7 +19,8 @@ use std::time::Instant;
 
 use croquis_core::catalogue::parts;
 use croquis_core::netlist::{
-    AnalogReading, CircuitEval, Drive, KeyPosition, LedState, OutputState, RgbState, SensorState,
+    AnalogReading, CircuitEval, Drive, KeyPosition, LcdWiring, LedState, OutputState, RgbState,
+    SensorState,
 };
 use croquis_core::route::{expand_path, Point as CorePoint};
 use croquis_sim::engine::{self, SimEvent};
@@ -28,6 +29,8 @@ use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sen
 mod art;
 mod buzzer;
 mod editor;
+mod lcd;
+mod lcd_font;
 mod scene;
 
 use scene::{Part, PinRef, Wire};
@@ -172,6 +175,9 @@ struct Spike {
     /// drive is not re-sent every frame.
     last_drives: HashMap<(char, u8), bool>,
     last_analogs: HashMap<u8, u16>,
+    /// The LCDs' wiring, and what their controllers have been told so far.
+    lcd_wiring: HashMap<String, LcdWiring>,
+    lcd_states: HashMap<String, lcd::LcdState>,
     buzzer: buzzer::BuzzerAudio,
     pin_pulses: HashMap<String, f64>,
     segment_memory: HashMap<String, Vec<u8>>,
@@ -225,6 +231,8 @@ impl Default for Spike {
             joystick_start: None,
             last_drives: HashMap::new(),
             last_analogs: HashMap::new(),
+            lcd_wiring: HashMap::new(),
+            lcd_states: HashMap::new(),
             buzzer: buzzer::BuzzerAudio::default(),
             pin_pulses: HashMap::new(),
             segment_memory: HashMap::new(),
@@ -382,6 +390,7 @@ impl Spike {
         self.outputs.clear();
         self.rgb_leds.clear();
         self.sensors.clear();
+        self.lcd_states.clear();
         self.forget_input();
         self.pin_pulses.clear();
         self.segment_memory.clear();
@@ -473,7 +482,28 @@ impl Spike {
         self.outputs = eval.outputs;
         self.rgb_leds = eval.rgb_leds;
         self.sensors = eval.sensors;
+        self.lcd_wiring = eval.lcd_wiring;
         self.apply_output_memory();
+    }
+
+    /// One enable pulse ended: hand the four data lines to every LCD that uses
+    /// this pin, in whichever register its RS line selects.
+    fn latch_lcds(&mut self, enable_key: &str) {
+        let level = |pins: &HashMap<String, bool>, key: &str| pins.get(key).copied().unwrap_or(false);
+        for (id, wiring) in &self.lcd_wiring {
+            if wiring.pins.e != enable_key {
+                continue;
+            }
+            let data = [
+                level(&self.avr_pins, &wiring.pins.d4),
+                level(&self.avr_pins, &wiring.pins.d5),
+                level(&self.avr_pins, &wiring.pins.d6),
+                level(&self.avr_pins, &wiring.pins.d7),
+            ];
+            let rs = level(&self.avr_pins, &wiring.pins.rs);
+            let state = self.lcd_states.entry(id.clone()).or_default();
+            lcd::latch(state, rs, data);
+        }
     }
 
     /// Push what the netlist makes of the input into the simulator: a held
@@ -604,7 +634,18 @@ impl Spike {
         self.avr_pins.clear();
         self.last_drives.clear();
         self.last_analogs.clear();
-        self.led_states = scene::evaluate_with(&self.parts, &self.wires, &self.avr_pins);
+        // Evaluate once before the simulator starts. This is what learns the
+        // LCDs' wiring, and a sketch that writes to one in `setup()` sends all
+        // of its enable pulses before the first poll would have learned it.
+        let eval = scene::evaluate_scene(
+            &self.parts,
+            &self.wires,
+            &self.pressed,
+            &self.avr_pins,
+            &self.pin_pulses,
+            &self.keypad_keys,
+        );
+        self.store_eval(eval);
         let workdir = std::env::temp_dir().join(format!("croquis-egui-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&workdir);
         match engine::compile(&self.sketch, &workdir) {
@@ -654,37 +695,50 @@ impl Spike {
     }
 
     fn poll_engine(&mut self) {
-        let mut changed = false;
+        // Drain first, then act: taking an LCD nibble needs to mutate state
+        // while the events are being read.
+        let mut pending: Vec<SimEvent> = Vec::new();
         if let Some(receiver) = &self.events {
             while let Ok(event) = receiver.try_recv() {
-                match event {
-                    SimEvent::Pin { port, pin, high } => {
-                        self.avr_pins
-                            .insert(format!("{}{}", port as char, pin), high);
-                        changed = true;
+                pending.push(event);
+            }
+        }
+        let mut changed = false;
+        for event in pending {
+            match event {
+                SimEvent::Pin { port, pin, high } => {
+                    let key = format!("{}{}", port as char, pin);
+                    let previous = self.avr_pins.get(&key).copied();
+                    self.avr_pins.insert(key.clone(), high);
+                    changed = true;
+                    // The enable line has to fall for a nibble to be taken, and
+                    // only a real high-to-low counts: the simulator announces
+                    // every pin's level at start-up, and taking that lone low as
+                    // a pulse puts every later byte half a nibble out of step.
+                    if !high && previous == Some(true) {
+                        self.latch_lcds(&key);
                     }
-                    SimEvent::Serial(byte) => {
-                        self.serial.push(byte as char);
+                }
+                SimEvent::Serial(byte) => {
+                    self.serial.push(byte as char);
+                    changed = true;
+                }
+                SimEvent::Timing {
+                    port,
+                    pin,
+                    high_micros,
+                    ..
+                } => {
+                    if high_micros > 0 {
+                        self.pin_pulses
+                            .insert(format!("{}{}", port as char, pin), high_micros as f64);
                         changed = true;
-                    }
-                    SimEvent::Timing {
-                        port,
-                        pin,
-                        high_micros,
-                        ..
-                    } => {
-                        if high_micros > 0 {
-                            self.pin_pulses
-                                .insert(format!("{}{}", port as char, pin), high_micros as f64);
-                            changed = true;
-                        }
                     }
                 }
             }
         }
         if changed {
-            let eval =
-                scene::evaluate_scene(
+            let eval = scene::evaluate_scene(
                 &self.parts,
                 &self.wires,
                 &self.pressed,
@@ -1030,6 +1084,18 @@ impl eframe::App for Spike {
                 );
                 if shows_active(part, &self.outputs, &self.sensors) {
                     draw_active_dot(&painter, rect, self.camera, part);
+                }
+                if part.kind == "lcd1602" {
+                    if let Some(state) = self.lcd_states.get(&part.id) {
+                        draw_lcd_text(
+                            &painter,
+                            rect,
+                            self.camera,
+                            part,
+                            state,
+                            ctx.input(|input| input.time),
+                        );
+                    }
                 }
             }
 
@@ -1429,6 +1495,82 @@ fn with_alpha(colour: Color32, alpha: f32) -> Color32 {
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// The LCD element's drawing, and its character grid inside it: 16x2 cells of
+/// 3.55 x 5.95 from (12.45, 12.55), each glyph five by eight dots of 0.55 x
+/// 0.65 spaced 0.6 across and 0.7 down.
+const LCD_VIEW: Vec2 = Vec2::new(80.0, 36.0);
+const LCD_ORIGIN: Vec2 = Vec2::new(12.45, 12.55);
+const LCD_CELL: Vec2 = Vec2::new(3.55, 5.95);
+const LCD_DOT: Vec2 = Vec2::new(0.6, 0.7);
+const LCD_DOT_SIZE: Vec2 = Vec2::new(0.55, 0.65);
+
+/// Draw what the LCD1602's controller has been told, in the element's own dots.
+fn draw_lcd_text(
+    painter: &egui::Painter,
+    rect: Rect,
+    camera: Camera,
+    part: &Part,
+    state: &lcd::LcdState,
+    now: f64,
+) {
+    if !state.display_on {
+        return;
+    }
+    let bounds = part.bounds();
+    let screen = Rect::from_min_max(
+        camera.world_to_screen(rect, bounds.min),
+        camera.world_to_screen(rect, bounds.max),
+    );
+    let unit = screen.width() / LCD_VIEW.x;
+    let at = |x: f32, y: f32| screen.min + Vec2::new(x, y) * unit;
+    let dwell = |column: f32, row: f32| LCD_ORIGIN + Vec2::new(column, row) * Vec2::new(LCD_CELL.x, LCD_CELL.y);
+    for (index, code) in state.chars.iter().enumerate() {
+        let Some(glyph) = lcd_font::glyph(*code) else {
+            continue;
+        };
+        let cell = dwell((index % 16) as f32, (index / 16) as f32);
+        for (row, bits) in glyph.iter().enumerate() {
+            // Merge a run of lit dots into one rect: a fifth of the shapes.
+            let mut column = 0;
+            while column < 5 {
+                if bits & (1 << column) == 0 {
+                    column += 1;
+                    continue;
+                }
+                let mut run = 1;
+                while column + run < 5 && bits & (1 << (column + run)) != 0 {
+                    run += 1;
+                }
+                let origin = at(
+                    cell.x + column as f32 * LCD_DOT.x,
+                    cell.y + row as f32 * LCD_DOT.y,
+                );
+                let size = Vec2::new(
+                    LCD_DOT_SIZE.x + LCD_DOT.x * (run - 1) as f32,
+                    LCD_DOT_SIZE.y,
+                ) * unit;
+                painter.rect_filled(Rect::from_min_size(origin, size), 0.0, Color32::WHITE);
+                column += run;
+            }
+        }
+    }
+    // Cursor and blink sit in the cell the address counter points at.
+    let Some(cell_index) = lcd::lcd_index(state.address) else {
+        return;
+    };
+    let cell = dwell((cell_index % 16) as f32, (cell_index / 16) as f32);
+    if state.blink_on && (now % 1.0) < 0.5 {
+        let origin = at(cell.x, cell.y);
+        let size = Vec2::new(2.95, 5.55) * unit;
+        painter.rect_filled(Rect::from_min_size(origin, size), 0.0, Color32::WHITE);
+    }
+    if state.cursor_on {
+        let origin = at(cell.x, cell.y + LCD_DOT.y * 7.0);
+        let size = Vec2::new(2.95, 0.65) * unit;
+        painter.rect_filled(Rect::from_min_size(origin, size), 0.0, Color32::WHITE);
+    }
 }
 
 /// The keypad element's key grid, in its own 70.336 x 91 units: each key is an
