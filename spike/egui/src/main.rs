@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
 use croquis_core::catalogue::parts;
-use croquis_core::netlist::{LedState, OutputState};
+use croquis_core::netlist::{LedState, OutputState, RgbState};
 use croquis_core::route::{expand_path, Point as CorePoint};
 use croquis_sim::engine::{self, SimEvent};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
@@ -153,6 +153,7 @@ struct Spike {
     textures: HashMap<String, egui::TextureHandle>,
     led_states: HashMap<String, LedState>,
     outputs: HashMap<String, OutputState>,
+    rgb_leds: HashMap<String, RgbState>,
     sketch: String,
     next_id: usize,
     sim: Option<engine::Simulator>,
@@ -180,6 +181,7 @@ impl Default for Spike {
             textures: HashMap::new(),
             led_states: HashMap::new(),
             outputs: HashMap::new(),
+            rgb_leds: HashMap::new(),
             sketch: scene::blink_sketch(),
             next_id: 0,
             sim: None,
@@ -216,7 +218,12 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
 }
 
 
-fn texture_key(part: &Part, lit: bool, outputs: &HashMap<String, OutputState>) -> String {
+fn texture_key(
+    part: &Part,
+    lit: bool,
+    outputs: &HashMap<String, OutputState>,
+    rgb_leds: &HashMap<String, RgbState>,
+) -> String {
     if part.kind == "led" {
         return format!("led:{lit}");
     }
@@ -229,6 +236,30 @@ fn texture_key(part: &Part, lit: bool, outputs: &HashMap<String, OutputState>) -
         let color = part.attrs.get("color").map(String::as_str).unwrap_or("red");
         return format!("bar:{color}:{bits}");
     }
+    if part.kind == "rgb-led" {
+        let value = rgb_leds.get(&part.id);
+        return format!(
+            "rgb:{:.2}:{:.2}:{:.2}",
+            value.map(|v| v.r).unwrap_or(0.0),
+            value.map(|v| v.g).unwrap_or(0.0),
+            value.map(|v| v.b).unwrap_or(0.0)
+        );
+    }
+    if part.kind == "servo" || part.kind == "stepper-motor" {
+        let angle = outputs
+            .get(&part.id)
+            .and_then(|out| out.angle)
+            .unwrap_or(0.0);
+        return format!("{}-{:.1}", part.kind, angle);
+    }
+    if part.kind == "seven-segment" || part.kind == "seven-segment-4" {
+        let values = outputs.get(&part.id).map(|out| out.values.as_slice()).unwrap_or(&[]);
+        let bits: String = values
+            .iter()
+            .map(|value| if *value != 0 { '1' } else { '0' })
+            .collect();
+        return format!("seg:{bits}");
+    }
     part.kind.clone()
 }
 
@@ -237,12 +268,13 @@ fn ensure_textures(
     textures: &mut HashMap<String, egui::TextureHandle>,
     parts: &[Part],
     outputs: &HashMap<String, OutputState>,
+    rgb_leds: &HashMap<String, RgbState>,
 ) {
     for part in parts {
         let variants: Vec<(String, bool)> = if part.kind == "led" {
             vec![("led:false".into(), false), ("led:true".into(), true)]
         } else {
-            vec![(texture_key(part, false, outputs), false)]
+            vec![(texture_key(part, false, outputs, rgb_leds), false)]
         };
         for (key, lit) in variants {
             if textures.contains_key(&key) {
@@ -261,6 +293,30 @@ fn ensure_textures(
                     .map(|out| out.values.as_slice())
                     .unwrap_or(&[]);
                 scene::led_bar_svg(
+                    &part.svg,
+                    values,
+                    part.attrs.get("color").map(String::as_str).unwrap_or("red"),
+                )
+            } else if part.kind == "rgb-led" {
+                let value = rgb_leds.get(&part.id);
+                scene::rgb_svg(
+                    &part.svg,
+                    value.map(|v| v.r).unwrap_or(0.0),
+                    value.map(|v| v.g).unwrap_or(0.0),
+                    value.map(|v| v.b).unwrap_or(0.0),
+                )
+            } else if part.kind == "servo" || part.kind == "stepper-motor" {
+                let angle = outputs
+                    .get(&part.id)
+                    .and_then(|out| out.angle)
+                    .unwrap_or(0.0);
+                scene::servo_svg(&part.svg, angle)
+            } else if part.kind == "seven-segment" || part.kind == "seven-segment-4" {
+                let values = outputs
+                    .get(&part.id)
+                    .map(|out| out.values.as_slice())
+                    .unwrap_or(&[]);
+                scene::seven_segment_svg(
                     &part.svg,
                     values,
                     part.attrs.get("color").map(String::as_str).unwrap_or("red"),
@@ -292,6 +348,7 @@ impl Spike {
         self.wire_start = None;
         self.led_states.clear();
         self.outputs.clear();
+        self.rgb_leds.clear();
         self.serial.clear();
         self.run_error = None;
         self.file_error = None;
@@ -309,7 +366,7 @@ impl Spike {
         }
         // Rasterise the new scene before swapping it in. Otherwise the canvas
         // paints the blue fallback for a frame while textures load.
-        ensure_textures(ctx, &mut self.textures, &parts, &HashMap::new());
+        ensure_textures(ctx, &mut self.textures, &parts, &HashMap::new(), &HashMap::new());
         self.parts = parts;
         self.wires = wires;
         self.sketch = sketch;
@@ -323,6 +380,7 @@ impl Spike {
         let eval = scene::evaluate_scene(&self.parts, &self.wires, &HashMap::new());
         self.led_states = eval.leds;
         self.outputs = eval.outputs;
+        self.rgb_leds = eval.rgb_leds;
     }
 
     fn open_dialog(&mut self, ctx: &egui::Context) {
@@ -400,6 +458,7 @@ impl Spike {
         let eval = scene::evaluate_scene(&self.parts, &self.wires, &self.avr_pins);
         self.led_states = eval.leds;
         self.outputs = eval.outputs;
+        self.rgb_leds = eval.rgb_leds;
     }
 
     fn poll_engine(&mut self) {
@@ -424,6 +483,7 @@ impl Spike {
             let eval = scene::evaluate_scene(&self.parts, &self.wires, &self.avr_pins);
             self.led_states = eval.leds;
             self.outputs = eval.outputs;
+            self.rgb_leds = eval.rgb_leds;
         }
     }
 }
@@ -432,7 +492,7 @@ impl eframe::App for Spike {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         self.poll_engine();
-        ensure_textures(&ctx, &mut self.textures, &self.parts, &self.outputs);
+        ensure_textures(&ctx, &mut self.textures, &self.parts, &self.outputs, &self.rgb_leds);
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.wire_start = None;
@@ -697,6 +757,7 @@ impl eframe::App for Spike {
                             .get(&part.id)
                             .is_some_and(|state| *state == LedState::Lit),
                         &self.outputs,
+                        &self.rgb_leds,
                     )),
                 );
             }
@@ -962,5 +1023,15 @@ mod tests {
         let patched = scene::led_bar_svg(&svg, &values, "red");
         assert_eq!(patched.matches("#dc012d").count(), 1);
         assert_eq!(patched.matches("#444").count(), 9);
+    }
+
+    #[test]
+    fn seven_segment_patches_lit_segments() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/wokwi/seven-segment.svg");
+        let svg = std::fs::read_to_string(path).expect("7-segment asset");
+        let patched = scene::seven_segment_svg(&svg, &[1, 0, 0, 0, 0, 0, 0, 0], "red");
+        assert_eq!(patched.matches("#dc012d").count(), 1);
+        assert_eq!(patched.matches("#444").count(), 7);
     }
 }
