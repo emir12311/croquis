@@ -134,8 +134,13 @@ pub fn pot_tick(value: f64) -> [(f32, f32); 4] {
 }
 
 /// Where the slide pot's tip group sits, in the drawing's own units.
-pub fn slide_tip_x(value: f64) -> f32 {
-    SLIDE_ORIGIN + slide_offset(value)
+/// Where the tip group's origin sits, in the drawing's own units.
+///
+/// The tip sits inside the drawing's `translate(5 5)`, so that offset belongs on
+/// both axes. Putting it on x alone draws the handle five units high, which is a
+/// handle sitting above the track instead of centred on it.
+pub fn slide_tip_origin(value: f64) -> (f32, f32) {
+    (SLIDE_ORIGIN + slide_offset(value), SLIDE_ORIGIN)
 }
 
 /// The tip offset a value shows, in the element's units.
@@ -281,6 +286,20 @@ mod tests {
             !on_stick(&stick, bounds.min + Vec2::splat(1.0 * unit)),
             "the corner of the module is body"
         );
+    }
+
+    #[test]
+    fn the_handle_is_centred_on_the_track() {
+        // The track runs at y 9.5 inside the drawing's 5,5 offset, and the
+        // handle is 19 tall, so its own centre has to land on the same line.
+        for value in [0.0, 50.0, 100.0] {
+            let (_, top) = slide_tip_origin(value);
+            let centre = top + SLIDE_HANDLE_HEIGHT / 2.0;
+            assert!(
+                (centre - (SLIDE_ORIGIN + 9.5)).abs() < 0.01,
+                "handle centre {centre} is off the track at value {value}"
+            );
+        }
     }
 
     #[test]
