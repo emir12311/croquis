@@ -265,6 +265,7 @@ pub fn evaluate_scene(
     parts: &[Part],
     wires: &[Wire],
     avr: &HashMap<String, bool>,
+    pin_pulse: &HashMap<String, f64>,
 ) -> CircuitEval {
     let eval_parts: Vec<EvalPart> = parts
         .iter()
@@ -293,13 +294,7 @@ pub fn evaluate_scene(
             })
         })
         .collect();
-    evaluate_circuit(
-        &eval_parts,
-        &eval_wires,
-        &HashMap::new(),
-        avr,
-        &HashMap::new(),
-    )
+    evaluate_circuit(&eval_parts, &eval_wires, &HashMap::new(), avr, pin_pulse)
 }
 
 /// The LED states from a loaded circuit.
@@ -308,7 +303,7 @@ pub fn evaluate_with(
     wires: &[Wire],
     avr: &HashMap<String, bool>,
 ) -> HashMap<String, LedState> {
-    evaluate_scene(parts, wires, avr).leds
+    evaluate_scene(parts, wires, avr, &HashMap::new()).leds
 }
 
 /// Evaluate Blink from the simulator's current AVR pin levels.
@@ -425,7 +420,11 @@ pub fn led_bar_svg(svg: &str, values: &[u8], color: &str) -> String {
         if let Some(fill) = after.find("fill=\"#444\"") {
             out.push_str(&after[..fill]);
             let lit = values.get(index).copied().unwrap_or(0) != 0;
-            let fill_color = if lit { bar_colour(color, index) } else { "#444".into() };
+            let fill_color = if lit {
+                bar_colour(color, index)
+            } else {
+                "#444".into()
+            };
             out.push_str(&format!("fill=\"{fill_color}\""));
             rest = &after[fill + "fill=\"#444\"".len()..];
         } else {
@@ -440,8 +439,16 @@ pub fn led_bar_svg(svg: &str, values: &[u8], color: &str) -> String {
 
 fn bar_colour(color: &str, index: usize) -> String {
     match color {
-        "GYR" => ["#9eff3c", "#9eff3c", "#9eff3c", "#9eff3c", "#9eff3c", "#f1d73c", "#f1d73c", "#f1d73c", "#dc012d", "#dc012d"][index.min(9)].into(),
-        "BCYR" => ["#2c95fa", "#6cf9dc", "#6cf9dc", "#6cf9dc", "#6cf9dc", "#f1d73c", "#f1d73c", "#f1d73c", "#dc012d", "#dc012d"][index.min(9)].into(),
+        "GYR" => [
+            "#9eff3c", "#9eff3c", "#9eff3c", "#9eff3c", "#9eff3c", "#f1d73c", "#f1d73c", "#f1d73c",
+            "#dc012d", "#dc012d",
+        ][index.min(9)]
+        .into(),
+        "BCYR" => [
+            "#2c95fa", "#6cf9dc", "#6cf9dc", "#6cf9dc", "#6cf9dc", "#f1d73c", "#f1d73c", "#f1d73c",
+            "#dc012d", "#dc012d",
+        ][index.min(9)]
+        .into(),
         "green" => "#9eff3c".into(),
         "blue" => "#2c95fa".into(),
         "cyan" => "#6cf9dc".into(),
@@ -449,81 +456,6 @@ fn bar_colour(color: &str, index: usize) -> String {
         "red" => "#dc012d".into(),
         other => other.into(),
     }
-}
-
-/// Apply the RGB LED's three channel glows.
-pub fn rgb_svg(svg: &str, r: f64, g: f64, b: f64) -> String {
-    let r = r.clamp(0.0, 1.0);
-    let g = g.clamp(0.0, 1.0);
-    let b = b.clamp(0.0, 1.0);
-    let brightness = r.max(g).max(b);
-    let glow = 0.2 + brightness * 0.6;
-    let mut out = set_filter(svg, "ledFilterRed", r * 3.0);
-    out = set_filter(&out, "ledFilterGreen", g * 3.0);
-    out = set_filter(&out, "ledFilterBlue", b * 3.0);
-    out = out
-        .replacen(
-            "cx=\"1.7\" cy=\"3\" fill=\"rgb(255, 0, 0)\" filter=\"url(#ledFilterRed)\" r=\"2\" opacity=\"0\"",
-            &format!(
-                "cx=\"1.7\" cy=\"3\" fill=\"rgb(255, 0, 0)\" filter=\"url(#ledFilterRed)\" r=\"{}\" opacity=\"{}\"",
-                r * 5.0 + 2.0,
-                (r * 20.0).min(0.3)
-            ),
-            1,
-        )
-        .replacen(
-            "cx=\"2.7\" cy=\"5\" fill=\"rgb(0, 255, 0)\" filter=\"url(#ledFilterGreen)\" r=\"2\" opacity=\"0\"",
-            &format!(
-                "cx=\"2.7\" cy=\"5\" fill=\"rgb(0, 255, 0)\" filter=\"url(#ledFilterGreen)\" r=\"{}\" opacity=\"{}\"",
-                g * 5.0 + 2.0,
-                (g * 20.0).min(0.3)
-            ),
-            1,
-        )
-        .replacen(
-            "cx=\"0.7\" cy=\"5\" fill=\"rgb(1,85,253)\" filter=\"url(#ledFilterBlue)\" r=\"2\" opacity=\"0\"",
-            &format!(
-                "cx=\"0.7\" cy=\"5\" fill=\"rgb(1,85,253)\" filter=\"url(#ledFilterBlue)\" r=\"{}\" opacity=\"{}\"",
-                b * 5.0 + 2.0,
-                (b * 20.0).min(0.3)
-            ),
-            1,
-        )
-        .replacen(
-            "fill=\"rgb(0, 0, 0)\" opacity=\"0\"",
-            &format!(
-                "fill=\"rgb({}, {}, {})\" opacity=\"{glow}\"",
-                (r * 255.0).round(),
-                (g * 255.0 + b * 90.0).round(),
-                (b * 255.0).round()
-            ),
-            1,
-        )
-        .replacen(
-            "cx=\"1.7\" cy=\"4\" r=\"13\" stroke=\"#666\" stroke-width=\"1\" fill=\"none\" filter=\"url(#ledFilter)\" opacity=\"0\"",
-            &format!(
-                "cx=\"1.7\" cy=\"4\" r=\"13\" stroke=\"#666\" stroke-width=\"1\" fill=\"none\" filter=\"url(#ledFilter)\" opacity=\"{glow}\""
-            ),
-            1,
-        );
-    out
-}
-
-fn set_filter(svg: &str, id: &str, value: f64) -> String {
-    let Some(start) = svg.find(&format!("<filter id=\"{id}\"")) else {
-        return svg.to_string();
-    };
-    let Some(relative) = svg[start..].find("stdDeviation=\"0\"") else {
-        return svg.to_string();
-    };
-    let position = start + relative;
-    let needle = "stdDeviation=\"0\"";
-    format!(
-        "{}stdDeviation=\"{}\"{}",
-        &svg[..position],
-        value,
-        &svg[position + needle.len()..]
-    )
 }
 
 /// Rotate the servo horn from the netlist angle.
