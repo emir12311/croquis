@@ -18,12 +18,63 @@ const POT_SWEEP: f64 = 135.0;
 /// The potentiometer's `max`.
 const POT_MAX: f64 = 1023.0;
 
+/// The knob's own radius, so a grab on it turns rather than moves.
+const POT_KNOB_RADIUS: f32 = 7.4;
+
 const SLIDE_VIEW: Vec2 = Vec2::new(55.0, 29.0);
+/// The slide pot's handle, in the drawing's own units: a 12 x 19 rect that
+/// starts at 16.5 across and spans the full height.
+const SLIDE_HANDLE_X: f32 = 16.5;
+const SLIDE_HANDLE_WIDTH: f32 = 12.0;
+const SLIDE_HANDLE_HEIGHT: f32 = 19.0;
+
+/// The joystick's stick, in its 27.2 x 31.8 drawing.
+const STICK_VIEW: Vec2 = Vec2::new(27.2, 31.8);
+const STICK_CENTRE: Vec2 = Vec2::new(13.6, 13.6);
+const STICK_RADIUS: f32 = 10.6;
 /// The tip group's own offset inside the drawing, and its travel.
 const SLIDE_ORIGIN: f32 = 5.0;
 const SLIDE_BASE: f32 = -15.0;
 const SLIDE_TRAVEL: f32 = 30.0;
 const SLIDE_MAX: f64 = 100.0;
+
+/// Whether a grab landed on the potentiometer's knob rather than its body.
+///
+/// A press on the body moves the part; only the knob itself turns.
+pub fn on_pot_knob(part: &Part, world: Pos2) -> bool {
+    let bounds = part.bounds();
+    let unit = bounds.width() / POT_VIEW.x;
+    let centre = bounds.min + POT_CENTRE * unit;
+    world.distance(centre) <= POT_KNOB_RADIUS * unit
+}
+
+/// Whether a grab landed on the slide pot's handle rather than its body.
+pub fn on_slide_handle(part: &Part, world: Pos2) -> bool {
+    let bounds = part.bounds();
+    let unit = bounds.width() / SLIDE_VIEW.x;
+    let local = (world - bounds.min) / unit;
+    let offset = slide_offset(attr_value(part));
+    let left = SLIDE_ORIGIN + SLIDE_HANDLE_X + offset;
+    let right = left + SLIDE_HANDLE_WIDTH;
+    let top = SLIDE_ORIGIN;
+    local.x >= left && local.x <= right && local.y >= top && local.y <= top + SLIDE_HANDLE_HEIGHT
+}
+
+/// Whether a grab landed on the joystick's stick rather than its body.
+pub fn on_stick(part: &Part, world: Pos2) -> bool {
+    let bounds = part.bounds();
+    let unit = bounds.width() / STICK_VIEW.x;
+    let centre = bounds.min + STICK_CENTRE * unit;
+    world.distance(centre) <= STICK_RADIUS * unit
+}
+
+/// The part's own `value` attribute, or zero.
+fn attr_value(part: &Part) -> f64 {
+    part.attrs
+        .get("value")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(0.0)
+}
 
 /// The knob angle a value shows, in degrees.
 pub fn pot_angle(value: f64) -> f64 {
@@ -117,6 +168,48 @@ mod tests {
         );
         // A pointer on the shaft itself asks for nothing.
         assert_eq!(pot_value(&pot, centre), None);
+    }
+
+    #[test]
+    fn only_the_knob_turns_and_a_grab_on_the_body_moves_the_part() {
+        let pot = part(PartKind::Potentiometer);
+        let bounds = pot.bounds();
+        let unit = bounds.width() / POT_VIEW.x;
+        let centre = bounds.min + POT_CENTRE * unit;
+        assert!(on_pot_knob(&pot, centre), "the middle of the knob");
+        assert!(
+            !on_pot_knob(&pot, bounds.min + Vec2::splat(1.0 * unit)),
+            "a corner of the body is not the knob"
+        );
+    }
+
+    #[test]
+    fn the_slide_pot_handle_is_where_the_tip_is_drawn() {
+        let mut slide = part(PartKind::SlidePotentiometer);
+        let bounds = slide.bounds();
+        let unit = bounds.width() / SLIDE_VIEW.x;
+        let at = |local_x: f32| {
+            bounds.min + Vec2::new(SLIDE_ORIGIN + local_x, SLIDE_ORIGIN + 9.0) * unit
+        };
+        // At zero the handle sits left of the track…
+        assert!(on_slide_handle(&slide, at(SLIDE_HANDLE_X + -15.0 + 6.0)));
+        assert!(!on_slide_handle(&slide, at(SLIDE_HANDLE_X + -15.0 + 20.0)));
+        // …and at full it has moved 30 units right with it.
+        slide.attrs.insert("value".into(), "100".into());
+        assert!(on_slide_handle(&slide, at(SLIDE_HANDLE_X + 15.0 + 6.0)));
+        assert!(!on_slide_handle(&slide, at(SLIDE_HANDLE_X + -15.0 + 6.0)));
+    }
+
+    #[test]
+    fn the_stick_is_the_only_thing_that_moves_it() {
+        let stick = part(PartKind::AnalogJoystick);
+        let bounds = stick.bounds();
+        let unit = bounds.width() / STICK_VIEW.x;
+        assert!(on_stick(&stick, bounds.min + STICK_CENTRE * unit));
+        assert!(
+            !on_stick(&stick, bounds.min + Vec2::splat(1.0 * unit)),
+            "the corner of the module is body"
+        );
     }
 
     #[test]
