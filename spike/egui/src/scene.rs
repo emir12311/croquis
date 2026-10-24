@@ -11,7 +11,7 @@ use croquis_core::catalogue::{parse_kind, part_by_kind, PartKind, CATALOGUE};
 use croquis_core::diagram::{build_diagram, parse_diagram, PlacedPart, RoutedWire};
 use croquis_core::document::PinRef as CorePinRef;
 use croquis_core::netlist::{
-    evaluate_circuit_with_state, CircuitEval, EvalPart, EvalWire, KeyPosition, LedState,
+    evaluate_circuit_with_state, CircuitEval, EvalPart, EvalWire, KeyPosition, LedState, PinPoint,
 };
 
 #[derive(Clone)]
@@ -111,10 +111,7 @@ pub fn load_diagram_file(path: &Path) -> (Vec<Part>, Vec<Wire>, String) {
         let Some(kind) = parse_kind(&source.kind) else {
             continue;
         };
-        let Some(def) = defs.get(source.kind.as_str()) else {
-            continue;
-        };
-        let Some(svg) = fs::read_to_string(root.join("assets/wokwi").join(&def.svg)).ok() else {
+        let Some((width, height, pins, svg)) = part_art(&root, kind, &defs) else {
             continue;
         };
         let index = parts.len();
@@ -123,20 +120,10 @@ pub fn load_diagram_file(path: &Path) -> (Vec<Part>, Vec<Wire>, String) {
             id: source.id.clone(),
             kind: source.kind.clone(),
             name: part_by_kind(kind).label.to_string(),
-            center: Pos2::new(
-                source.x as f32 + def.width / 2.0,
-                source.y as f32 + def.height / 2.0,
-            ),
-            size: Vec2::new(def.width, def.height),
+            center: Pos2::new(source.x as f32 + width / 2.0, source.y as f32 + height / 2.0),
+            size: Vec2::new(width, height),
             color: Color32::from_rgb(70, 100, 130),
-            pins: def
-                .pins
-                .iter()
-                .map(|pin| Pin {
-                    name: pin.name.clone(),
-                    offset: Vec2::new(pin.x - def.width / 2.0, pin.y - def.height / 2.0),
-                })
-                .collect(),
+            pins,
             attrs: source.attrs.clone(),
             svg,
         });
@@ -279,7 +266,22 @@ pub fn evaluate_scene(
             Some(EvalPart {
                 id: part.id.clone(),
                 kind,
-                pins: Vec::new(),
+                // A pin sitting in a breadboard hole is how the board's strips
+                // connect: the netlist joins holes by proximity, so it needs the
+                // legs' real positions, not just their names.
+                pins: part
+                    .pins
+                    .iter()
+                    .enumerate()
+                    .map(|(index, pin)| {
+                        let at = part.pin_world(index);
+                        PinPoint {
+                            name: pin.name.clone(),
+                            x: f64::from(at.x),
+                            y: f64::from(at.y),
+                        }
+                    })
+                    .collect(),
                 attrs: part.attrs.clone(),
             })
         })
@@ -419,31 +421,56 @@ pub fn blink_sketch() -> String {
 }
 
 /// Create a new instance of a catalogue part for the palette.
-pub fn part_from_kind(kind: PartKind, center: Pos2, id: String) -> Option<Part> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let text = fs::read_to_string(root.join("assets/wokwi/manifest.json")).ok()?;
-    let manifest = serde_json::from_str::<Manifest>(&text).ok()?;
-    let def = manifest
-        .parts
-        .iter()
-        .find(|part| part.kind == kind.as_str())?;
-    let svg = fs::read_to_string(root.join("assets/wokwi").join(&def.svg)).ok()?;
-    let meta = part_by_kind(kind);
-    Some(Part {
-        id,
-        kind: kind.as_str().to_string(),
-        name: meta.label.to_string(),
-        center,
-        size: Vec2::new(def.width, def.height),
-        color: Color32::from_rgb(70, 100, 130),
-        pins: def
+/// A part's art and pins: from the Wokwi assets when they have it, or generated
+/// when the kind is one Croquis draws itself (the breadboards, the 74HC595).
+fn part_art(
+    root: &Path,
+    kind: PartKind,
+    defs: &HashMap<&str, &ManifestPart>,
+) -> Option<(f32, f32, Vec<Pin>, String)> {
+    if let Some(def) = defs.get(kind.as_str()) {
+        let svg = fs::read_to_string(root.join("assets/wokwi").join(&def.svg)).ok()?;
+        let pins = def
             .pins
             .iter()
             .map(|pin| Pin {
                 name: pin.name.clone(),
                 offset: Vec2::new(pin.x - def.width / 2.0, pin.y - def.height / 2.0),
             })
-            .collect(),
+            .collect();
+        return Some((def.width, def.height, pins, svg));
+    }
+    let built = crate::generated::for_kind(kind)?;
+    let pins = built
+        .pins
+        .iter()
+        .map(|(name, x, y)| Pin {
+            name: name.clone(),
+            offset: Vec2::new(x - built.width / 2.0, y - built.height / 2.0),
+        })
+        .collect();
+    Some((built.width, built.height, pins, built.svg))
+}
+
+pub fn part_from_kind(kind: PartKind, center: Pos2, id: String) -> Option<Part> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let text = fs::read_to_string(root.join("assets/wokwi/manifest.json")).ok()?;
+    let manifest = serde_json::from_str::<Manifest>(&text).ok()?;
+    let defs: HashMap<&str, &ManifestPart> = manifest
+        .parts
+        .iter()
+        .map(|part| (part.kind.as_str(), part))
+        .collect();
+    let (width, height, pins, svg) = part_art(&root, kind, &defs)?;
+    let meta = part_by_kind(kind);
+    Some(Part {
+        id,
+        kind: kind.as_str().to_string(),
+        name: meta.label.to_string(),
+        center,
+        size: Vec2::new(width, height),
+        color: Color32::from_rgb(70, 100, 130),
+        pins,
         attrs: meta.attrs.clone(),
         svg,
     })

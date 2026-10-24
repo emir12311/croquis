@@ -29,6 +29,7 @@ use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sen
 mod art;
 mod buzzer;
 mod editor;
+mod generated;
 mod lcd;
 mod lcd_font;
 mod scene;
@@ -2089,6 +2090,72 @@ mod tests {
         let hard = disc_bands(10.0, 0.0, Color32::WHITE, 1.0);
         assert_eq!(hard.len(), 2, "no blur means one hard edge");
         assert_eq!(hard[1].0, 10.0);
+    }
+
+    #[test]
+    fn a_breadboard_joins_only_the_holes_in_one_strip() {
+        use croquis_core::catalogue::PartKind;
+
+        // Pin 13 high, through the board, into the LED: lit only when the two
+        // holes share a strip. This is the board's whole connectivity model.
+        let led_lights = |upper: &str, lower: &str| -> bool {
+            let parts = vec![
+                scene::part_from_kind(PartKind::Uno, Pos2::new(0.0, 0.0), "uno".into())
+                    .expect("uno"),
+                scene::part_from_kind(PartKind::Breadboard, Pos2::new(400.0, 0.0), "bb".into())
+                    .expect("breadboard"),
+                scene::part_from_kind(PartKind::Led, Pos2::new(900.0, 0.0), "led".into())
+                    .expect("led"),
+            ];
+            let at = |id: &str, pin: &str| {
+                let part = parts
+                    .iter()
+                    .position(|part| part.id == id)
+                    .unwrap_or_else(|| panic!("no part {id}"));
+                let index = parts[part]
+                    .pins
+                    .iter()
+                    .position(|candidate| candidate.name == pin)
+                    .unwrap_or_else(|| panic!("no pin {id}:{pin}"));
+                (part, index)
+            };
+            let wire = |a: (&str, &str), b: (&str, &str)| scene::Wire {
+                a: at(a.0, a.1),
+                b: at(b.0, b.1),
+                waypoints: Vec::new(),
+            };
+            let wires = vec![
+                wire(("uno", "13"), ("bb", upper)),
+                wire(("bb", lower), ("led", "A")),
+                wire(("led", "C"), ("uno", "GND.1")),
+            ];
+            let avr = HashMap::from([("B5".to_string(), true)]);
+            let eval = scene::evaluate_scene(
+                &parts,
+                &wires,
+                &HashMap::new(),
+                &avr,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+            );
+            // No resistor here, so a connected LED is over-driven rather than
+            // merely lit. Both mean the strip carried the current.
+            matches!(
+                eval.leds.get("led"),
+                Some(LedState::Lit) | Some(LedState::Dim) | Some(LedState::Burnt)
+            )
+        };
+
+        assert!(led_lights("a5", "c5"), "two holes of one strip are one net");
+        assert!(
+            !led_lights("a5", "f5"),
+            "the two banks across the trench are not joined"
+        );
+        assert!(
+            !led_lights("a5", "a9"),
+            "another column is a different strip"
+        );
     }
 
     #[test]
