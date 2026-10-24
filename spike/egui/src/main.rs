@@ -273,15 +273,11 @@ fn texture_key(
         return format!("{}-{:.1}", part.kind, angle);
     }
     if part.kind == "seven-segment" || part.kind == "seven-segment-4" {
-        let values = outputs
-            .get(&part.id)
-            .map(|out| out.values.as_slice())
-            .unwrap_or(&[]);
-        let bits: String = values
-            .iter()
-            .map(|value| if *value != 0 { '1' } else { '0' })
-            .collect();
-        return format!("seg:{bits}");
+        // The lit segments are drawn live in draw_segments over the base art,
+        // so the texture must not depend on the state. Keying it on the
+        // segments re-rasterised the SVG and uploaded a new texture on every
+        // scan, which collapsed the frame rate to a few frames a second.
+        return part.kind.clone();
     }
     part.kind.clone()
 }
