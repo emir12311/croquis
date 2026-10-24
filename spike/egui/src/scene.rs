@@ -388,6 +388,24 @@ pub fn led_state_svg(svg: &str, color: &str, brightness: f64, on: bool) -> Strin
     format!("{}{}{}", &svg[..start], patched, &svg[end..])
 }
 
+/// The joystick's base art, ready to have its knob drawn on top.
+///
+/// The element's own CSS says `.controls .region { fill: none }`, which the
+/// extraction lost, so the four invisible hit-areas rendered as grey blocks.
+/// The knob itself is hidden: it moves with the axes, and a texture that moved
+/// would have to be re-rasterised for every step of a drag.
+pub fn joystick_svg(svg: &str) -> String {
+    let mut out = svg.to_string();
+    // The hit-areas keep their outline paths; only the fills go.
+    out = out.replace("<rect class=\"region\"", "<rect class=\"region\" fill=\"none\"");
+    // The knob is drawn live, at whatever the axes say.
+    out = out.replace(
+        "<circle id=\"knob\" cx=\"13.6\" cy=\"13.6\" r=\"10.6\" fill=\"url(#g-knob)\" filter=\"url(#noise)\" tabindex=\"0\" transform=\"translate(0, 0)\"></circle>",
+        "",
+    );
+    out
+}
+
 /// The sketch text from the Blink preset.
 pub fn blink_sketch() -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
