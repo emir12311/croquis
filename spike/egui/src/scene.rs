@@ -184,8 +184,17 @@ pub fn presets() -> Vec<(String, PathBuf)> {
         };
         let title = serde_json::from_str::<serde_json::Value>(&text)
             .ok()
-            .and_then(|value| value.get("title").and_then(|title| title.as_str()).map(str::to_string))
-            .or_else(|| path.file_stem().and_then(|stem| stem.to_str()).map(str::to_string))
+            .and_then(|value| {
+                value
+                    .get("title")
+                    .and_then(|title| title.as_str())
+                    .map(str::to_string)
+            })
+            .or_else(|| {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(str::to_string)
+            })
             .unwrap_or_else(|| "Untitled".into());
         entries.push((title, path));
     }
