@@ -180,6 +180,9 @@ struct Spike {
     /// edge — an ultrasonic's echo and a DHT's frame. It is shared with the
     /// simulator's event thread, which is where the answering happens.
     responder: Arc<Mutex<sensors::Responder>>,
+    /// Where pin changes go for the responder thread. Dropping it ends the
+    /// thread, which is what happens when the simulator stops.
+    pin_responder: Option<mpsc::Sender<(String, u8, u8, bool)>>,
     /// Which parts the pointer is holding down, by part id.
     pressed: HashMap<String, bool>,
     /// The key held on each keypad, and when its minimum hold ends.
@@ -265,6 +268,7 @@ impl Default for Spike {
             shift_states: HashMap::new(),
             shift_wiring: HashMap::new(),
             responder: Arc::new(Mutex::new(sensors::Responder::default())),
+            pin_responder: None,
             pressed: HashMap::new(),
             keypad_keys: HashMap::new(),
             keypad_until: HashMap::new(),
@@ -944,13 +948,25 @@ impl Spike {
                 // A DHT read gives up after about a millisecond, so the answer
                 // goes out here, on the thread that sees the edge, rather than
                 // from the frame loop tens of milliseconds later.
+                // Answering from inside simavr's pin callback raises its IRQ
+                // re-entrantly, and a DHT's forty-edge frame comes out
+                // truncated: measured as `start 80 41` on the sketch's own
+                // clock. So the event goes to a thread of its own, which is
+                // outside that callback and still only microseconds behind.
+                let (pin_sender, pin_receiver) = mpsc::channel::<(String, u8, u8, bool)>();
                 let responder = self.responder.clone();
+                std::thread::spawn(move || {
+                    while let Ok((key, port, pin, high)) = pin_receiver.recv() {
+                        if let Ok(mut responder) = responder.lock() {
+                            responder.on_pin(&key, port, pin, high);
+                        }
+                    }
+                });
+                self.pin_responder = Some(pin_sender.clone());
                 let emit: engine::Emit = Arc::new(move |event| {
                     if let engine::SimEvent::Pin { port, pin, high } = &event {
                         let key = format!("{}{}", *port as char, pin);
-                        if let Ok(mut responder) = responder.lock() {
-                            responder.on_pin(&key, *port, *pin, *high);
-                        }
+                        let _ = pin_sender.send((key, *port, *pin, *high));
                     }
                     let _ = sender.send(event);
                     repaint.request_repaint();
@@ -974,6 +990,8 @@ impl Spike {
     }
 
     fn stop_sim(&mut self) {
+        // Ends the responder thread: nothing more to answer for.
+        self.pin_responder = None;
         if let Some(mut sim) = self.sim.take() {
             sim.stop();
         }
