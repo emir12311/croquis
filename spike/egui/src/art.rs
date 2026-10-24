@@ -21,8 +21,32 @@ pub const SPIKE_LED_SVG: &str = r##"
 pub fn rasterize(svg: &str, width: u32, height: u32) -> Option<egui::ColorImage> {
     let mut options = resvg::usvg::Options::default();
     // The Wokwi board drawings contain labels and pin text. With an empty
-    // font database resvg silently omits all of it.
-    options.fontdb_mut().load_system_fonts();
+    // font database resvg silently omits all of it. Pick families from the
+    // fonts this machine actually has instead of naming a font that may not be
+    // installed.
+    let (sans, mono) = {
+        let fonts = options.fontdb_mut();
+        fonts.load_system_fonts();
+        let mut sans = None;
+        let mut mono = None;
+        for face in fonts.faces() {
+            let Some((name, _)) = face.families.first() else {
+                continue;
+            };
+            if face.monospaced {
+                mono.get_or_insert_with(|| name.clone());
+            } else {
+                sans.get_or_insert_with(|| name.clone());
+            }
+        }
+        let sans = sans.unwrap_or_else(|| "sans-serif".to_string());
+        let mono = mono.unwrap_or_else(|| "monospace".to_string());
+        fonts.set_sans_serif_family(sans.clone());
+        fonts.set_monospace_family(mono.clone());
+        (sans, mono)
+    };
+    let _ = mono;
+    options.font_family = sans;
     let tree = match resvg::usvg::Tree::from_str(svg, &options) {
         Ok(tree) => tree,
         Err(error) => {
@@ -61,5 +85,21 @@ mod tests {
     #[test]
     fn invalid_svg_is_rejected_instead_of_panicking() {
         assert!(rasterize("<svg><not-closed>", 32, 32).is_none());
+    }
+
+    #[test]
+    fn system_fonts_render_svg_text() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40">
+            <rect width="120" height="40" fill="#000"/>
+            <text x="8" y="26" font-size="22" font-family="sans-serif" fill="#fff">ABC</text>
+        </svg>"##;
+        let image = rasterize(svg, 120, 40).expect("text svg parses");
+        assert!(
+            image
+                .pixels
+                .iter()
+                .any(|pixel| pixel.r() > 180 && pixel.g() > 180 && pixel.b() > 180),
+            "rendered text should have light pixels"
+        );
     }
 }
