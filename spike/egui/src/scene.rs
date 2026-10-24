@@ -2,13 +2,13 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{Color32, Pos2, Vec2};
 use serde::Deserialize;
 
 use croquis_core::catalogue::{parse_kind, part_by_kind, PartKind, CATALOGUE};
-use croquis_core::diagram::parse_diagram;
+use croquis_core::diagram::{build_diagram, parse_diagram, PlacedPart, RoutedWire};
 use croquis_core::document::PinRef as CorePinRef;
 use croquis_core::netlist::{evaluate_circuit, EvalPart, EvalWire, LedState};
 
@@ -73,18 +73,29 @@ pub struct Wire {
     pub waypoints: Vec<Pos2>,
 }
 
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
 pub fn load_blink() -> (Vec<Part>, Vec<Wire>) {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let path = root().join("presets/blink.json");
+    let (parts, wires, _) = load_diagram_file(&path);
+    (parts, wires)
+}
+
+/// Load a diagram file, returning the parts, wires and sketch.
+pub fn load_diagram_file(path: &Path) -> (Vec<Part>, Vec<Wire>, String) {
+    let root = root();
     let manifest_text = fs::read_to_string(root.join("assets/wokwi/manifest.json")).ok();
-    let preset_text = fs::read_to_string(root.join("presets/blink.json")).ok();
+    let preset_text = fs::read_to_string(path).ok();
     let (Some(manifest_text), Some(preset_text)) = (manifest_text, preset_text) else {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), String::new());
     };
     let Ok(manifest) = serde_json::from_str::<Manifest>(&manifest_text) else {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), String::new());
     };
     let Ok(parsed) = parse_diagram(&preset_text, &CATALOGUE) else {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), String::new());
     };
     let defs: HashMap<&str, &ManifestPart> = manifest
         .parts
@@ -154,7 +165,84 @@ pub fn load_blink() -> (Vec<Part>, Vec<Wire>) {
             waypoints,
         });
     }
-    (parts, wires)
+    (parts, wires, parsed.sketch.unwrap_or_default())
+}
+
+/// Read the shipped preset titles and paths for the File menu.
+pub fn presets() -> Vec<(String, PathBuf)> {
+    let mut entries = Vec::new();
+    let Ok(dir) = fs::read_dir(root().join("presets")) else {
+        return entries;
+    };
+    for entry in dir.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let title = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|value| value.get("title").and_then(|title| title.as_str()).map(str::to_string))
+            .or_else(|| path.file_stem().and_then(|stem| stem.to_str()).map(str::to_string))
+            .unwrap_or_else(|| "Untitled".into());
+        entries.push((title, path));
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries
+}
+
+/// Write the current circuit in the old app's diagram format.
+pub fn save_diagram_file(
+    path: &Path,
+    parts: &[Part],
+    wires: &[Wire],
+    sketch: &str,
+) -> Result<(), String> {
+    let placed: Vec<PlacedPart> = parts
+        .iter()
+        .map(|part| PlacedPart {
+            id: part.id.clone(),
+            kind: part.kind.clone(),
+            x: (part.center.x - part.size.x / 2.0) as f64,
+            y: (part.center.y - part.size.y / 2.0) as f64,
+            rotate: None,
+            attrs: part.attrs.clone(),
+        })
+        .collect();
+    let routed: Vec<RoutedWire> = wires
+        .iter()
+        .filter_map(|wire| {
+            let a = &parts[wire.a.0];
+            let b = &parts[wire.b.0];
+            Some(RoutedWire {
+                a: CorePinRef {
+                    instance_id: a.id.clone(),
+                    pin: a.pins[wire.a.1].name.clone(),
+                },
+                b: CorePinRef {
+                    instance_id: b.id.clone(),
+                    pin: b.pins[wire.b.1].name.clone(),
+                },
+                colour: None,
+                waypoints: wire
+                    .waypoints
+                    .iter()
+                    .map(|point| CorePoint::new(point.x as f64, point.y as f64))
+                    .collect(),
+            })
+        })
+        .collect();
+    let pin_point = |reference: &CorePinRef| {
+        let part = parts.iter().find(|part| part.id == reference.instance_id)?;
+        let index = part.pins.iter().position(|pin| pin.name == reference.pin)?;
+        let point = part.pin_world(index);
+        Some(CorePoint::new(point.x as f64, point.y as f64))
+    };
+    let diagram = build_diagram(&placed, &routed, sketch, &CATALOGUE, &pin_point);
+    let text = serde_json::to_string_pretty(&diagram).map_err(|error| error.to_string())?;
+    fs::write(path, format!("{text}\n")).map_err(|error| error.to_string())
 }
 
 /// Evaluate the Blink preset with the AVR's pin 13 high.
@@ -163,9 +251,12 @@ pub fn evaluate_blink() -> HashMap<String, LedState> {
     evaluate_blink_with(&avr)
 }
 
-/// Evaluate Blink from the simulator's current AVR pin levels.
-pub fn evaluate_blink_with(avr: &HashMap<String, bool>) -> HashMap<String, LedState> {
-    let (parts, wires) = load_blink();
+/// Evaluate any loaded circuit from the simulator's current AVR pin levels.
+pub fn evaluate_with(
+    parts: &[Part],
+    wires: &[Wire],
+    avr: &HashMap<String, bool>,
+) -> HashMap<String, LedState> {
     let eval_parts: Vec<EvalPart> = parts
         .iter()
         .filter_map(|part| {
@@ -201,6 +292,12 @@ pub fn evaluate_blink_with(avr: &HashMap<String, bool>) -> HashMap<String, LedSt
         &HashMap::new(),
     )
     .leds
+}
+
+/// Evaluate Blink from the simulator's current AVR pin levels.
+pub fn evaluate_blink_with(avr: &HashMap<String, bool>) -> HashMap<String, LedState> {
+    let (parts, wires) = load_blink();
+    evaluate_with(&parts, &wires, avr)
 }
 
 /// Apply the LED element's own state rules to its extracted SVG.

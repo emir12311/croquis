@@ -13,7 +13,7 @@
 //! geometry without one.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
 use croquis_core::catalogue::parts;
@@ -160,6 +160,8 @@ struct Spike {
     avr_pins: HashMap<String, bool>,
     serial: String,
     run_error: Option<String>,
+    path: Option<PathBuf>,
+    file_error: Option<String>,
 }
 
 impl Default for Spike {
@@ -183,6 +185,8 @@ impl Default for Spike {
             avr_pins: HashMap::new(),
             serial: String::new(),
             run_error: None,
+            path: None,
+            file_error: None,
         }
     }
 }
@@ -218,15 +222,75 @@ impl Spike {
         self.led_states.clear();
         self.serial.clear();
         self.run_error = None;
+        self.file_error = None;
+        self.path = None;
         self.textures.clear();
         self.camera = Camera::default();
+    }
+
+    fn open_path(&mut self, path: PathBuf) {
+        self.stop_sim();
+        let (parts, wires, sketch) = scene::load_diagram_file(&path);
+        if parts.is_empty() {
+            self.file_error = Some(format!("Could not load {}", path.display()));
+            return;
+        }
+        self.parts = parts;
+        self.wires = wires;
+        self.sketch = sketch;
+        self.path = Some(path);
+        self.selected = None;
+        self.wire_start = None;
+        self.serial.clear();
+        self.run_error = None;
+        self.file_error = None;
+        self.textures.clear();
+        self.camera = Camera::default();
+        self.led_states = scene::evaluate_with(&self.parts, &self.wires, &HashMap::new());
+    }
+
+    fn open_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Croquis diagram", &["json"])
+            .pick_file()
+        {
+            self.open_path(path);
+        }
+    }
+
+    fn save_to(&mut self, path: PathBuf) {
+        match scene::save_diagram_file(&path, &self.parts, &self.wires, &self.sketch) {
+            Ok(()) => {
+                self.path = Some(path);
+                self.file_error = None;
+            }
+            Err(error) => self.file_error = Some(error),
+        }
+    }
+
+    fn save(&mut self) {
+        if let Some(path) = &self.path {
+            self.save_to(path.clone());
+        } else {
+            self.save_as();
+        }
+    }
+
+    fn save_as(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Croquis diagram", &["json"])
+            .set_file_name("diagram.json")
+            .save_file()
+        {
+            self.save_to(path);
+        }
     }
 
     fn start_sim(&mut self, ctx: &egui::Context) {
         self.run_error = None;
         self.serial.clear();
         self.avr_pins.clear();
-        self.led_states = scene::evaluate_blink_with(&self.avr_pins);
+        self.led_states = scene::evaluate_with(&self.parts, &self.wires, &self.avr_pins);
         let workdir = std::env::temp_dir().join(format!("croquis-egui-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&workdir);
         match engine::compile(&self.sketch, &workdir) {
@@ -257,7 +321,7 @@ impl Spike {
         self.events = None;
         self.running = false;
         self.avr_pins.clear();
-        self.led_states = scene::evaluate_blink_with(&self.avr_pins);
+        self.led_states = scene::evaluate_with(&self.parts, &self.wires, &self.avr_pins);
     }
 
     fn poll_engine(&mut self) {
@@ -279,7 +343,7 @@ impl Spike {
             }
         }
         if changed {
-            self.led_states = scene::evaluate_blink_with(&self.avr_pins);
+            self.led_states = scene::evaluate_with(&self.parts, &self.wires, &self.avr_pins);
         }
     }
 }
@@ -331,6 +395,23 @@ impl eframe::App for Spike {
                         if ui.button("New").clicked() {
                             self.new_document();
                         }
+                        if ui.button("Open…").clicked() {
+                            self.open_dialog();
+                        }
+                        if ui.button("Save").clicked() {
+                            self.save();
+                        }
+                        if ui.button("Save as…").clicked() {
+                            self.save_as();
+                        }
+                        ui.menu_button("Presets", |ui| {
+                            for (title, path) in scene::presets() {
+                                if ui.button(title).clicked() {
+                                    self.open_path(path);
+                                }
+                            }
+                        });
+                        ui.separator();
                         if ui.button("Quit").clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
@@ -360,6 +441,9 @@ impl eframe::App for Spike {
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(if self.running { "Running" } else { "Stopped" });
+                        if let Some(error) = &self.file_error {
+                            ui.colored_label(Color32::from_rgb(0xe5, 0x48, 0x4d), error);
+                        }
                         if let Some(error) = &self.run_error {
                             ui.colored_label(
                                 Color32::from_rgb(0xe5, 0x48, 0x4d),
@@ -790,5 +874,30 @@ mod tests {
             scene::evaluate_blink_with(&low).get("led1"),
             Some(&LedState::Off)
         );
+    }
+
+    #[test]
+    fn presets_load_through_the_generic_loader() {
+        let presets = scene::presets();
+        assert!(presets.len() >= 20, "shipped presets are discoverable");
+        let (parts, wires, sketch) = scene::load_diagram_file(&presets[0].1);
+        assert!(!parts.is_empty());
+        assert!(!wires.is_empty());
+        assert!(!sketch.is_empty());
+    }
+
+    #[test]
+    fn a_loaded_diagram_saves_and_reloads() {
+        let path = std::env::temp_dir().join("croquis-roundtrip.json");
+        let (parts, wires, sketch) = scene::load_diagram_file(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/button.json"),
+        );
+        scene::save_diagram_file(&path, &parts, &wires, &sketch).expect("save");
+        let (reloaded_parts, reloaded_wires, reloaded_sketch) =
+            scene::load_diagram_file(&path);
+        assert_eq!(reloaded_parts.len(), parts.len());
+        assert_eq!(reloaded_wires.len(), wires.len());
+        assert_eq!(reloaded_sketch, sketch);
+        let _ = std::fs::remove_file(path);
     }
 }
