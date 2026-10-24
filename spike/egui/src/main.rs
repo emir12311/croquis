@@ -32,6 +32,7 @@ mod editor;
 mod generated;
 mod lcd;
 mod lcd_font;
+mod properties;
 mod scene;
 
 use scene::{Part, PinRef, Wire};
@@ -181,6 +182,9 @@ struct Spike {
     /// The LCDs' wiring, and what their controllers have been told so far.
     lcd_wiring: HashMap<String, LcdWiring>,
     lcd_states: HashMap<String, lcd::LcdState>,
+    /// Set when a property was edited, so the circuit is solved again even
+    /// though no pin changed.
+    reevaluate: bool,
     buzzer: buzzer::BuzzerAudio,
     pin_pulses: HashMap<String, f64>,
     /// The duty cycle measured on each PWM pin, 0 to 1.
@@ -241,6 +245,7 @@ impl Default for Spike {
             last_analogs: HashMap::new(),
             lcd_wiring: HashMap::new(),
             lcd_states: HashMap::new(),
+            reevaluate: false,
             buzzer: buzzer::BuzzerAudio::default(),
             pin_pulses: HashMap::new(),
             pin_duty: HashMap::new(),
@@ -810,17 +815,24 @@ impl Spike {
             }
         }
         if changed {
-            let eval = scene::evaluate_scene(
-                &self.parts,
-                &self.wires,
-                &self.pressed,
-                &self.avr_pins,
-                &self.pin_duty,
-                &self.pin_pulses,
-                &self.keypad_keys,
-            );
-            self.store_eval(eval);
+            self.evaluate_now();
         }
+    }
+
+    /// Solve the circuit as it stands. Called when the simulator reports a
+    /// change, and when a property was edited — the netlist reads attributes, so
+    /// an edit has to re-solve even though no pin moved.
+    fn evaluate_now(&mut self) {
+        let eval = scene::evaluate_scene(
+            &self.parts,
+            &self.wires,
+            &self.pressed,
+            &self.avr_pins,
+            &self.pin_duty,
+            &self.pin_pulses,
+            &self.keypad_keys,
+        );
+        self.store_eval(eval);
     }
 }
 
@@ -831,6 +843,10 @@ impl eframe::App for Spike {
         if self.auto_run && !self.running {
             self.auto_run = false;
             self.start_sim(&ctx);
+        }
+        if self.reevaluate {
+            self.reevaluate = false;
+            self.evaluate_now();
         }
         self.tick_input();
         self.buzzer.update(&self.outputs);
@@ -944,6 +960,7 @@ impl eframe::App for Spike {
                     });
             });
 
+        let mut edited = false;
         egui::Panel::right("components")
             .exact_size(220.0)
             .show(root, |ui| {
@@ -951,6 +968,7 @@ impl eframe::App for Spike {
                 ui.separator();
                 egui::ScrollArea::vertical()
                     .id_salt("component-list")
+                    .max_height(260.0)
                     .show(ui, |ui| {
                         for def in parts() {
                             if ui.button(def.label).clicked() {
@@ -970,7 +988,25 @@ impl eframe::App for Spike {
                             }
                         }
                     });
+                ui.separator();
+                ui.heading("Properties");
+                egui::ScrollArea::vertical()
+                    .id_salt("properties")
+                    .show(ui, |ui| {
+                        match self.selected {
+                            Some(index) if index < self.parts.len() => {
+                                let part = &mut self.parts[index];
+                                edited = properties::show(ui, part);
+                            }
+                            _ => {
+                                ui.weak("Select a part to edit it.");
+                            }
+                        }
+                    });
             });
+        if edited {
+            self.reevaluate = true;
+        }
 
         egui::Panel::left("editor")
             .exact_size(420.0)
@@ -2096,6 +2132,43 @@ mod tests {
         let hard = disc_bands(10.0, 0.0, Color32::WHITE, 1.0);
         assert_eq!(hard.len(), 2, "no blur means one hard edge");
         assert_eq!(hard[1].0, 10.0);
+    }
+
+    #[test]
+    fn editing_a_property_resolves_the_circuit() {
+        // The tilt switch is the case the owner could not use: its `tilted`
+        // attribute is the whole switch, and nothing could change it. This is
+        // the panel's write path, then the solve it triggers.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/digital-sensors.json");
+        let (parts, wires, _) = scene::load_diagram_file(&path);
+        let mut spike = Spike::default();
+        let tilt = parts
+            .iter()
+            .position(|part| part.id == "tilt1")
+            .expect("tilt switch");
+        spike.parts = parts;
+        spike.wires = wires;
+
+        spike.evaluate_now();
+        assert!(!spike.sensors["tilt1"].active, "upright to start with");
+
+        use croquis_core::catalogue::{parse_kind, part_by_kind};
+        let field = part_by_kind(parse_kind("tilt-switch").expect("kind"))
+            .fields
+            .iter()
+            .find(|field| field.name == "tilted")
+            .expect("tilted field")
+            .clone();
+        assert!(properties::field_commit(
+            &mut spike.parts[tilt],
+            &field,
+            properties::EditorValue::Toggle(true)
+        ));
+        spike.evaluate_now();
+        assert!(
+            spike.sensors["tilt1"].active,
+            "tilting it has to reach the netlist, which is what every preset              that reads a sensor depends on"
+        );
     }
 
     #[test]
