@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use croquis_core::catalogue::parts;
@@ -171,17 +171,15 @@ struct Spike {
     outputs: HashMap<String, OutputState>,
     rgb_leds: HashMap<String, RgbState>,
     sensors: HashMap<String, SensorState>,
-    /// Each ultrasonic's trigger pin, and the echo to play back: echo port,
-    /// echo pin, delay in microseconds, width in microseconds.
     /// Each 74HC595's clocked and latched bits, and how its inputs are wired.
     /// A `shiftOut` burst is several clock edges in a few microseconds, so the
     /// register is stepped per edge rather than once per evaluation.
     shift_states: HashMap<String, ShiftState>,
     shift_wiring: HashMap<String, ShiftWiring>,
-    echoes: HashMap<String, (u8, u8, u64, u64)>,
-    /// Each DHT's data pin, and the reading to answer with.
-    dht_sensors: HashMap<String, (f64, f64)>,
-    dht_busy: HashMap<String, Instant>,
+    /// The sensors that must be answered within a millisecond of the sketch's
+    /// edge — an ultrasonic's echo and a DHT's frame. It is shared with the
+    /// simulator's event thread, which is where the answering happens.
+    responder: Arc<Mutex<sensors::Responder>>,
     /// Which parts the pointer is holding down, by part id.
     pressed: HashMap<String, bool>,
     /// The key held on each keypad, and when its minimum hold ends.
@@ -264,9 +262,7 @@ impl Default for Spike {
             sensors: HashMap::new(),
             shift_states: HashMap::new(),
             shift_wiring: HashMap::new(),
-            echoes: HashMap::new(),
-            dht_sensors: HashMap::new(),
-            dht_busy: HashMap::new(),
+            responder: Arc::new(Mutex::new(sensors::Responder::default())),
             pressed: HashMap::new(),
             keypad_keys: HashMap::new(),
             keypad_until: HashMap::new(),
@@ -483,9 +479,9 @@ impl Spike {
         self.sensors.clear();
         self.shift_states.clear();
         self.shift_wiring.clear();
-        self.echoes.clear();
-        self.dht_sensors.clear();
-        self.dht_busy.clear();
+        if let Ok(mut responder) = self.responder.lock() {
+            responder.clear();
+        }
         self.lcd_states.clear();
         self.forget_input();
         self.pin_pulses.clear();
@@ -591,26 +587,28 @@ impl Spike {
         self.sensors = eval.sensors;
         self.shift_states = eval.shift_registers.clone();
         self.shift_wiring = eval.shift_wiring.clone();
-        self.echoes = eval
-            .echoes
-            .iter()
-            .map(|echo| {
-                (
-                    format!("{}{}", echo.trigger.0, echo.trigger.1),
-                    (
-                        echo.echo.0 as u8,
-                        echo.echo.1,
-                        u64::from(echo.delay_us),
-                        u64::from(echo.width_us),
-                    ),
-                )
-            })
-            .collect();
-        self.dht_sensors = eval
-            .dht_sensors
-            .values()
-            .map(|sensor| (sensor.pin.clone(), (sensor.humidity, sensor.temperature)))
-            .collect();
+        if let Ok(mut responder) = self.responder.lock() {
+            responder.set_circuit(
+                eval.echoes
+                    .iter()
+                    .map(|echo| {
+                        (
+                            format!("{}{}", echo.trigger.0, echo.trigger.1),
+                            (
+                                echo.echo.0 as u8,
+                                echo.echo.1,
+                                u64::from(echo.delay_us),
+                                u64::from(echo.width_us),
+                            ),
+                        )
+                    })
+                    .collect(),
+                eval.dht_sensors
+                    .values()
+                    .map(|sensor| (sensor.pin.clone(), (sensor.humidity, sensor.temperature)))
+                    .collect(),
+            );
+        }
         self.lcd_wiring = eval.lcd_wiring;
         self.ir_receivers = eval.ir_receivers;
         self.stepper_wiring = eval.stepper_wiring;
@@ -938,12 +936,27 @@ impl Spike {
             Ok(firmware) => {
                 let (sender, receiver) = mpsc::channel();
                 let repaint = ctx.clone();
+                // A DHT read gives up after about a millisecond, so the answer
+                // goes out here, on the thread that sees the edge, rather than
+                // from the frame loop tens of milliseconds later.
+                let responder = self.responder.clone();
                 let emit: engine::Emit = Arc::new(move |event| {
+                    if let engine::SimEvent::Pin { port, pin, high } = &event {
+                        let key = format!("{}{}", *port as char, pin);
+                        if let Ok(mut responder) = responder.lock() {
+                            responder.on_pin(&key, *port, *pin, *high);
+                        }
+                    }
                     let _ = sender.send(event);
                     repaint.request_repaint();
                 });
                 match engine::Simulator::start(Path::new(&firmware.elf), emit, false) {
                     Ok(sim) => {
+                        // The responder can answer now: it holds the same pulse
+                        // channels the simulator listens on.
+                        if let Ok(mut responder) = self.responder.lock() {
+                            responder.set_pulses(Some(sim.pulse_handle()));
+                        }
                         self.sim = Some(sim);
                         self.events = Some(receiver);
                         self.running = true;
@@ -1008,43 +1021,6 @@ impl Spike {
                     // a pulse puts every later byte half a nibble out of step.
                     if !high && previous == Some(true) {
                         self.latch_lcds(&key);
-                    }
-                    // An ultrasonic is asked by a trigger pulse, and answers on
-                    // its falling edge with an echo timed on the sketch's clock.
-                    if !high && previous == Some(true) {
-                        if let Some(&(echo_port, echo_pin, delay, width)) =
-                            self.echoes.get(&key)
-                        {
-                            if let Some(sim) = &self.sim {
-                                sim.pulse(echo_port, echo_pin, delay, width);
-                            }
-                        }
-                    }
-                    // A DHT is not triggered by a pulse but by the line being let
-                    // go: the sketch pulls it low, releases it, and waits. So the
-                    // answer goes out on the rising edge, and not again until the
-                    // sensor would have finished talking.
-                    if high {
-                        if let Some(&(humidity, temperature)) = self.dht_sensors.get(&key) {
-                            let ready = self
-                                .dht_busy
-                                .get(&key)
-                                .is_none_or(|until| *until <= Instant::now());
-                            if ready {
-                                self.dht_busy.insert(
-                                    key.clone(),
-                                    Instant::now() + Duration::from_millis(1000),
-                                );
-                                if let Some(sim) = &self.sim {
-                                    sim.pulse_script(
-                                        port as u8,
-                                        pin,
-                                        30,
-                                        sensors::dht_durations(humidity, temperature),
-                                    );
-                                }
-                            }
-                        }
                     }
                     // A shift register clocks on its clock line and latches on
                     // its latch line, and `shiftOut` makes those edges far
