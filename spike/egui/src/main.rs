@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
 use croquis_core::catalogue::parts;
-use croquis_core::netlist::LedState;
+use croquis_core::netlist::{LedState, OutputState};
 use croquis_core::route::{expand_path, Point as CorePoint};
 use croquis_sim::engine::{self, SimEvent};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
@@ -152,6 +152,7 @@ struct Spike {
     hovered_pin: Option<PinRef>,
     textures: HashMap<String, egui::TextureHandle>,
     led_states: HashMap<String, LedState>,
+    outputs: HashMap<String, OutputState>,
     sketch: String,
     next_id: usize,
     sim: Option<engine::Simulator>,
@@ -178,6 +179,7 @@ impl Default for Spike {
             hovered_pin: None,
             textures: HashMap::new(),
             led_states: HashMap::new(),
+            outputs: HashMap::new(),
             sketch: scene::blink_sketch(),
             next_id: 0,
             sim: None,
@@ -213,6 +215,73 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
     None
 }
 
+
+fn texture_key(part: &Part, lit: bool, outputs: &HashMap<String, OutputState>) -> String {
+    if part.kind == "led" {
+        return format!("led:{lit}");
+    }
+    if part.kind == "led-bar-graph" {
+        let values = outputs.get(&part.id).map(|out| out.values.as_slice()).unwrap_or(&[]);
+        let bits: String = values
+            .iter()
+            .map(|value| if *value != 0 { '1' } else { '0' })
+            .collect();
+        let color = part.attrs.get("color").map(String::as_str).unwrap_or("red");
+        return format!("bar:{color}:{bits}");
+    }
+    part.kind.clone()
+}
+
+fn ensure_textures(
+    ctx: &egui::Context,
+    textures: &mut HashMap<String, egui::TextureHandle>,
+    parts: &[Part],
+    outputs: &HashMap<String, OutputState>,
+) {
+    for part in parts {
+        let variants: Vec<(String, bool)> = if part.kind == "led" {
+            vec![("led:false".into(), false), ("led:true".into(), true)]
+        } else {
+            vec![(texture_key(part, false, outputs), false)]
+        };
+        for (key, lit) in variants {
+            if textures.contains_key(&key) {
+                continue;
+            }
+            let svg = if part.kind == "led" {
+                scene::led_state_svg(
+                    &part.svg,
+                    part.attrs.get("color").map(String::as_str).unwrap_or("red"),
+                    if lit { 1.0 } else { 0.0 },
+                    lit,
+                )
+            } else if part.kind == "led-bar-graph" {
+                let values = outputs
+                    .get(&part.id)
+                    .map(|out| out.values.as_slice())
+                    .unwrap_or(&[]);
+                scene::led_bar_svg(
+                    &part.svg,
+                    values,
+                    part.attrs.get("color").map(String::as_str).unwrap_or("red"),
+                )
+            } else {
+                part.svg.clone()
+            };
+            let width = (part.size.x * 3.0).max(1.0) as u32;
+            let height = (part.size.y * 3.0).max(1.0) as u32;
+            if let Some(image) = art::rasterize(&svg, width, height) {
+                let texture = ctx.load_texture(
+                    format!("part-{key}"),
+                    image,
+                    egui::TextureOptions::LINEAR,
+                );
+                textures.insert(key, texture);
+            }
+        }
+    }
+}
+
 impl Spike {
     fn new_document(&mut self) {
         self.stop_sim();
@@ -222,52 +291,13 @@ impl Spike {
         self.selected = None;
         self.wire_start = None;
         self.led_states.clear();
+        self.outputs.clear();
         self.serial.clear();
         self.run_error = None;
         self.file_error = None;
         self.path = None;
         self.textures.clear();
         self.camera = Camera::default();
-    }
-
-    fn ensure_textures(&mut self, ctx: &egui::Context, parts: &[Part]) {
-        for part in parts {
-            let variants: &[bool] = if part.kind == "led" {
-                &[false, true]
-            } else {
-                &[false]
-            };
-            for lit in variants {
-                let key = if part.kind == "led" {
-                    format!("led:{lit}")
-                } else {
-                    part.kind.clone()
-                };
-                if self.textures.contains_key(&key) {
-                    continue;
-                }
-                let svg = if part.kind == "led" {
-                    scene::led_state_svg(
-                        &part.svg,
-                        part.attrs.get("color").map(String::as_str).unwrap_or("red"),
-                        if *lit { 1.0 } else { 0.0 },
-                        *lit,
-                    )
-                } else {
-                    part.svg.clone()
-                };
-                let width = (part.size.x * 3.0).max(1.0) as u32;
-                let height = (part.size.y * 3.0).max(1.0) as u32;
-                if let Some(image) = art::rasterize(&svg, width, height) {
-                    let texture = ctx.load_texture(
-                        format!("part-{key}"),
-                        image,
-                        egui::TextureOptions::LINEAR,
-                    );
-                    self.textures.insert(key, texture);
-                }
-            }
-        }
     }
 
     fn open_path(&mut self, path: PathBuf, ctx: &egui::Context) {
@@ -279,7 +309,7 @@ impl Spike {
         }
         // Rasterise the new scene before swapping it in. Otherwise the canvas
         // paints the blue fallback for a frame while textures load.
-        self.ensure_textures(ctx, &parts);
+        ensure_textures(ctx, &mut self.textures, &parts, &HashMap::new());
         self.parts = parts;
         self.wires = wires;
         self.sketch = sketch;
@@ -290,7 +320,9 @@ impl Spike {
         self.run_error = None;
         self.file_error = None;
         self.camera = Camera::default();
-        self.led_states = scene::evaluate_with(&self.parts, &self.wires, &HashMap::new());
+        let eval = scene::evaluate_scene(&self.parts, &self.wires, &HashMap::new());
+        self.led_states = eval.leds;
+        self.outputs = eval.outputs;
     }
 
     fn open_dialog(&mut self, ctx: &egui::Context) {
@@ -365,7 +397,9 @@ impl Spike {
         self.events = None;
         self.running = false;
         self.avr_pins.clear();
-        self.led_states = scene::evaluate_with(&self.parts, &self.wires, &self.avr_pins);
+        let eval = scene::evaluate_scene(&self.parts, &self.wires, &self.avr_pins);
+        self.led_states = eval.leds;
+        self.outputs = eval.outputs;
     }
 
     fn poll_engine(&mut self) {
@@ -387,7 +421,9 @@ impl Spike {
             }
         }
         if changed {
-            self.led_states = scene::evaluate_with(&self.parts, &self.wires, &self.avr_pins);
+            let eval = scene::evaluate_scene(&self.parts, &self.wires, &self.avr_pins);
+            self.led_states = eval.leds;
+            self.outputs = eval.outputs;
         }
     }
 }
@@ -396,37 +432,8 @@ impl eframe::App for Spike {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         self.poll_engine();
-        for part in &self.parts {
-            let lit = self
-                .led_states
-                .get(&part.id)
-                .is_some_and(|state| *state == LedState::Lit);
-            let key = if part.kind == "led" {
-                format!("led:{lit}")
-            } else {
-                part.kind.clone()
-            };
-            if self.textures.contains_key(&key) {
-                continue;
-            }
-            let svg = if part.kind == "led" {
-                scene::led_state_svg(
-                    &part.svg,
-                    part.attrs.get("color").map(String::as_str).unwrap_or("red"),
-                    if lit { 1.0 } else { 0.0 },
-                    lit,
-                )
-            } else {
-                part.svg.clone()
-            };
-            let width = (part.size.x * 3.0).max(1.0) as u32;
-            let height = (part.size.y * 3.0).max(1.0) as u32;
-            if let Some(image) = art::rasterize(&svg, width, height) {
-                let texture =
-                    ctx.load_texture(format!("part-{key}"), image, egui::TextureOptions::LINEAR);
-                self.textures.insert(key, texture);
-            }
-        }
+        ensure_textures(&ctx, &mut self.textures, &self.parts, &self.outputs);
+
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.wire_start = None;
         }
@@ -684,19 +691,13 @@ impl eframe::App for Spike {
                     self.selected == Some(index),
                     self.hovered_pin
                         .filter(|(part_index, _)| *part_index == index),
-                    self.textures.get(if part.kind == "led" {
-                        if self
-                            .led_states
+                    self.textures.get(&texture_key(
+                        part,
+                        self.led_states
                             .get(&part.id)
-                            .is_some_and(|state| *state == LedState::Lit)
-                        {
-                            "led:true"
-                        } else {
-                            "led:false"
-                        }
-                    } else {
-                        &part.kind
-                    }),
+                            .is_some_and(|state| *state == LedState::Lit),
+                        &self.outputs,
+                    )),
                 );
             }
 
