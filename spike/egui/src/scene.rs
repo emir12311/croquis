@@ -545,9 +545,13 @@ pub fn potentiometer_svg(svg: &str, value: f64) -> String {
         &format!("--knob-angle:{degrees}deg"),
         1,
     )
+    // The tick that shows the position is the art's own `#rotating` rect, and
+    // the element turns it with `transform-origin: 10px 8px`. Rotating the knob
+    // ellipse instead leaves that tick standing still, which is what drew a
+    // second marker on top of it.
     .replacen(
-        "<ellipse id=\"knob\"",
-        &format!("<ellipse transform=\"rotate({degrees} 9.91 8.18)\" id=\"knob\""),
+        "<rect id=\"rotating\"",
+        &format!("<rect transform=\"rotate({degrees} 10 8)\" id=\"rotating\""),
         1,
     )
 }

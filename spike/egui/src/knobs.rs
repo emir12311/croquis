@@ -27,6 +27,9 @@ const SLIDE_VIEW: Vec2 = Vec2::new(55.0, 29.0);
 const SLIDE_HANDLE_X: f32 = 16.5;
 const SLIDE_HANDLE_WIDTH: f32 = 12.0;
 const SLIDE_HANDLE_HEIGHT: f32 = 19.0;
+/// Where the handle's left edge sits in the drawing when the value is zero:
+/// the group's 5,5 offset, the tip's -15 base and the handle's own 16.5.
+const SLIDE_HANDLE_ZERO: f32 = SLIDE_ORIGIN + SLIDE_BASE + SLIDE_HANDLE_X;
 
 /// The joystick's stick, in its 27.2 x 31.8 drawing.
 const STICK_VIEW: Vec2 = Vec2::new(27.2, 31.8);
@@ -114,13 +117,33 @@ pub fn slide_offset(value: f64) -> f32 {
     SLIDE_BASE + (value / SLIDE_MAX).clamp(0.0, 1.0) as f32 * SLIDE_TRAVEL
 }
 
-/// The value a pointer asks of the slide pot: its position along the track.
-pub fn slide_value(part: &Part, world: Pos2) -> f64 {
+/// Where the slide pot's handle starts, in the drawing's own units.
+fn slide_handle_left(part: &Part) -> f32 {
+    SLIDE_HANDLE_ZERO + (attr_value(part) / SLIDE_MAX).clamp(0.0, 1.0) as f32 * SLIDE_TRAVEL
+}
+
+/// How far from the handle's left edge a grab landed, in the drawing's units.
+///
+/// A slide follows the pointer: it must not jump so that its edge lands under
+/// the pointer, which is what makes a drag feel like an offset.
+pub fn slide_grab_offset(part: &Part, world: Pos2) -> f32 {
     let bounds = part.bounds();
     let unit = bounds.width() / SLIDE_VIEW.x;
-    let local = (world.x - bounds.min.x) / unit - SLIDE_ORIGIN;
-    let fraction = ((local - SLIDE_BASE) / SLIDE_TRAVEL).clamp(0.0, 1.0);
+    (world.x - bounds.min.x) / unit - slide_handle_left(part)
+}
+
+/// The value a drag asks for, holding on to wherever the handle was grabbed.
+pub fn slide_value_grabbed(part: &Part, world: Pos2, grab: f32) -> f64 {
+    let bounds = part.bounds();
+    let unit = bounds.width() / SLIDE_VIEW.x;
+    let handle = (world.x - bounds.min.x) / unit - grab;
+    let fraction = ((handle - SLIDE_HANDLE_ZERO) / SLIDE_TRAVEL).clamp(0.0, 1.0);
     (f64::from(fraction) * SLIDE_MAX).round()
+}
+
+/// The value a pointer asks of the slide pot, grabbing it where it is left.
+pub fn slide_value(part: &Part, world: Pos2) -> f64 {
+    slide_value_grabbed(part, world, 0.0)
 }
 
 #[cfg(test)]
@@ -220,20 +243,27 @@ mod tests {
     }
 
     #[test]
-    fn a_pointer_along_the_slide_asks_for_that_position() {
-        let slide = part(PartKind::SlidePotentiometer);
+    fn a_slide_follows_the_pointer_from_where_it_was_grabbed() {
+        let mut slide = part(PartKind::SlidePotentiometer);
         let bounds = slide.bounds();
         let unit = bounds.width() / SLIDE_VIEW.x;
-        let at = |local_x: f32| {
-            slide_value(
-                &slide,
-                bounds.min + Vec2::new(SLIDE_ORIGIN + local_x, 10.0) * unit,
-            )
-        };
-        assert_eq!(at(SLIDE_BASE), 0.0);
-        assert_eq!(at(SLIDE_BASE + SLIDE_TRAVEL), 100.0);
-        assert_eq!(at(SLIDE_BASE + SLIDE_TRAVEL / 2.0), 50.0);
-        assert_eq!(at(-50.0), 0.0, "past the low end pins at zero");
-        assert_eq!(at(50.0), 100.0, "and past the high end at full");
+        let at = |local_x: f32| slide_value(&slide, bounds.min + Vec2::new(local_x, 10.0) * unit);
+
+        // The handle's left edge is where the value says it is.
+        assert_eq!(at(SLIDE_HANDLE_ZERO), 0.0);
+        assert_eq!(at(SLIDE_HANDLE_ZERO + SLIDE_TRAVEL), 100.0);
+        assert_eq!(at(SLIDE_HANDLE_ZERO + SLIDE_TRAVEL / 2.0), 50.0);
+
+        // Grabbed in the middle of the handle at zero, the drag keeps that grip:
+        // moving the pointer by half the travel moves the value by half.
+        slide.attrs.insert("value".into(), "0".into());
+        let grab_x = SLIDE_HANDLE_ZERO + SLIDE_HANDLE_WIDTH / 2.0;
+        let grab = slide_grab_offset(&slide, bounds.min + Vec2::new(grab_x, 10.0) * unit);
+        let moved = bounds.min + Vec2::new(grab_x + SLIDE_TRAVEL / 2.0, 10.0) * unit;
+        let value = slide_value_grabbed(&slide, moved, grab);
+        assert_eq!(value, 50.0, "half the travel is half the range, got {value}");
+        // And the ends are reachable without leaving the part.
+        let end = bounds.min + Vec2::new(grab_x + SLIDE_TRAVEL, 10.0) * unit;
+        assert_eq!(slide_value_grabbed(&slide, end, grab), 100.0);
     }
 }

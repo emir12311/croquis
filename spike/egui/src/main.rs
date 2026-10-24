@@ -178,8 +178,10 @@ struct Spike {
     joystick: Option<usize>,
     joystick_moved: bool,
     joystick_start: Option<Pos2>,
-    /// The potentiometer or slide pot whose knob is being dragged.
+    /// The potentiometer or slide pot whose knob is being dragged, and how far
+    /// the pointer sat from the slide pot's handle when it was grabbed.
     knob: Option<usize>,
+    slide_grab: f32,
     /// The levels and voltages last pushed into the simulator, so an unchanged
     /// drive is not re-sent every frame.
     last_drives: HashMap<(char, u8), bool>,
@@ -254,6 +256,7 @@ impl Default for Spike {
             joystick_moved: false,
             joystick_start: None,
             knob: None,
+            slide_grab: 0.0,
             last_drives: HashMap::new(),
             last_analogs: HashMap::new(),
             lcd_wiring: HashMap::new(),
@@ -632,7 +635,7 @@ impl Spike {
         let part = &self.parts[index];
         let value = match part.kind.as_str() {
             "potentiometer" => knobs::pot_value(part, world),
-            "slide-potentiometer" => Some(knobs::slide_value(part, world)),
+            "slide-potentiometer" => Some(knobs::slide_value_grabbed(part, world, self.slide_grab)),
             _ => None,
         };
         let Some(value) = value else {
@@ -801,7 +804,9 @@ impl Spike {
             "slide-potentiometer" => {
                 if knobs::on_slide_handle(&self.parts[index], world) {
                     self.knob = Some(index);
-                    self.drag_knob(index, world);
+                    // Remember where on the handle the grab landed, so it
+                    // follows the pointer instead of jumping to it.
+                    self.slide_grab = knobs::slide_grab_offset(&self.parts[index], world);
                 } else {
                     self.dragging = Some(index);
                 }
@@ -831,6 +836,7 @@ impl Spike {
         self.pressed.clear();
         self.remote_hold = None;
         self.knob = None;
+        self.slide_grab = 0.0;
         if let Some(index) = self.joystick.take() {
             // A stick is a momentary input, not a positioned part.
             self.parts[index].attrs.insert("x".into(), "50".into());
@@ -1114,9 +1120,10 @@ impl eframe::App for Spike {
                 });
             });
 
+        // Docked and fixed: a panel that can change height moves the canvas
+        // beside it, and a canvas that shifts under a drag reads as a twitch.
         egui::Panel::bottom("serial")
-            .resizable(true)
-            .default_size(150.0)
+            .exact_size(150.0)
             .show(root, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("Serial");
@@ -1398,9 +1405,6 @@ impl eframe::App for Spike {
                 }
                 if part.kind == "analog-joystick" {
                     draw_joystick_knob(&painter, rect, self.camera, part);
-                }
-                if part.kind == "potentiometer" {
-                    draw_pot_pointer(&painter, rect, self.camera, part);
                 }
                 if let Some((_, button)) = self.remote_hold.filter(|(held, _)| *held == index) {
                     if let Some(centre) = remote::button_centre(part, button) {
@@ -1825,32 +1829,6 @@ fn with_alpha(colour: Color32, alpha: f32) -> Color32 {
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
-}
-
-/// A pointer on the potentiometer's knob.
-///
-/// The element rotates the knob itself, but its knob is a nearly circular
-/// ellipse (rx 7.27, ry 7.43) with no notch in the artwork, so turning it is
-/// almost invisible. This draws the notch the eye needs: a short line from the
-/// centre at the angle the value asks for.
-fn draw_pot_pointer(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part) {
-    const VIEW_WIDTH: f32 = 20.0;
-    const CENTRE: Vec2 = Vec2::new(9.91, 8.18);
-    let bounds = part.bounds();
-    let screen = Rect::from_min_max(
-        camera.world_to_screen(rect, bounds.min),
-        camera.world_to_screen(rect, bounds.max),
-    );
-    let unit = screen.width() / VIEW_WIDTH;
-    let centre = screen.min + CENTRE * unit;
-    let degrees = knobs::pot_angle(attr_number(part, "value", 0.0)) as f32;
-    let (sin, cos) = degrees.to_radians().sin_cos();
-    // The element measures from twelve o'clock, clockwise.
-    let direction = Vec2::new(sin, -cos);
-    painter.line_segment(
-        [centre + direction * 2.0 * unit, centre + direction * 6.0 * unit],
-        Stroke::new(1.2 * unit, Color32::from_rgb(0x1a, 0x3a, 0x4a)),
-    );
 }
 
 /// The joystick's ball, drawn where its axes say it is.
@@ -2382,11 +2360,11 @@ mod tests {
         let low = scene::potentiometer_svg(&pot, 0.0);
         let high = scene::potentiometer_svg(&pot, 1023.0);
         assert!(
-            low.contains("rotate(-135 9.91 8.18)"),
-            "a knob at zero points down-left"
+            low.contains("rotate(-135 10 8)"),
+            "the art's own tick at zero points down-left"
         );
         assert!(
-            high.contains("rotate(135 9.91 8.18)"),
+            high.contains("rotate(135 10 8)"),
             "and at full, down-right"
         );
         assert_ne!(low, high);
