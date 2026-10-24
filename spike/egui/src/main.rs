@@ -244,7 +244,6 @@ fn texture_key(
     part: &Part,
     lit: bool,
     outputs: &HashMap<String, OutputState>,
-    _rgb_leds: &HashMap<String, RgbState>,
 ) -> String {
     if part.kind == "led" {
         return format!("led:{lit}");
@@ -262,7 +261,11 @@ fn texture_key(
         return format!("bar:{color}:{bits}");
     }
     if part.kind == "rgb-led" {
-        // RGB glows are drawn live in draw_part; the texture stays the base art.
+        // The glow is drawn live in draw_rgb_glow over the base art. It cannot
+        // be baked into the texture per state: the element's SVG carries four
+        // Gaussian-blur filters, and one resvg pass over them costs about a
+        // third of a second, which would re-create the frame-rate collapse
+        // that per-state display art caused.
         return "rgb".into();
     }
     if part.kind == "servo" || part.kind == "stepper-motor" {
@@ -287,13 +290,12 @@ fn ensure_textures(
     textures: &mut HashMap<String, egui::TextureHandle>,
     parts: &[Part],
     outputs: &HashMap<String, OutputState>,
-    rgb_leds: &HashMap<String, RgbState>,
 ) {
     for part in parts {
         let variants: Vec<(String, bool)> = if part.kind == "led" {
             vec![("led:false".into(), false), ("led:true".into(), true)]
         } else {
-            vec![(texture_key(part, false, outputs, rgb_leds), false)]
+            vec![(texture_key(part, false, outputs), false)]
         };
         for (key, lit) in variants {
             if textures.contains_key(&key) {
@@ -373,13 +375,7 @@ impl Spike {
         }
         // Rasterise the new scene before swapping it in. Otherwise the canvas
         // paints the blue fallback for a frame while textures load.
-        ensure_textures(
-            ctx,
-            &mut self.textures,
-            &parts,
-            &HashMap::new(),
-            &HashMap::new(),
-        );
+        ensure_textures(ctx, &mut self.textures, &parts, &HashMap::new());
         self.parts = parts;
         self.wires = wires;
         self.sketch = sketch;
@@ -595,13 +591,7 @@ impl eframe::App for Spike {
             self.auto_run = false;
             self.start_sim(&ctx);
         }
-        ensure_textures(
-            &ctx,
-            &mut self.textures,
-            &self.parts,
-            &self.outputs,
-            &self.rgb_leds,
-        );
+        ensure_textures(&ctx, &mut self.textures, &self.parts, &self.outputs);
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.wire_start = None;
@@ -870,7 +860,6 @@ impl eframe::App for Spike {
                             .get(&part.id)
                             .is_some_and(|state| *state == LedState::Lit),
                         &self.outputs,
-                        &self.rgb_leds,
                     )),
                     self.rgb_leds.get(&part.id).copied(),
                     self.outputs.get(&part.id).map(|out| out.values.as_slice()),
@@ -1083,6 +1072,198 @@ fn draw_segments(painter: &egui::Painter, screen: Rect, part: &Part, values: &[u
     }
 }
 
+/// One of the five shapes the RGB LED element paints for its state.
+struct Glow {
+    x: f32,
+    y: f32,
+    radius: f32,
+    sigma: f32,
+    colour: Color32,
+    alpha: f32,
+    halo: bool,
+}
+
+/// The element's five shapes for a state, in the order it paints them.
+///
+/// Straight out of `rgb-led-element.js`: a channel is a disc of `value * 5 + 2`
+/// blurred by `value * 3` at `min(value * 20, 0.3)`; then a disc of the mixed
+/// colour blurred by 4 at `0.2 + brightness * 0.6`; then a grey halo of the
+/// same opacity.
+fn rgb_glows(state: RgbState) -> [Glow; 5] {
+    let r = state.r.clamp(0.0, 1.0) as f32;
+    let g = state.g.clamp(0.0, 1.0) as f32;
+    let b = state.b.clamp(0.0, 1.0) as f32;
+    let brightness = r.max(g).max(b);
+    let glow = if brightness > 0.0 {
+        0.2 + brightness * 0.6
+    } else {
+        0.0
+    };
+    // The element's own quirk: blue also feeds the green channel by 90/255.
+    let mixed = Color32::from_rgb(
+        (r * 255.0).round() as u8,
+        (g * 255.0 + b * 90.0).min(255.0).round() as u8,
+        (b * 255.0).round() as u8,
+    );
+    let channel = |x: f32, y: f32, value: f32, colour: Color32| Glow {
+        x,
+        y,
+        radius: value * 5.0 + 2.0,
+        sigma: value * 3.0,
+        colour,
+        alpha: (value * 20.0).min(0.3),
+        halo: false,
+    };
+    [
+        channel(1.7, 3.0, r, Color32::from_rgb(255, 0, 0)),
+        channel(2.7, 5.0, g, Color32::from_rgb(0, 255, 0)),
+        channel(0.7, 5.0, b, Color32::from_rgb(1, 85, 253)),
+        Glow {
+            x: 1.7,
+            y: 4.0,
+            radius: 10.0,
+            sigma: 4.0,
+            colour: mixed,
+            alpha: glow,
+            halo: false,
+        },
+        Glow {
+            x: 1.7,
+            y: 4.0,
+            radius: 13.0,
+            sigma: 4.0,
+            colour: Color32::from_rgb(0x66, 0x66, 0x66),
+            alpha: glow,
+            halo: true,
+        },
+    ]
+}
+
+/// The view box of the RGB LED asset, and where it starts.
+const RGB_VIEW_WIDTH: f32 = 37.3425;
+const RGB_VIEW_HEIGHT: f32 = 57.5115;
+const RGB_VIEW_X: f32 = -17.0;
+const RGB_VIEW_Y: f32 = -10.0;
+
+/// Paint the element's glow over the base art.
+///
+/// This has to be drawn rather than rasterised: one resvg pass over the
+/// element's four Gaussian filters costs about a third of a second here, and
+/// the state changes as soon as PWM duty drifts.
+fn draw_rgb_glow(painter: &egui::Painter, screen: Rect, state: RgbState) {
+    // The asset is fitted into the part rect with `preserveAspectRatio="meet"`,
+    // so the glow uses the same mapping to land on the drawn LED.
+    let unit = (screen.width() / RGB_VIEW_WIDTH).min(screen.height() / RGB_VIEW_HEIGHT);
+    let centre_of_view = egui::vec2(
+        RGB_VIEW_X + RGB_VIEW_WIDTH / 2.0,
+        RGB_VIEW_Y + RGB_VIEW_HEIGHT / 2.0,
+    );
+    let at = |x: f32, y: f32| screen.center() + (egui::vec2(x, y) - centre_of_view) * unit;
+    for glow in rgb_glows(state) {
+        if glow.alpha <= 0.0 {
+            continue;
+        }
+        let bands = if glow.halo {
+            halo_bands(glow.radius * unit, glow.sigma * unit, glow.colour, glow.alpha)
+        } else {
+            disc_bands(glow.radius * unit, glow.sigma * unit, glow.colour, glow.alpha)
+        };
+        soft_radial(painter, at(glow.x, glow.y), &bands);
+    }
+}
+
+/// A disc through a Gaussian blur: solid inside, half strength at the radius,
+/// gone about three sigmas past it. Without a blur it is a hard-edged disc.
+fn disc_bands(radius: f32, sigma: f32, colour: Color32, alpha: f32) -> Vec<(f32, Color32)> {
+    let mut bands = vec![(0.0, with_alpha(colour, alpha))];
+    if sigma <= 0.01 || radius <= 0.0 {
+        bands.push((radius.max(0.0), with_alpha(colour, alpha)));
+        return bands;
+    }
+    let inner = (radius - sigma * 2.0).max(0.0);
+    let outer = radius + sigma * 3.0;
+    if inner > 0.0 {
+        bands.push((inner, with_alpha(colour, alpha)));
+    }
+    const STEPS: usize = 6;
+    for step in 1..=STEPS {
+        let t = step as f32 / STEPS as f32;
+        let distance = inner + (outer - inner) * t;
+        bands.push((distance, with_alpha(colour, alpha * (1.0 - smoothstep(t)))));
+    }
+    bands
+}
+
+/// A one-unit stroke through a Gaussian blur: a faint ring, not a disc.
+fn halo_bands(radius: f32, sigma: f32, colour: Color32, alpha: f32) -> Vec<(f32, Color32)> {
+    if sigma <= 0.01 {
+        return vec![(radius, with_alpha(colour, alpha))];
+    }
+    // Peak alpha of a stroke spread over a Gaussian of this width.
+    let peak = (1.0 / (sigma * (std::f32::consts::TAU).sqrt())).min(1.0) * alpha;
+    let inner = (radius - sigma * 3.0).max(0.0);
+    let outer = radius + sigma * 3.0;
+    let mut bands = vec![(inner, with_alpha(colour, 0.0))];
+    const STEPS: usize = 8;
+    for step in 1..=STEPS {
+        let t = step as f32 / STEPS as f32;
+        let distance = inner + (outer - inner) * t;
+        let offset = (distance - radius) / sigma;
+        bands.push((
+            distance,
+            with_alpha(colour, peak * (-0.5 * offset * offset).exp()),
+        ));
+    }
+    bands
+}
+
+/// Fill a radial shape from the inside out, interpolating between bands.
+fn soft_radial(painter: &egui::Painter, centre: Pos2, bands: &[(f32, Color32)]) {
+    const SEGMENTS: usize = 48;
+    let Some((first_radius, first_colour)) = bands.first().copied() else {
+        return;
+    };
+    if first_radius > 0.0 {
+        painter.circle_filled(centre, first_radius, first_colour);
+    }
+    for pair in bands.windows(2) {
+        let (inner, inner_colour) = pair[0];
+        let (outer, outer_colour) = pair[1];
+        if outer <= inner {
+            continue;
+        }
+        let mut mesh = egui::Mesh::default();
+        for index in 0..SEGMENTS {
+            let angle = index as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+            let direction = egui::vec2(angle.cos(), angle.sin());
+            mesh.colored_vertex(centre + direction * inner, inner_colour);
+            mesh.colored_vertex(centre + direction * outer, outer_colour);
+        }
+        for index in 0..SEGMENTS {
+            let next = (index + 1) % SEGMENTS;
+            let (a, b) = ((index * 2) as u32, (index * 2 + 1) as u32);
+            let (c, d) = ((next * 2) as u32, (next * 2 + 1) as u32);
+            mesh.add_triangle(a, b, d);
+            mesh.add_triangle(a, d, c);
+        }
+        painter.add(egui::Shape::mesh(mesh));
+    }
+}
+
+fn with_alpha(colour: Color32, alpha: f32) -> Color32 {
+    Color32::from_rgba_unmultiplied(
+        colour.r(),
+        colour.g(),
+        colour.b(),
+        (alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
+}
+
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn draw_part(
     painter: &egui::Painter,
     rect: Rect,
@@ -1107,38 +1288,8 @@ fn draw_part(
     } else {
         painter.rect_filled(screen, 4.0, part.color);
     }
-    if let Some(rgb) = rgb {
-        let scale = screen.width() / 37.3425;
-        let at = |x: f32, y: f32| {
-            screen.min
-                + egui::vec2(
-                    (x + 17.0) / 37.3425 * screen.width(),
-                    (y + 10.0) / 57.5115 * screen.height(),
-                )
-        };
-        let max = rgb.r.max(rgb.g).max(rgb.b).clamp(0.0, 1.0);
-        let glow = 0.2 + max * 0.6;
-        let red = (rgb.r * 255.0).round().clamp(0.0, 255.0) as u8;
-        let green = (rgb.g * 255.0 + rgb.b * 90.0).round().clamp(0.0, 255.0) as u8;
-        let blue = (rgb.b * 255.0).round().clamp(0.0, 255.0) as u8;
-        painter.circle_filled(
-            at(1.7, 4.0),
-            10.0 * scale,
-            Color32::from_rgba_unmultiplied(red, green, blue, (glow * 255.0) as u8),
-        );
-        for (x, y, r, g, b, channel) in [
-            (1.7, 3.0, 255u8, 0u8, 0u8, rgb.r),
-            (2.7, 5.0, 0, 255, 0, rgb.g),
-            (0.7, 5.0, 1, 85, 253, rgb.b),
-        ] {
-            let alpha = (channel * 20.0).min(0.3) * 255.0;
-            let radius = (channel as f32 * 5.0 + 2.0) * scale;
-            painter.circle_filled(
-                at(x, y),
-                radius,
-                Color32::from_rgba_unmultiplied(r, g, b, alpha as u8),
-            );
-        }
+    if let Some(state) = rgb {
+        draw_rgb_glow(painter, screen, state);
     }
     if let Some(values) = segments {
         draw_segments(painter, screen, part, values);
@@ -1319,8 +1470,81 @@ mod tests {
     }
 
     #[test]
-    fn multiplexed_display_memory_keeps_all_digits() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/four-digit.json");
+    fn rgb_glow_numbers_come_from_the_element() {
+        let glows = rgb_glows(RgbState {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+        });
+        assert_eq!(glows[0].radius, 7.0, "a full channel is a radius 7 disc");
+        assert_eq!(glows[0].sigma, 3.0, "blurred by 3");
+        assert!((glows[0].alpha - 0.3).abs() < 1e-6, "at min(value * 20, 0.3)");
+        assert_eq!(glows[1].alpha, 0.0, "green is off");
+        assert_eq!(glows[2].alpha, 0.0, "blue is off");
+        assert_eq!(
+            glows[3].colour,
+            Color32::from_rgb(255, 0, 0),
+            "the glow takes the mixed colour"
+        );
+        assert!(
+            (glows[3].alpha - 0.8).abs() < 1e-6,
+            "and 0.2 + brightness * 0.6"
+        );
+        assert!(glows[4].halo, "the last shape is the grey halo");
+        assert_eq!(glows[4].colour, Color32::from_rgb(0x66, 0x66, 0x66));
+        assert!((glows[4].alpha - glows[3].alpha).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rgb_glow_keeps_the_elements_blue_in_green_quirk() {
+        let blue = rgb_glows(RgbState {
+            r: 0.0,
+            g: 0.0,
+            b: 1.0,
+        });
+        assert_eq!(blue[3].colour, Color32::from_rgb(0, 90, 255));
+        let white = rgb_glows(RgbState {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+        });
+        assert_eq!(
+            white[3].colour,
+            Color32::from_rgb(255, 255, 255),
+            "255 + 90 clamps back to 255"
+        );
+        let dark = rgb_glows(RgbState {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+        });
+        assert_eq!(dark[3].alpha, 0.0, "an unlit LED does not glow at all");
+    }
+
+    #[test]
+    fn a_blurred_disc_fades_outward() {
+        let bands = disc_bands(10.0, 4.0, Color32::WHITE, 1.0);
+        assert_eq!(bands[0].0, 0.0, "starts at the centre");
+        assert!(
+            bands.windows(2).all(|pair| pair[1].0 >= pair[0].0),
+            "radii only grow"
+        );
+        assert!(
+            bands.windows(2).all(|pair| pair[1].1.a() <= pair[0].1.a()),
+            "alpha never rises outward"
+        );
+        let outer = bands.last().expect("bands").0;
+        assert!(
+            outer > 10.0 + 2.0 * 4.0,
+            "the blur reaches well past the edge, got {outer}"
+        );
+        let hard = disc_bands(10.0, 0.0, Color32::WHITE, 1.0);
+        assert_eq!(hard.len(), 2, "no blur means one hard edge");
+        assert_eq!(hard[1].0, 10.0);
+    }
+
+    #[test]
+    fn multiplexed_display_memory_keeps_all_digits() {        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/four-digit.json");
         let (parts, _, _) = scene::load_diagram_file(&path);
         let display = parts
             .iter()
