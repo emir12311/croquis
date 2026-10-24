@@ -770,6 +770,10 @@ impl Spike {
     /// start dragging everything else. `screen` is where the pointer was, for
     /// the stick's movement threshold.
     fn press_control(&mut self, index: usize, world: Pos2, screen: Pos2) {
+        // A button or a key does not change a pin; it changes what the netlist
+        // is told. Without this the press is recorded and never solved, which is
+        // why buttons and keypads did nothing at all.
+        self.reevaluate = true;
         let id = self.parts[index].id.clone();
         match self.parts[index].kind.as_str() {
             "pushbutton" => {
@@ -833,6 +837,7 @@ impl Spike {
     /// Nothing stays held once the pointer lifts: buttons and the stick are
     /// momentary. A keypad key keeps its minimum hold, so `tick_input` ends it.
     fn release_input(&mut self) {
+        self.reevaluate = true;
         self.pressed.clear();
         self.remote_hold = None;
         self.knob = None;
@@ -858,6 +863,7 @@ impl Spike {
         for id in expired {
             self.keypad_until.remove(&id);
             self.keypad_keys.insert(id, None);
+            self.reevaluate = true;
         }
     }
 
@@ -1323,6 +1329,7 @@ impl eframe::App for Spike {
                     if self.joystick_moved {
                         if let Some(world) = world_pointer {
                             let (x, y) = joystick_axes(&self.parts[index], world);
+                            self.reevaluate = true;
                             self.parts[index]
                                 .attrs
                                 .insert("x".into(), x.to_string());
@@ -2490,6 +2497,78 @@ mod tests {
             spike.sensors["tilt1"].active,
             "tilting it has to reach the netlist, which is what every preset              that reads a sensor depends on"
         );
+    }
+
+    #[test]
+    fn a_press_reaches_the_circuit_and_a_release_lets_go() {
+        use croquis_core::catalogue::PartKind;
+
+        // 5V in through a button and a resistor to an LED: no sketch involved,
+        // so what lights the LED is the press and nothing else.
+        let parts = vec![
+            scene::part_from_kind(PartKind::Uno, Pos2::new(0.0, 0.0), "uno".into()).expect("uno"),
+            scene::part_from_kind(PartKind::Pushbutton, Pos2::new(300.0, 0.0), "btn".into())
+                .expect("button"),
+            scene::part_from_kind(PartKind::Resistor, Pos2::new(400.0, 0.0), "r".into())
+                .expect("resistor"),
+            scene::part_from_kind(PartKind::Led, Pos2::new(500.0, 0.0), "led".into())
+                .expect("led"),
+        ];
+        let at = |id: &str, pin: &str| {
+            let part = parts
+                .iter()
+                .position(|part| part.id == id)
+                .unwrap_or_else(|| panic!("no part {id}"));
+            let index = parts[part]
+                .pins
+                .iter()
+                .position(|candidate| candidate.name == pin)
+                .unwrap_or_else(|| panic!("no pin {id}:{pin}"));
+            (part, index)
+        };
+        let wire = |a: (&str, &str), b: (&str, &str)| {
+            let (from, to) = (at(a.0, a.1), at(b.0, b.1));
+            scene::Wire {
+                a: from,
+                b: to,
+                waypoints: Vec::new(),
+            }
+        };
+        let wires = vec![
+            wire(("uno", "5V"), ("btn", "1.l")),
+            wire(("btn", "2.l"), ("r", "1")),
+            wire(("r", "2"), ("led", "A")),
+            wire(("led", "C"), ("uno", "GND.1")),
+        ];
+
+        let mut spike = Spike::default();
+        spike.parts = parts;
+        spike.wires = wires;
+        let lights = |spike: &Spike| {
+            matches!(
+                spike.led_states.get("led"),
+                Some(LedState::Lit) | Some(LedState::Dim) | Some(LedState::Burnt)
+            )
+        };
+
+        spike.evaluate_now();
+        assert!(!lights(&spike), "at rest the LED is dark");
+
+        let centre = spike.parts[1].bounds().center();
+        spike.press_control(1, centre, Pos2::ZERO);
+        assert!(
+            spike.reevaluate,
+            "a press changes what the netlist is told, so it must ask for a solve"
+        );
+        spike.reevaluate = false;
+        spike.evaluate_now();
+        assert!(lights(&spike), "pressing has to light it");
+
+        spike.release_input();
+        assert!(spike.reevaluate, "and letting go must ask for one too");
+        spike.reevaluate = false;
+        spike.evaluate_now();
+        assert!(!lights(&spike), "releasing puts it out");
     }
 
     #[test]
