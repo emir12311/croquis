@@ -381,6 +381,8 @@ fn ensure_textures(
                 )
             } else if part.kind == "rgb-led" {
                 part.svg.clone()
+            } else if part.kind == "analog-joystick" {
+                scene::joystick_svg(&part.svg)
             } else if part.kind == "servo" || part.kind == "stepper-motor" {
                 let angle = outputs
                     .get(&part.id)
@@ -1161,6 +1163,9 @@ impl eframe::App for Spike {
                 if shows_active(part, &self.outputs, &self.sensors) {
                     draw_active_dot(&painter, rect, self.camera, part);
                 }
+                if part.kind == "analog-joystick" {
+                    draw_joystick_knob(&painter, rect, self.camera, part);
+                }
                 if part.kind == "lcd1602" {
                     if let Some(state) = self.lcd_states.get(&part.id) {
                         draw_lcd_text(
@@ -1571,6 +1576,38 @@ fn with_alpha(colour: Color32, alpha: f32) -> Color32 {
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// The joystick's ball, drawn where its axes say it is.
+///
+/// The element translates the knob by 2.5 units at full deflection: x grows to
+/// the right, y upwards. A texture could not do this without being rebuilt for
+/// every step of a drag, so the ball is drawn on top of the base art.
+fn draw_joystick_knob(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part) {
+    const VIEW_WIDTH: f32 = 27.2;
+    const REST: Vec2 = Vec2::new(13.6, 13.6);
+    let bounds = part.bounds();
+    let screen = Rect::from_min_max(
+        camera.world_to_screen(rect, bounds.min),
+        camera.world_to_screen(rect, bounds.max),
+    );
+    let unit = screen.width() / VIEW_WIDTH;
+    let axis = |name: &str| {
+        part.attrs
+            .get(name)
+            .and_then(|value| value.parse::<f32>().ok())
+            .unwrap_or(50.0)
+            .clamp(0.0, 100.0)
+    };
+    let offset = Vec2::new((axis("x") - 50.0) / 50.0, -(axis("y") - 50.0) / 50.0) * 2.5;
+    let centre = screen.min + (REST + offset) * unit;
+    let radius = 10.6 * unit;
+    painter.circle_filled(centre, radius, Color32::from_rgb(0x22, 0x22, 0x22));
+    painter.circle_stroke(
+        centre,
+        radius,
+        Stroke::new(1.2 * unit, Color32::from_rgb(0x77, 0x77, 0x77)),
+    );
 }
 
 /// The LCD element's drawing, and its character grid inside it: 16x2 cells of
