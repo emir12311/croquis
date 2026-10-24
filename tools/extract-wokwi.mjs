@@ -52,6 +52,30 @@ try {
         }
         return area(b) - area(a)
       })[0]
+      // The element's text styling lives in its shadow-root CSS, not in the
+      // SVG. Inline the computed values or every label renders at the SVG
+      // default size.
+      if (svg) {
+        for (const node of svg.querySelectorAll('text, tspan')) {
+          const style = getComputedStyle(node)
+          for (const property of [
+            'font-size',
+            'font-family',
+            'font-weight',
+            'font-style',
+            'fill',
+            'fill-opacity',
+            'stroke',
+            'stroke-width',
+            'text-anchor',
+            'letter-spacing',
+            'opacity',
+          ]) {
+            const value = style.getPropertyValue(property)
+            if (value) node.setAttribute(property, value)
+          }
+        }
+      }
       const pins = Array.isArray(el.pinInfo) ? el.pinInfo.map((pin) => ({
         name: pin.name,
         x: pin.x,

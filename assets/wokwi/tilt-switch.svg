@@ -6,7 +6,7 @@
         <g transform="translate(-6.88 -4.2)" clip-path="url(#g)">
           <path d="m49.8 12.7c-0.256-0.299-0.705-0.334-1-0.078-3.3 2.82-20.7 17.7-24 20.5-0.299 0.255-0.334 0.705-0.078 1 1.83 2.14 8.55 9.99 10.4 12.1 0.255 0.299 0.705 0.334 1 0.078 3.3-2.82 20.7-17.7 24-20.5 0.299-0.255 0.334-0.705 0.079-1-1.83-2.14-8.55-9.99-10.4-12.1z" fill="#1b2f4c"></path>
         </g>
-        <text transform="rotate(-90 31 151)" x="132.20" y="184.995" fill="#fffefe" font-size="10.3px">
+        <text transform="rotate(-90 31 151)" x="132.20" y="184.995" fill="rgb(255, 254, 254)" font-size="10.3px" font-family="sans-serif" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
           s
         </text>
         <g fill="#bbb9b9">

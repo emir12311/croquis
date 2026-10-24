@@ -46,9 +46,9 @@
         <path d="m79.979 41.028c3.519 0 6.375 2.168 6.375 4.839 0 2.67-2.856 4.839-6.375 4.839-3.518 0-6.375-2.169-6.375-4.839 0-2.671 2.857-4.839 6.375-4.839zm0 1.141c2.041 0 3.698 1.657 3.698 3.698s-1.657 3.698-3.698 3.698-3.698-1.657-3.698-3.698 1.657-3.698 3.698-3.698z" fill="#bbb9b9"></path>
         <path d="m79.979 20.04c3.519 0 6.375 2.169 6.375 4.839 0 2.671-2.856 4.839-6.375 4.839-3.518 0-6.375-2.168-6.375-4.839 0-2.67 2.857-4.839 6.375-4.839zm0 1.141c2.041 0 3.698 1.657 3.698 3.698s-1.657 3.698-3.698 3.698-3.698-1.657-3.698-3.698 1.657-3.698 3.698-3.698z" fill="#bbb9b9"></path>
         <path d="m89.905 44.462v-17.142h8.391v17.142z" fill="none" stroke="#fff" stroke-linejoin="miter" stroke-width=".65px"></path>
-        <text fill="#fffefe" font-family="sans-serif" transform="rotate(-90)">
-          <tspan x="-39.297 -37.036 -34.776" y="95.418" font-size="3.735px">103</tspan>
-          <tspan x="-61.485" y="111.57" font-size="9.778px">S</tspan>
-          <tspan x="-15.512" y="111.573" font-size="15.828px">-</tspan>
+        <text fill="rgb(255, 254, 254)" font-family="sans-serif" transform="rotate(-90)" font-size="14px" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
+          <tspan x="-39.297 -37.036 -34.776" y="95.418" font-size="3.735px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">103</tspan>
+          <tspan x="-61.485" y="111.57" font-size="9.778px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">S</tspan>
+          <tspan x="-15.512" y="111.573" font-size="15.828px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">-</tspan>
         </text>
       </svg>

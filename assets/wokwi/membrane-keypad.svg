@@ -9,7 +9,7 @@
           <pattern id="wires-marks" width="2.54" height="8" patternUnits="userSpaceOnUse">
             <rect x="0.52" y="6" width="1.5" height="2" fill="#746d41"></rect>
           </pattern>
-          <!--?lit$512290874$-->
+          <!--?lit$358190898$-->
   <pattern id="pins-female" width="2.54" height="2.54" patternUnits="userSpaceOnUse">
     <rect x="0" y="0" width="2.54" height="2.54" fill="#333"></rect>
     <rect x="1.079" y="0.896" width="0.762" height="0.762" style="fill: #191919"></rect>
@@ -29,7 +29,7 @@
         <rect x="2.78" y="3.25" height="68.6" rx="3.5" ry="3.5" fill="none" stroke="#b1b5b9" stroke-width="1" width="65"></rect>
 
         <!-- Connector -->
-        <!--?lit$512290874$-->
+        <!--?lit$358190898$-->
             <g transform="translate(25.008, 76)">
               <rect height="8" fill="url(#wires)" width="20.32"></rect>
               <rect width="10.16" height="8" fill="url(#wires-marks)"></rect>
@@ -40,74 +40,74 @@
 
         <!-- Blue keys -->
         <g fill="#4e90d7">
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(7 10.7)" class="blue-key" data-key-name="1">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(7 10.7)" class="blue-key" data-key-name="1">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->1</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->1</text>
     </g></g>
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(22 10.7)" class="blue-key" data-key-name="2">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(22 10.7)" class="blue-key" data-key-name="2">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->2</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->2</text>
     </g></g>
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(37 10.7)" class="blue-key" data-key-name="3">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(37 10.7)" class="blue-key" data-key-name="3">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->3</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->3</text>
     </g></g>
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(7 25)" class="blue-key" data-key-name="4">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(7 25)" class="blue-key" data-key-name="4">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->4</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->4</text>
     </g></g>
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(22 25)" class="blue-key" data-key-name="5">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(22 25)" class="blue-key" data-key-name="5">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->5</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->5</text>
     </g></g>
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(37 25)" class="blue-key" data-key-name="6">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(37 25)" class="blue-key" data-key-name="6">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->6</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->6</text>
     </g></g>
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(7 39.3)" class="blue-key" data-key-name="7">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(7 39.3)" class="blue-key" data-key-name="7">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->7</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->7</text>
     </g></g>
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(22 39.3)" class="blue-key" data-key-name="8">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(22 39.3)" class="blue-key" data-key-name="8">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->8</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->8</text>
     </g></g>
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(37 39.3)" class="blue-key" data-key-name="9">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(37 39.3)" class="blue-key" data-key-name="9">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->9</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->9</text>
     </g></g>
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(22 53.6)" class="blue-key" data-key-name="0">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(22 53.6)" class="blue-key" data-key-name="0">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->0</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->0</text>
     </g></g>
         </g>
 
         <!-- Red keys -->
         <g fill="#e94541">
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(7 53.6)" class="red-key" data-key-name="*">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(7 53.6)" class="red-key" data-key-name="*">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->*</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->*</text>
     </g></g>
-          <g><!--?lit$512290874$--><g tabindex="0" transform="translate(37 53.6)" class="red-key" data-key-name="#">
+          <g><!--?lit$358190898$--><g tabindex="0" transform="translate(37 53.6)" class="red-key" data-key-name="#">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->#</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->#</text>
     </g></g>
-          <!--?lit$512290874$-->
-              <g><!--?lit$512290874$--><g tabindex="0" transform="translate(52 10.7)" class="red-key" data-key-name="A">
+          <!--?lit$358190898$-->
+              <g><!--?lit$358190898$--><g tabindex="0" transform="translate(52 10.7)" class="red-key" data-key-name="A">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->A</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->A</text>
     </g></g>
-              <g><!--?lit$512290874$--><g tabindex="0" transform="translate(52 25)" class="red-key" data-key-name="B">
+              <g><!--?lit$358190898$--><g tabindex="0" transform="translate(52 25)" class="red-key" data-key-name="B">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->B</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->B</text>
     </g></g>
-              <g><!--?lit$512290874$--><g tabindex="0" transform="translate(52 39.3)" class="red-key" data-key-name="C">
+              <g><!--?lit$358190898$--><g tabindex="0" transform="translate(52 39.3)" class="red-key" data-key-name="C">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->C</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->C</text>
     </g></g>
-              <g><!--?lit$512290874$--><g tabindex="0" transform="translate(52 53.6)" class="red-key" data-key-name="D">
+              <g><!--?lit$358190898$--><g tabindex="0" transform="translate(52 53.6)" class="red-key" data-key-name="D">
       <rect width="11.2" height="11" rx="1.4" ry="1.4" stroke="#b1b5b9" stroke-width=".75"></rect>
-      <text x="5.6" y="8.1"><!--?lit$512290874$-->D</text>
+      <text x="5.6" y="8.1" font-size="8.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(223, 226, 229)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1"><!--?lit$358190898$-->D</text>
     </g></g>
           
         </g>

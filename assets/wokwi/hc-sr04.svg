@@ -39,13 +39,13 @@
           <rect x="23.69" y="19" width=".75" height="7" rx=".2"></rect>
           <rect x="26.23" y="19" width=".75" height="7" rx=".2"></rect>
         </g>
-        <text font-weight="400" font-size="2.2" fill="#e6e6e6" stroke-width=".055">
-          <tspan y="8" x="17.6">HC-SR04</tspan>
+        <text font-weight="400" font-size="2.2px" fill="rgb(230, 230, 230)" stroke-width="0.055px" font-family="monospace" font-style="normal" fill-opacity="1" stroke="none" text-anchor="start" letter-spacing="normal" opacity="1">
+          <tspan y="8" x="17.6" font-size="2.2px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(230, 230, 230)" fill-opacity="1" stroke="none" stroke-width="0.055px" text-anchor="start" letter-spacing="normal" opacity="1">HC-SR04</tspan>
         </text>
-        <text transform="rotate(-90)" font-weight="400" font-size="1.55" fill="#e6e6e6" stroke-width=".039">
-          <tspan x="-17.591" y="19.561">VCC</tspan>
-          <tspan x="-17.591" y="22.101">TRIG</tspan>
-          <tspan x="-17.591" y="24.641">ECHO</tspan>
-          <tspan x="-17.591" y="27.181">GND</tspan>
+        <text transform="rotate(-90)" font-weight="400" font-size="1.55px" fill="rgb(230, 230, 230)" stroke-width="0.039px" font-family="monospace" font-style="normal" fill-opacity="1" stroke="none" text-anchor="start" letter-spacing="normal" opacity="1">
+          <tspan x="-17.591" y="19.561" font-size="1.55px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(230, 230, 230)" fill-opacity="1" stroke="none" stroke-width="0.039px" text-anchor="start" letter-spacing="normal" opacity="1">VCC</tspan>
+          <tspan x="-17.591" y="22.101" font-size="1.55px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(230, 230, 230)" fill-opacity="1" stroke="none" stroke-width="0.039px" text-anchor="start" letter-spacing="normal" opacity="1">TRIG</tspan>
+          <tspan x="-17.591" y="24.641" font-size="1.55px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(230, 230, 230)" fill-opacity="1" stroke="none" stroke-width="0.039px" text-anchor="start" letter-spacing="normal" opacity="1">ECHO</tspan>
+          <tspan x="-17.591" y="27.181" font-size="1.55px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(230, 230, 230)" fill-opacity="1" stroke="none" stroke-width="0.039px" text-anchor="start" letter-spacing="normal" opacity="1">GND</tspan>
         </text>
       </svg>

@@ -25,23 +25,23 @@
         <circle cx="47.7" cy="29.8" r="21.4" fill="#bab3ad"></circle>
         <circle cx="47.7" cy="29.8" r="21.4" fill="url(#a)"></circle>
 
-        <text fill="#ffffff" font-family="sans-serif" font-size="3.72px">
-          <tspan x="94.656" y="16.729">AOUT</tspan>
-          <tspan x="94.656" y="26.098">DOUT</tspan>
-          <tspan x="94.656" y="35.911">GND</tspan>
-          <tspan x="94.656" y="45.696">VCC</tspan>
+        <text fill="rgb(255, 255, 255)" font-family="sans-serif" font-size="3.72px" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
+          <tspan x="94.656" y="16.729" font-size="3.72px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">AOUT</tspan>
+          <tspan x="94.656" y="26.098" font-size="3.72px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">DOUT</tspan>
+          <tspan x="94.656" y="35.911" font-size="3.72px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">GND</tspan>
+          <tspan x="94.656" y="45.696" font-size="3.72px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">VCC</tspan>
         </text>
 
         <!-- LEDs -->
 
         <rect style="opacity:1;fill:#999999;stroke-width:1.5747;paint-order:stroke markers fill" id="rect17" width="8.5262499" height="3.8281121" x="81.321793" y="5.8179226"></rect>
         <rect style="opacity:1;fill:#e6e6e6;stroke-width:2.05589;paint-order:stroke markers fill" id="rect18" width="4.8444595" height="3.8281121" x="83.162689" y="5.8179226"></rect>
-        <!--?lit$512290874$-->false
+        <!--?lit$358190898$-->false
         <rect style="fill:#999999;stroke-width:1.5747;paint-order:stroke markers fill" id="rect17-9" width="8.5262499" height="3.8281121" x="81.018036" y="48.700188"></rect>
         <rect style="fill:#e6e6e6;stroke-width:2.05589;paint-order:stroke markers fill" id="rect18-0" width="4.8444595" height="3.8281121" x="82.858932" y="48.700188"></rect>
-        <!--?lit$512290874$-->false
-        <text fill="#ffffff" font-family="sans-serif" font-size="3px">
-          <tspan x="80.213432" y="4.7265162">PWR LED</tspan>
-          <tspan x="80.463821" y="55.852409">D0 LED</tspan>
+        <!--?lit$358190898$-->false
+        <text fill="rgb(255, 255, 255)" font-family="sans-serif" font-size="3px" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
+          <tspan x="80.213432" y="4.7265162" font-size="3px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">PWR LED</tspan>
+          <tspan x="80.463821" y="55.852409" font-size="3px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D0 LED</tspan>
         </text>
       </svg>
