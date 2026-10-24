@@ -13,10 +13,13 @@
 //! geometry without one.
 
 use std::collections::HashMap;
+use std::path::Path;
+use std::sync::{mpsc, Arc};
 
 use croquis_core::catalogue::parts;
 use croquis_core::netlist::LedState;
 use croquis_core::route::{expand_path, Point as CorePoint};
+use croquis_sim::engine::{self, SimEvent};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod art;
@@ -80,6 +83,12 @@ struct Spike {
     led_states: HashMap<String, LedState>,
     sketch: String,
     next_id: usize,
+    sim: Option<engine::Simulator>,
+    events: Option<mpsc::Receiver<SimEvent>>,
+    running: bool,
+    avr_pins: HashMap<String, bool>,
+    serial: String,
+    run_error: Option<String>,
 }
 
 impl Default for Spike {
@@ -97,6 +106,12 @@ impl Default for Spike {
             led_states: scene::evaluate_blink(),
             sketch: scene::blink_sketch(),
             next_id: 0,
+            sim: None,
+            events: None,
+            running: false,
+            avr_pins: HashMap::new(),
+            serial: String::new(),
+            run_error: None,
         }
     }
 }
@@ -121,9 +136,71 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
     None
 }
 
+impl Spike {
+    fn start_sim(&mut self, ctx: &egui::Context) {
+        self.run_error = None;
+        self.serial.clear();
+        self.avr_pins.clear();
+        self.led_states = scene::evaluate_blink_with(&self.avr_pins);
+        let workdir = std::env::temp_dir().join(format!("croquis-egui-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&workdir);
+        match engine::compile(&self.sketch, &workdir) {
+            Ok(firmware) => {
+                let (sender, receiver) = mpsc::channel();
+                let repaint = ctx.clone();
+                let emit: engine::Emit = Arc::new(move |event| {
+                    let _ = sender.send(event);
+                    repaint.request_repaint();
+                });
+                match engine::Simulator::start(Path::new(&firmware.elf), emit, false) {
+                    Ok(sim) => {
+                        self.sim = Some(sim);
+                        self.events = Some(receiver);
+                        self.running = true;
+                    }
+                    Err(error) => self.run_error = Some(error),
+                }
+            }
+            Err(error) => self.run_error = Some(error),
+        }
+    }
+
+    fn stop_sim(&mut self) {
+        if let Some(mut sim) = self.sim.take() {
+            sim.stop();
+        }
+        self.events = None;
+        self.running = false;
+    }
+
+    fn poll_engine(&mut self) {
+        let mut changed = false;
+        if let Some(receiver) = &self.events {
+            while let Ok(event) = receiver.try_recv() {
+                match event {
+                    SimEvent::Pin { port, pin, high } => {
+                        self.avr_pins
+                            .insert(format!("{}{}", port as char, pin), high);
+                        changed = true;
+                    }
+                    SimEvent::Serial(byte) => {
+                        self.serial.push(byte as char);
+                        changed = true;
+                    }
+                    SimEvent::Timing { .. } => {}
+                }
+            }
+        }
+        if changed {
+            self.led_states = scene::evaluate_blink_with(&self.avr_pins);
+        }
+    }
+}
+
 impl eframe::App for Spike {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
+        self.poll_engine();
         for part in &self.parts {
             let lit = self
                 .led_states
@@ -158,6 +235,44 @@ impl eframe::App for Spike {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.wire_start = None;
         }
+
+        egui::Panel::top("run-bar").show(root, |ui| {
+            ui.horizontal(|ui| {
+                if self.running {
+                    if ui.button("Stop").clicked() {
+                        self.stop_sim();
+                    }
+                } else if ui.button("Run").clicked() {
+                    self.start_sim(&ctx);
+                }
+                ui.label(if self.running { "Running" } else { "Stopped" });
+                if let Some(error) = &self.run_error {
+                    ui.colored_label(Color32::from_rgb(230, 120, 100), "Compile/run failed");
+                    ui.label(error.lines().next().unwrap_or(""));
+                }
+            });
+        });
+
+        egui::Panel::bottom("serial")
+            .resizable(true)
+            .default_size(150.0)
+            .show(root, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Serial");
+                    if ui.button("Clear").clicked() {
+                        self.serial.clear();
+                    }
+                });
+                egui::ScrollArea::vertical()
+                    .id_salt("serial-output")
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        ui.monospace(&self.serial);
+                        if let Some(error) = &self.run_error {
+                            ui.colored_label(Color32::from_rgb(230, 120, 100), error);
+                        }
+                    });
+            });
 
         egui::Panel::right("components")
             .exact_size(220.0)
@@ -543,5 +658,19 @@ mod tests {
         assert!(dim.contains("opacity: 0.65"));
         let off = scene::led_state_svg(&led.svg, "red", 1.0, false);
         assert!(off.contains("display: none"));
+    }
+
+    #[test]
+    fn blink_led_follows_pin_13() {
+        let high = HashMap::from([("B5".to_string(), true)]);
+        assert_eq!(
+            scene::evaluate_blink_with(&high).get("led1"),
+            Some(&LedState::Lit)
+        );
+        let low = HashMap::from([("B5".to_string(), false)]);
+        assert_eq!(
+            scene::evaluate_blink_with(&low).get("led1"),
+            Some(&LedState::Off)
+        );
     }
 }
