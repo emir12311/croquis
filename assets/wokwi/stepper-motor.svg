@@ -50,12 +50,12 @@
           </g>
 
           <!-- Text -->
-          <text font-family="arial" font-size="14.667px" text-align="center" text-anchor="middle">
-            <tspan x="28.65" y="41" font-size="6.34920634920635px">
-              <!--?lit$512290874$-->
+          <text font-family="arial" font-size="14.667px" text-align="center" text-anchor="middle" font-weight="400" font-style="normal" fill="rgb(0, 0, 0)" fill-opacity="1" stroke="none" stroke-width="1px" letter-spacing="normal" opacity="1">
+            <tspan x="28.65" y="41" font-size="6.34921px" font-family="arial" font-weight="400" font-style="normal" fill="rgb(0, 0, 0)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1">
+              <!--?lit$358190898$-->
             </tspan>
-            <tspan x="28.65" y="46" font-size="4.444444444444444px">
-              <!--?lit$512290874$-->
+            <tspan x="28.65" y="46" font-size="4.44444px" font-family="arial" font-weight="400" font-style="normal" fill="rgb(0, 0, 0)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="middle" letter-spacing="normal" opacity="1">
+              <!--?lit$358190898$-->
             </tspan>
           </text>
         </g>

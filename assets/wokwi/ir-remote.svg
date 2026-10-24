@@ -39,9 +39,9 @@
           <path d="m27.9 113 9.58 4.79v-9.58z" fill="#fff" stroke-width="1.29"></path>
           <path d="m21.8 113 8.95 4.79v-9.58z" fill="#fff" stroke-width="1.29"></path>
           <path d="m22.4 109v9.58" fill="none" stroke="#fff" stroke-width="1.29"></path>
-          <text fill="#e6252e" font-size="9.72px" font-weight="700" stroke-width="1.29">
-            <tspan x="106.892 115.469 122.432 129.931" y="41.288">MENU</tspan>
-            <tspan x="16.488 22.904 29.866 36.829" y="78.679">TEST</tspan>
+          <text fill="rgb(230, 37, 46)" font-size="9.72px" font-weight="700" stroke-width="1.29px" font-family="sans-serif" font-style="normal" fill-opacity="1" stroke="none" text-anchor="start" letter-spacing="normal" opacity="1">
+            <tspan x="106.892 115.469 122.432 129.931" y="41.288" font-size="9.72px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(230, 37, 46)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">MENU</tspan>
+            <tspan x="16.488 22.904 29.866 36.829" y="78.679" font-size="9.72px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(230, 37, 46)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">TEST</tspan>
           </text>
           <g fill="none" stroke="#fff" stroke-width="1.29">
             <path d="m67.7 152h15.5"></path>
@@ -49,18 +49,18 @@
           </g>
           <g fill="#121115" stroke-width="1.29">
             <path d="m119.4 70.7v -3.25l-6.95 4.84 6.71 4.45 0.111-2.2s6.65-0.357 7.05 3.15c0.397 3.51-6.66 5.21-6.66 5.21s10.9-2.33 10.7-6.82c-0.276-5.4-10.9-5.39-10.9-5.39z"></path>
-            <text font-size="13.9px" font-weight="700">
-              <tspan x="25.312" y="156.434">0</tspan>
-              <tspan x="116.973" y="156.498">C</tspan>
-              <tspan x="25.312" y="194.685">1</tspan>
-              <tspan x="71.776" y="194.685">2</tspan>
-              <tspan x="118.06" y="194.6">3</tspan>
-              <tspan x="25.312" y="232.851">4</tspan>
-              <tspan x="71.776" y="232.679">5</tspan>
-              <tspan x="118.199" y="232.767">6</tspan>
-              <tspan x="25.312" y="270.931">7</tspan>
-              <tspan x="71.776" y="270.931">8</tspan>
-              <tspan x="118.124" y="270.931">9</tspan>
+            <text font-size="13.9px" font-weight="700" font-family="sans-serif" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">
+              <tspan x="25.312" y="156.434" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">0</tspan>
+              <tspan x="116.973" y="156.498" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">C</tspan>
+              <tspan x="25.312" y="194.685" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">1</tspan>
+              <tspan x="71.776" y="194.685" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">2</tspan>
+              <tspan x="118.06" y="194.6" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">3</tspan>
+              <tspan x="25.312" y="232.851" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">4</tspan>
+              <tspan x="71.776" y="232.679" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">5</tspan>
+              <tspan x="118.199" y="232.767" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">6</tspan>
+              <tspan x="25.312" y="270.931" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">7</tspan>
+              <tspan x="71.776" y="270.931" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">8</tspan>
+              <tspan x="118.124" y="270.931" font-size="13.9px" font-family="sans-serif" font-weight="700" font-style="normal" fill="rgb(18, 17, 21)" fill-opacity="1" stroke="none" stroke-width="1.29px" text-anchor="start" letter-spacing="normal" opacity="1">9</tspan>
             </text>
           </g>
           <g fill="#fff" stroke-width="1.29">

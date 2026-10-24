@@ -48,11 +48,11 @@
         <filter id="ledFilter" x="-0.8" y="-0.8" height="5.2" width="5.8">
           <feGaussianBlur stdDeviation="2"></feGaussianBlur>
         </filter>
-        <!--?lit$512290874$-->false
+        <!--?lit$358190898$-->false
 
         <rect x="118" y="52.6" width="13" height="4.29" fill="#dae3eb"></rect>
         <rect x="121" y="52.5" width="6.55" height="4.59" fill="#fffefe"></rect>
-        <!--?lit$512290874$-->false
+        <!--?lit$358190898$-->false
 
         <!-- Chip -->
         <g fill="#dae3eb">
@@ -75,15 +75,15 @@
         <path d="m123 19.8c5.5 0 9.96 4.46 9.96 9.96s-4.46 9.96-9.96 9.96-9.96-4.46-9.96-9.96 4.46-9.96 9.96-9.96zm0 2.4c4.17 0 7.55 3.38 7.55 7.55 0 4.17-3.38 7.55-7.55 7.55s-7.55-3.38-7.55-7.55c0-4.17 3.38-7.55 7.55-7.55z" fill="#d4d0d1"></path>
 
         <!-- Text -->
-        <text fill="#fffefe" font-size="4.4px" font-family="sans-serif">
-          <tspan x="117.46" y="13.90">PWR</tspan>
-          <tspan x="117.46" y="18.41">LED</tspan>
-          <tspan x="133.16" y="17.37">VCC</tspan>
-          <tspan x="133.16" y="26.87">GND</tspan>
-          <tspan x="135.42" y="36.55">DO</tspan>
-          <tspan x="135.42" y="46.359">AO</tspan>
-          <tspan x="117.44" y="45.53">DO</tspan>
-          <tspan x="117.44" y="50.036">LED</tspan>
+        <text fill="rgb(255, 254, 254)" font-size="4.4px" font-family="sans-serif" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
+          <tspan x="117.46" y="13.90" font-size="4.4px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">PWR</tspan>
+          <tspan x="117.46" y="18.41" font-size="4.4px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">LED</tspan>
+          <tspan x="133.16" y="17.37" font-size="4.4px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">VCC</tspan>
+          <tspan x="133.16" y="26.87" font-size="4.4px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">GND</tspan>
+          <tspan x="135.42" y="36.55" font-size="4.4px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">DO</tspan>
+          <tspan x="135.42" y="46.359" font-size="4.4px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">AO</tspan>
+          <tspan x="117.44" y="45.53" font-size="4.4px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">DO</tspan>
+          <tspan x="117.44" y="50.036" font-size="4.4px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 254, 254)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">LED</tspan>
         </text>
 
         <!-- Board pins -->

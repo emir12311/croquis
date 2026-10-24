@@ -24,16 +24,16 @@
         </defs>
         <path d="M1.3 0v31.7h25.5V0zm2.33.683a1.87 1.87 0 01.009 0 1.87 1.87 0 011.87 1.87 1.87 1.87 0 01-1.87 1.87 1.87 1.87 0 01-1.87-1.87 1.87 1.87 0 011.87-1.87zm20.5 0a1.87 1.87 0 01.009 0 1.87 1.87 0 011.87 1.87 1.87 1.87 0 01-1.87 1.87 1.87 1.87 0 01-1.87-1.87 1.87 1.87 0 011.87-1.87zm-20.5 26.8a1.87 1.87 0 01.009 0 1.87 1.87 0 011.87 1.87 1.87 1.87 0 01-1.87 1.87 1.87 1.87 0 01-1.87-1.87 1.87 1.87 0 011.87-1.87zm20.4 0a1.87 1.87 0 01.009 0 1.87 1.87 0 011.87 1.87 1.87 1.87 0 01-1.87 1.87 1.87 1.87 0 01-1.87-1.87 1.87 1.87 0 011.87-1.87zm-12.7 2.66a.489.489 0 01.004 0 .489.489 0 01.489.489.489.489 0 01-.489.489.489.489 0 01-.489-.489.489.489 0 01.485-.489zm2.57 0a.489.489 0 01.004 0 .489.489 0 01.489.489.489.489 0 01-.489.489.489.489 0 01-.489-.489.489.489 0 01.485-.489zm2.49.013a.489.489 0 01.004 0 .489.489 0 01.489.489.489.489 0 01-.489.489.489.489 0 01-.489-.489.489.489 0 01.485-.489zm-7.62.007a.489.489 0 01.004 0 .489.489 0 01.489.489.489.489 0 01-.489.489.489.489 0 01-.489-.49.489.489 0 01.485-.488zm10.2.013a.489.489 0 01.004 0 .489.489 0 01.489.489.489.489 0 01-.489.489.489.489 0 01-.489-.49.489.489 0 01.485-.488z" fill="#bd1e34"></path>
         <g fill="#fff" font-family="sans-serif" stroke-width=".03">
-          <text text-anchor="middle" font-size="1.2" letter-spacing=".053">
-            <tspan x="4.034" y="25.643">Analog</tspan>
-            <tspan x="4.061" y="27.159">Joystick</tspan>
+          <text text-anchor="middle" font-size="1.2px" letter-spacing="0.053px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.03px" opacity="1">
+            <tspan x="4.034" y="25.643" font-size="1.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.03px" text-anchor="middle" letter-spacing="0.053px" opacity="1">Analog</tspan>
+            <tspan x="4.061" y="27.159" font-size="1.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.03px" text-anchor="middle" letter-spacing="0.053px" opacity="1">Joystick</tspan>
           </text>
-          <text transform="rotate(-90)" text-anchor="start" font-size="1.2">
-            <tspan x="-29.2" y="9.2">VCC</tspan>
-            <tspan x="-29.2" y="11.74">VERT</tspan>
-            <tspan x="-29.2" y="14.28">HORZ</tspan>
-            <tspan x="-29.2" y="16.82">SEL</tspan>
-            <tspan x="-29.2" y="19.36">GND</tspan>
+          <text transform="rotate(-90)" text-anchor="start" font-size="1.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.03px" letter-spacing="normal" opacity="1">
+            <tspan x="-29.2" y="9.2" font-size="1.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.03px" text-anchor="start" letter-spacing="normal" opacity="1">VCC</tspan>
+            <tspan x="-29.2" y="11.74" font-size="1.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.03px" text-anchor="start" letter-spacing="normal" opacity="1">VERT</tspan>
+            <tspan x="-29.2" y="14.28" font-size="1.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.03px" text-anchor="start" letter-spacing="normal" opacity="1">HORZ</tspan>
+            <tspan x="-29.2" y="16.82" font-size="1.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.03px" text-anchor="start" letter-spacing="normal" opacity="1">SEL</tspan>
+            <tspan x="-29.2" y="19.36" font-size="1.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.03px" text-anchor="start" letter-spacing="normal" opacity="1">GND</tspan>
           </text>
         </g>
         <ellipse cx="13.6" cy="13.7" rx="13.6" ry="13.7" fill="url(#g-knob-base)"></ellipse>

@@ -69,9 +69,9 @@
             <path d="m90.1 60.4-2.72 4.71h-5.44l-2.72-4.71 2.72-4.71h5.44z"></path>
           </g>
         </g>
-        <text fill="#ffffff" font-family="sans-serif">
-          <tspan x="33.293" y="73.864" font-size="9.88px">+</tspan>
-          <tspan x="43.531" y="72.609" font-size="6.38px">D</tspan>
+        <text fill="rgb(255, 255, 255)" font-family="sans-serif" font-size="14px" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
+          <tspan x="33.293" y="73.864" font-size="9.88px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">+</tspan>
+          <tspan x="43.531" y="72.609" font-size="6.38px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D</tspan>
         </text>
         <path d="m57.9 70.8h-4.67v-0.81h4.67z" fill="#fff"></path>
       </svg>

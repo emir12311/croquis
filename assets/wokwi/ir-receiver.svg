@@ -20,12 +20,12 @@
           <path d="m32 62.5c0-0.377-0.149-0.739-0.416-1.01-0.268-0.267-0.629-0.417-1.01-0.417-0.377 0-0.739 0.15-1.01 0.417s-0.417 0.629-0.417 1.01v25.8c0 0.231 0.188 0.419 0.418 0.419h2.01c0.231 0 0.418-0.188 0.418-0.419v-25.8z"></path>
           <path d="m41.6 62.5c0-0.377-0.15-0.739-0.417-1.01s-0.629-0.417-1.01-0.417c-0.377 0-0.739 0.15-1.01 0.417s-0.417 0.629-0.417 1.01v25.8c0 0.231 0.188 0.419 0.419 0.419h2.01c0.231 0 0.419-0.188 0.419-0.419v-25.8z"></path>
         </g>
-        <text transform="rotate(90)" fill="#ffffff" font-size="5px">
-          <tspan x="45.369" y="-37.601">DAT</tspan>
-          <tspan x="45.609" y="-28.801">VCC</tspan>
-          <tspan x="45.359" y="-20.2">GND</tspan>
-          <text font-size="5.71px">
-            <tspan x="16.234 18.076 22.422 24.263 28.608 32.018 35.112 36.639 40.05 43.144 46.553" y="-52.266">
+        <text transform="rotate(90)" fill="rgb(255, 255, 255)" font-size="5px" font-family="sans-serif" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
+          <tspan x="45.369" y="-37.601" font-size="5px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">DAT</tspan>
+          <tspan x="45.609" y="-28.801" font-size="5px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">VCC</tspan>
+          <tspan x="45.359" y="-20.2" font-size="5px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">GND</tspan>
+          <text font-size="5.71px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
+            <tspan x="16.234 18.076 22.422 24.263 28.608 32.018 35.112 36.639 40.05 43.144 46.553" y="-52.266" font-size="5.71px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
               IR Reciever
             </tspan>
           </text>
@@ -59,9 +59,9 @@
           <rect x="17.9" y="23.7" width="3.93" height="3.23" fill="#8e7147"></rect>
           <rect x="34.8" y="24.1" width="4.88" height="2.44" fill="#171514"></rect>
           <rect x="34.8" y="34.1" width="4.88" height="2.44" fill="#171514"></rect>
-          <text fill="#ffffff" font-size="2.2px" stroke-width=".987">
-            <tspan x="35.267719 36.591557 37.915394" y="26.1">103</tspan>
-            <tspan x="35.267719 36.591557 37.915394" y="36.12">102</tspan>
+          <text fill="rgb(255, 255, 255)" font-size="2.2px" stroke-width="0.987px" font-family="sans-serif" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" text-anchor="start" letter-spacing="normal" opacity="1">
+            <tspan x="35.267719 36.591557 37.915394" y="26.1" font-size="2.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.987px" text-anchor="start" letter-spacing="normal" opacity="1">103</tspan>
+            <tspan x="35.267719 36.591557 37.915394" y="36.12" font-size="2.2px" font-family="sans-serif" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="0.987px" text-anchor="start" letter-spacing="normal" opacity="1">102</tspan>
           </text>
           <rect x="17.9" y="33.7" width="3.93" height="3.23" fill="#ccf9f9"></rect>
         </g>

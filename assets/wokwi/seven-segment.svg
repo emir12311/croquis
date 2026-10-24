@@ -1,11 +1,11 @@
 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="12.55mm" height="22mm" viewBox="0 0 12.55 22">
         <defs>
           <pattern id="pin-pattern" height="2" width="2.54" patternUnits="userSpaceOnUse">
-            <!--?lit$512290874$--><circle cx="1.27" cy="1" r="0.5" fill="#aaa"></circle>
+            <!--?lit$358190898$--><circle cx="1.27" cy="1" r="0.5" fill="#aaa"></circle>
           </pattern>
         </defs>
         <rect x="0" height="20.5" y="0" width="12.55"></rect>
-        <!--?lit$512290874$--><!---->
+        <!--?lit$358190898$--><!---->
       <g transform="skewX(-8) translate(3.5, 2.4) scale(0.81)">
         <polygon points="2 0 8 0 9 1 8 2 2 2 1 1" fill="#444"></polygon>
         <polygon points="10 2 10 8 9 9 8 8 8 2 9 1" fill="#444"></polygon>
@@ -17,8 +17,8 @@
       </g>
       <circle r="0.89" cx="10.9" cy="16" fill="#444"></circle>
     <!----><!-- -->
-        <!--?lit$512290874$--><!-- -->
-        <!--?lit$512290874$-->
+        <!--?lit$358190898$--><!-- -->
+        <!--?lit$358190898$-->
       <g fill="url(#pin-pattern)" transform="translate(-0.07499999999999929, 0)">
         <rect height="2" width="12.7"></rect>
         <rect height="2" width="12.7" transform="translate(0, 18)"></rect>
