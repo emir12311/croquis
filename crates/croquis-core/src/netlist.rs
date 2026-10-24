@@ -650,12 +650,88 @@ pub fn evaluate_circuit_with_state(
 
     let rails = collect_rails(parts, wires, &mut uf, avr, pin_duty, pin_pulse);
     let edges = resistor_edges(parts, &mut uf);
+    let mut eval = CircuitEval::default();
+    // The registers are stepped first: their latched outputs are levels like
+    // any other, and everything below reads levels.
+    let rail_high = |root: &str| rails.vcc.contains(root) || rails.mcu_high.contains(root);
+    let rail_low = |root: &str| rails.gnd.contains(root) || rails.mcu_low.contains(root);
+    let mut shift_high: HashSet<String> = HashSet::new();
+    let mut shift_low: HashSet<String> = HashSet::new();
+    for part in parts {
+        if part.kind != PartKind::ShiftRegister74hc595 {
+            continue;
+        }
+        let powered = rail_high(&uf.find(&format!("{}:VCC", part.id)))
+            && rail_low(&uf.find(&format!("{}:GND", part.id)));
+        let mut pins = HashMap::new();
+        let mut levels = ShiftLevels::default();
+        for (signal, pin) in [
+            (ShiftSignal::Ds, "DS"),
+            (ShiftSignal::Shcp, "SHCP"),
+            (ShiftSignal::Stcp, "STCP"),
+            (ShiftSignal::Mr, "MR"),
+            (ShiftSignal::Oe, "OE"),
+        ] {
+            let root = uf.find(&format!("{}:{pin}", part.id));
+            if let Some((port, number)) = mcu_pin_on(&rails, &root) {
+                pins.insert(signal, format!("{port}{number}"));
+            } else {
+                let high = rail_high(&root);
+                match signal {
+                    ShiftSignal::Ds => levels.ds = high,
+                    ShiftSignal::Shcp => levels.shcp = high,
+                    ShiftSignal::Stcp => levels.stcp = high,
+                    ShiftSignal::Mr => levels.mr = high,
+                    ShiftSignal::Oe => levels.oe = high,
+                }
+            }
+        }
+        let wiring = ShiftWiring {
+            powered,
+            pins,
+            levels,
+        };
+        let state = step_shift_register(
+            previous_shift.get(&part.id).copied().unwrap_or_default(),
+            &wiring,
+            avr,
+        );
+        eval.shift_wiring.insert(part.id.clone(), wiring);
+        eval.shift_registers.insert(part.id.clone(), state);
+
+        // The parallel outputs are levels the rest of the circuit can feel. OE
+        // gates them; Q7S is the chain output and is not gated, which is what
+        // lets chips chain. Without this the register shifts and latches into
+        // nothing at all.
+        if !state.levels.oe {
+            for (bit, name) in ["Q0", "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7"]
+                .iter()
+                .enumerate()
+            {
+                let root = uf.find(&format!("{}:{name}", part.id));
+                if (state.latch >> bit) & 1 == 1 {
+                    shift_high.insert(root);
+                } else {
+                    shift_low.insert(root);
+                }
+            }
+        }
+        let q7s = uf.find(&format!("{}:Q7S", part.id));
+        if (state.shift >> 7) & 1 == 1 {
+            shift_high.insert(q7s);
+        } else {
+            shift_low.insert(q7s);
+        }
+    }
     let high_nets: HashSet<String> = rails.vcc.union(&rails.mcu_high).cloned().collect();
-    let low_nets: HashSet<String> = rails.gnd.union(&rails.mcu_low).cloned().collect();
+    let mut low_nets: HashSet<String> = rails.gnd.union(&rails.mcu_low).cloned().collect();
+    let mut high_nets: HashSet<String> = high_nets;
+    high_nets.extend(shift_high);
+    low_nets.extend(shift_low);
+    low_nets.retain(|net| !high_nets.contains(net));
     let net_high = |root: &str| high_nets.contains(root);
     let net_low = |root: &str| low_nets.contains(root);
 
-    let mut eval = CircuitEval::default();
 
     for part in parts {
         if part.kind != PartKind::Led {
@@ -1168,48 +1244,6 @@ pub fn evaluate_circuit_with_state(
         }
     }
 
-    for part in parts {
-        if part.kind != PartKind::ShiftRegister74hc595 {
-            continue;
-        }
-        let powered = net_high(&uf.find(&format!("{}:VCC", part.id)))
-            && net_low(&uf.find(&format!("{}:GND", part.id)));
-        let mut pins = HashMap::new();
-        let mut levels = ShiftLevels::default();
-        for (signal, pin) in [
-            (ShiftSignal::Ds, "DS"),
-            (ShiftSignal::Shcp, "SHCP"),
-            (ShiftSignal::Stcp, "STCP"),
-            (ShiftSignal::Mr, "MR"),
-            (ShiftSignal::Oe, "OE"),
-        ] {
-            let root = uf.find(&format!("{}:{pin}", part.id));
-            if let Some((port, number)) = mcu_pin_on(&rails, &root) {
-                pins.insert(signal, format!("{port}{number}"));
-            } else {
-                let high = net_high(&root);
-                match signal {
-                    ShiftSignal::Ds => levels.ds = high,
-                    ShiftSignal::Shcp => levels.shcp = high,
-                    ShiftSignal::Stcp => levels.stcp = high,
-                    ShiftSignal::Mr => levels.mr = high,
-                    ShiftSignal::Oe => levels.oe = high,
-                }
-            }
-        }
-        let wiring = ShiftWiring {
-            powered,
-            pins,
-            levels,
-        };
-        let state = step_shift_register(
-            previous_shift.get(&part.id).copied().unwrap_or_default(),
-            &wiring,
-            avr,
-        );
-        eval.shift_wiring.insert(part.id.clone(), wiring);
-        eval.shift_registers.insert(part.id.clone(), state);
-    }
 
     for part in parts {
         if part.kind != PartKind::Servo {
@@ -1821,6 +1855,42 @@ mod tests {
             &HashMap::new(),
         );
         assert_eq!(out.shift_registers["sr"].shift, 1);
+    }
+
+    #[test]
+    fn a_latched_output_lights_the_led_on_it() {
+        let sr = EvalPart::new("sr", PartKind::ShiftRegister74hc595);
+        let wires = [
+            wire(at("uno", "5V"), at("sr", "VCC")),
+            wire(at("sr", "GND"), at("uno", "GND.2")),
+            wire(at("uno", "5V"), at("sr", "MR")),
+            wire(at("sr", "OE"), at("uno", "GND.2")),
+            wire(at("sr", "Q0"), at("r", "1")),
+            wire(at("r", "2"), at("led", "A")),
+            wire(at("led", "C"), at("uno", "GND.2")),
+        ];
+        // One bit already latched: Q0 high, everything else low.
+        let state = ShiftState {
+            shift: 0,
+            latch: 0b0000_0001,
+            levels: ShiftLevels::default(),
+        };
+        let out = evaluate_circuit_with_state(
+            &[uno(), sr, resistor("220"), led("red")],
+            &wires,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::from([("sr".to_string(), state)]),
+            &HashMap::new(),
+        );
+        assert_eq!(
+            out.leds["led"],
+            LedState::Lit,
+            "a latched bit has to reach the wire on its output"
+        );
     }
 
     #[test]
