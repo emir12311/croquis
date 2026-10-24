@@ -541,6 +541,7 @@ pub fn evaluate_circuit_with_keypad(
         &HashMap::new(),
         keypad_keys,
         &HashMap::new(),
+        &HashMap::new(),
     )
 }
 
@@ -554,6 +555,9 @@ pub fn evaluate_circuit_with_state(
     pin_pulse: &HashMap<String, f64>,
     keypad_keys: &HashMap<String, Option<KeyPosition>>,
     previous_shift: &HashMap<String, ShiftState>,
+    // The frequency measured on each pin, in hertz: a buzzer's pitch, so that
+    // `tone(pin, 440)` sounds at 440 rather than at one fixed note.
+    pin_frequency: &HashMap<String, f64>,
 ) -> CircuitEval {
     let mut uf = UnionFind::new();
     let key = |reference: &PinRef| {
@@ -1258,13 +1262,32 @@ pub fn evaluate_circuit_with_state(
                 let b = uf.find(&format!("{}:{b}", part.id));
                 let active = (high_nets.contains(&a) && low_nets.contains(&b))
                     || (high_nets.contains(&b) && low_nets.contains(&a));
+                // The note is whatever the driving pin is running at; a pin whose
+                // frequency the simulator has not measured yet keeps the old
+                // default of a thousand hertz.
+                // `mcu_pins` is keyed by net *and* pin name, so a net is looked
+                // up by prefix.
+                let hertz = [&a, &b]
+                    .into_iter()
+                    .filter(|net| high_nets.contains(*net))
+                    .find_map(|net| {
+                        let prefix = format!("{net}/");
+                        rails
+                            .mcu_pins
+                            .iter()
+                            .find(|(key, _)| key.starts_with(&prefix))
+                            .map(|(_, pin)| *pin)
+                    })
+                    .and_then(|(port, pin)| {
+                        pin_frequency.get(&format!("{}{}", port, pin)).copied()
+                    });
                 eval.outputs.insert(
                     part.id.clone(),
                     OutputState {
                         active,
                         values: Vec::new(),
                         frequency: if part.kind == PartKind::Buzzer {
-                            Some(if active { 1000 } else { 0 })
+                            Some(if active { hertz.unwrap_or(1000.0).round() as u16 } else { 0 })
                         } else {
                             None
                         },
@@ -1639,6 +1662,31 @@ mod tests {
     }
 
     #[test]
+    fn a_buzzer_plays_the_pitch_on_its_pin() {
+        let buzzer = EvalPart::new("buzz", PartKind::Buzzer);
+        let wires = [
+            wire(at("uno", "8"), at("buzz", "1")),
+            wire(at("buzz", "2"), at("uno", "GND.2")),
+        ];
+        // Pin 8 is port B, bit 0 — the same key the simulator's pin events use.
+        let avr = HashMap::from([("B0".into(), true)]);
+        let pitch = HashMap::from([("B0".to_string(), 440.0)]);
+        let out = evaluate_circuit_with_state(
+            &[uno(), buzzer],
+            &wires,
+            &HashMap::new(),
+            &avr,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &pitch,
+        );
+        assert!(out.outputs["buzz"].active);
+        assert_eq!(out.outputs["buzz"].frequency, Some(440));
+    }
+
+    #[test]
     fn a_seven_segment_maps_lit_segments() {
         let display = EvalPart::new("seg", PartKind::SevenSegment);
         let wires = [
@@ -1766,6 +1814,7 @@ mod tests {
             &wires,
             &HashMap::new(),
             &avr,
+            &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),

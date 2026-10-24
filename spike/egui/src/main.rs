@@ -214,6 +214,8 @@ struct Spike {
     pin_pulses: HashMap<String, f64>,
     /// The duty cycle measured on each PWM pin, 0 to 1.
     pin_duty: HashMap<String, f64>,
+    /// The frequency measured on each pin, in hertz — a buzzer's pitch.
+    pin_frequency: HashMap<String, f64>,
     segment_memory: HashMap<String, Vec<u8>>,
     /// When each single 7-segment display last changed, for the settle guard.
     seven_changed_at: HashMap<String, Instant>,
@@ -284,6 +286,7 @@ impl Default for Spike {
             buzzer: buzzer::BuzzerAudio::default(),
             pin_pulses: HashMap::new(),
             pin_duty: HashMap::new(),
+            pin_frequency: HashMap::new(),
             segment_memory: HashMap::new(),
             seven_changed_at: HashMap::new(),
             seven_stable: HashMap::new(),
@@ -536,7 +539,8 @@ impl Spike {
                 &self.pin_pulses,
                 &self.keypad_keys,
                 &self.shift_states,
-            );
+            &self.pin_frequency,
+        );
         self.store_eval(eval);
     }
 
@@ -928,6 +932,7 @@ impl Spike {
             &self.pin_pulses,
             &self.keypad_keys,
             &self.shift_states,
+            &self.pin_frequency,
         );
         self.store_eval(eval);
         let workdir = std::env::temp_dir().join(format!("croquis-egui-{}", std::process::id()));
@@ -978,6 +983,7 @@ impl Spike {
         self.avr_pins.clear();
         self.pin_pulses.clear();
         self.pin_duty.clear();
+        self.pin_frequency.clear();
         self.segment_memory.clear();
         self.seven_changed_at.clear();
         self.seven_stable.clear();
@@ -994,7 +1000,8 @@ impl Spike {
                 &self.pin_pulses,
                 &self.keypad_keys,
                 &self.shift_states,
-            );
+            &self.pin_frequency,
+        );
         self.store_eval(eval);
     }
 
@@ -1052,7 +1059,7 @@ impl Spike {
                     pin,
                     duty_per_mille,
                     high_micros,
-                    ..
+                    period_micros,
                 } => {
                     let key = format!("{}{}", port as char, pin);
                     if high_micros > 0 {
@@ -1063,9 +1070,16 @@ impl Spike {
                     // PWM fade never dims anything.
                     if duty_per_mille > 0 {
                         self.pin_duty.insert(
-                            key,
+                            key.clone(),
                             (f64::from(duty_per_mille) / 1000.0).clamp(0.0, 1.0),
                         );
+                        changed = true;
+                    }
+                    // A buzzer sounds at this rate, so `tone(pin, 440)` is a
+                    // pitch rather than one fixed note.
+                    if period_micros > 0 {
+                        self.pin_frequency
+                            .insert(key, 1_000_000.0 / period_micros as f64);
                         changed = true;
                     }
                 }
@@ -1089,6 +1103,7 @@ impl Spike {
             &self.pin_pulses,
             &self.keypad_keys,
             &self.shift_states,
+            &self.pin_frequency,
         );
         self.store_eval(eval);
     }
@@ -2690,6 +2705,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
+                &HashMap::new(),
             );
             // No resistor here, so a connected LED is over-driven rather than
             // merely lit. Both mean the strip carried the current.
@@ -2767,6 +2783,7 @@ mod tests {
                 &parts,
                 &wires,
                 pressed,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
@@ -2973,6 +2990,7 @@ mod tests {
             &pulses,
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
         );
         let angle = eval.outputs[&servo].angle.expect("servo angle");
         assert!((85.0..=95.0).contains(&angle), "angle={angle}");
@@ -3007,6 +3025,7 @@ mod tests {
                 &spike.wires,
                 &HashMap::new(),
                 &avr,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
