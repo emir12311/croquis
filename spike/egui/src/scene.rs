@@ -10,7 +10,9 @@ use serde::Deserialize;
 use croquis_core::catalogue::{parse_kind, part_by_kind, PartKind, CATALOGUE};
 use croquis_core::diagram::{build_diagram, parse_diagram, PlacedPart, RoutedWire};
 use croquis_core::document::PinRef as CorePinRef;
-use croquis_core::netlist::{evaluate_circuit, CircuitEval, EvalPart, EvalWire, LedState};
+use croquis_core::netlist::{
+    evaluate_circuit_with_state, CircuitEval, EvalPart, EvalWire, LedState,
+};
 
 #[derive(Clone)]
 pub struct Pin {
@@ -294,7 +296,16 @@ pub fn evaluate_scene(
             })
         })
         .collect();
-    evaluate_circuit(&eval_parts, &eval_wires, &HashMap::new(), avr, pin_pulse)
+    evaluate_circuit_with_state(
+        &eval_parts,
+        &eval_wires,
+        &HashMap::new(),
+        avr,
+        &HashMap::new(),
+        pin_pulse,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
 }
 
 /// The LED states from a loaded circuit.
