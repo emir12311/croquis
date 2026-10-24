@@ -260,6 +260,7 @@ pub fn evaluate_scene(
     pin_pulse: &HashMap<String, f64>,
     keypad_keys: &HashMap<String, Option<KeyPosition>>,
     previous_shift: &HashMap<String, ShiftState>,
+    pin_frequency: &HashMap<String, f64>,
 ) -> CircuitEval {
     let eval_parts: Vec<EvalPart> = parts
         .iter()
@@ -312,6 +313,7 @@ pub fn evaluate_scene(
         pin_pulse,
         keypad_keys,
         previous_shift,
+        pin_frequency,
     )
 }
 
@@ -326,6 +328,7 @@ pub fn evaluate_with(
         wires,
         &HashMap::new(),
         avr,
+        &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
