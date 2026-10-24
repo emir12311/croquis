@@ -162,6 +162,7 @@ struct Spike {
     run_error: Option<String>,
     path: Option<PathBuf>,
     file_error: Option<String>,
+    presets: Vec<(String, PathBuf)>,
 }
 
 impl Default for Spike {
@@ -187,6 +188,7 @@ impl Default for Spike {
             run_error: None,
             path: None,
             file_error: None,
+            presets: scene::presets(),
         }
     }
 }
@@ -228,13 +230,56 @@ impl Spike {
         self.camera = Camera::default();
     }
 
-    fn open_path(&mut self, path: PathBuf) {
+    fn ensure_textures(&mut self, ctx: &egui::Context, parts: &[Part]) {
+        for part in parts {
+            let variants: &[bool] = if part.kind == "led" {
+                &[false, true]
+            } else {
+                &[false]
+            };
+            for lit in variants {
+                let key = if part.kind == "led" {
+                    format!("led:{lit}")
+                } else {
+                    part.kind.clone()
+                };
+                if self.textures.contains_key(&key) {
+                    continue;
+                }
+                let svg = if part.kind == "led" {
+                    scene::led_state_svg(
+                        &part.svg,
+                        part.attrs.get("color").map(String::as_str).unwrap_or("red"),
+                        if *lit { 1.0 } else { 0.0 },
+                        *lit,
+                    )
+                } else {
+                    part.svg.clone()
+                };
+                let width = (part.size.x * 3.0).max(1.0) as u32;
+                let height = (part.size.y * 3.0).max(1.0) as u32;
+                if let Some(image) = art::rasterize(&svg, width, height) {
+                    let texture = ctx.load_texture(
+                        format!("part-{key}"),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    self.textures.insert(key, texture);
+                }
+            }
+        }
+    }
+
+    fn open_path(&mut self, path: PathBuf, ctx: &egui::Context) {
         self.stop_sim();
         let (parts, wires, sketch) = scene::load_diagram_file(&path);
         if parts.is_empty() {
             self.file_error = Some(format!("Could not load {}", path.display()));
             return;
         }
+        // Rasterise the new scene before swapping it in. Otherwise the canvas
+        // paints the blue fallback for a frame while textures load.
+        self.ensure_textures(ctx, &parts);
         self.parts = parts;
         self.wires = wires;
         self.sketch = sketch;
@@ -244,17 +289,16 @@ impl Spike {
         self.serial.clear();
         self.run_error = None;
         self.file_error = None;
-        self.textures.clear();
         self.camera = Camera::default();
         self.led_states = scene::evaluate_with(&self.parts, &self.wires, &HashMap::new());
     }
 
-    fn open_dialog(&mut self) {
+    fn open_dialog(&mut self, ctx: &egui::Context) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Croquis diagram", &["json"])
             .pick_file()
         {
-            self.open_path(path);
+            self.open_path(path, &ctx);
         }
     }
 
@@ -396,7 +440,7 @@ impl eframe::App for Spike {
                             self.new_document();
                         }
                         if ui.button("Open…").clicked() {
-                            self.open_dialog();
+                            self.open_dialog(&ctx);
                         }
                         if ui.button("Save").clicked() {
                             self.save();
@@ -405,9 +449,9 @@ impl eframe::App for Spike {
                             self.save_as();
                         }
                         ui.menu_button("Presets", |ui| {
-                            for (title, path) in scene::presets() {
+                            for (title, path) in self.presets.clone() {
                                 if ui.button(title).clicked() {
-                                    self.open_path(path);
+                                    self.open_path(path, &ctx);
                                 }
                             }
                         });
@@ -439,6 +483,14 @@ impl eframe::App for Spike {
                             self.start_sim(&ctx);
                         }
                     });
+                    ui.separator();
+                    if self.running {
+                        if ui.button("Stop").clicked() {
+                            self.stop_sim();
+                        }
+                    } else if ui.button("Run").clicked() {
+                        self.start_sim(&ctx);
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(if self.running { "Running" } else { "Stopped" });
                         if let Some(error) = &self.file_error {
@@ -893,8 +945,7 @@ mod tests {
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/button.json"),
         );
         scene::save_diagram_file(&path, &parts, &wires, &sketch).expect("save");
-        let (reloaded_parts, reloaded_wires, reloaded_sketch) =
-            scene::load_diagram_file(&path);
+        let (reloaded_parts, reloaded_wires, reloaded_sketch) = scene::load_diagram_file(&path);
         assert_eq!(reloaded_parts.len(), parts.len());
         assert_eq!(reloaded_wires.len(), wires.len());
         assert_eq!(reloaded_sketch, sketch);
