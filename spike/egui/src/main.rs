@@ -103,7 +103,7 @@ impl Default for Spike {
             dragging: None,
             hovered_pin: None,
             textures: HashMap::new(),
-            led_states: scene::evaluate_blink(),
+            led_states: HashMap::new(),
             sketch: scene::blink_sketch(),
             next_id: 0,
             sim: None,
@@ -171,6 +171,8 @@ impl Spike {
         }
         self.events = None;
         self.running = false;
+        self.avr_pins.clear();
+        self.led_states = scene::evaluate_blink_with(&self.avr_pins);
     }
 
     fn poll_engine(&mut self) {

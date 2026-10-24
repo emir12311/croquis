@@ -19,7 +19,11 @@ pub const SPIKE_LED_SVG: &str = r##"
 /// Rasterise an SVG to a premultiplied RGBA image, fitted into the requested
 /// box without changing its aspect ratio.
 pub fn rasterize(svg: &str, width: u32, height: u32) -> Option<egui::ColorImage> {
-    let tree = match resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default()) {
+    let mut options = resvg::usvg::Options::default();
+    // The Wokwi board drawings contain labels and pin text. With an empty
+    // font database resvg silently omits all of it.
+    options.fontdb_mut().load_system_fonts();
+    let tree = match resvg::usvg::Tree::from_str(svg, &options) {
         Ok(tree) => tree,
         Err(error) => {
             eprintln!("SVG parse failed: {error}");
