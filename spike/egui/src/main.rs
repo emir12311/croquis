@@ -829,12 +829,16 @@ impl Spike {
         match self.parts[index].kind.as_str() {
             "pushbutton" => {
                 self.pressed.insert(id, true);
+                // A press is not a commitment to stay put: letting go without
+                // moving leaves it pressed-and-released, moving it moves it.
+                self.dragging = Some(index);
             }
             "membrane-keypad" => {
                 if let Some(key) = keypad_key(&self.parts[index], world) {
                     self.keypad_keys.insert(id.clone(), Some(key));
                     self.keypad_until.insert(id, Instant::now() + KEY_HOLD);
                 }
+                self.dragging = Some(index);
             }
             "analog-joystick" => {
                 if knobs::on_stick(&self.parts[index], world) {
@@ -1407,12 +1411,9 @@ impl eframe::App for Spike {
                 if let Some(pos) = ctx.input(|input| input.pointer.interact_pos()) {
                     if rect.contains(pos) {
                         let world = self.camera.screen_to_world(rect, pos);
-                        if hit_pin(&self.parts, world, PIN_HIT_RADIUS / self.camera.zoom).is_none()
-                        {
-                            self.selected = hit_part(&self.parts, world);
-                            if let Some(index) = self.selected {
-                                self.press_control(index, world, pos);
-                            }
+                        self.selected = hit_part(&self.parts, world);
+                        if let Some(index) = self.selected {
+                            self.press_control(index, world, pos);
                         }
                     }
                 }
@@ -2602,6 +2603,37 @@ mod tests {
             spike.sensors["tilt1"].active,
             "tilting it has to reach the netlist, which is what every preset              that reads a sensor depends on"
         );
+    }
+
+    #[test]
+    fn a_press_takes_the_button_and_leaves_it_movable() {
+        use croquis_core::catalogue::PartKind;
+
+        // A pressed part is still a part. Buttons and keypads used to take the
+        // press and never enter the drag state, so they could not be moved at
+        // all — which is what the owner hit.
+        let mut spike = Spike::default();
+        spike.parts = vec![scene::part_from_kind(
+            PartKind::Pushbutton,
+            Pos2::new(100.0, 100.0),
+            "btn".into(),
+        )
+        .expect("button")];
+        let centre = spike.parts[0].bounds().center();
+        spike.press_control(0, centre, Pos2::ZERO);
+        assert_eq!(spike.pressed.get("btn"), Some(&true), "the button is down");
+        assert_eq!(spike.dragging, Some(0), "and the same grab can move it");
+
+        let mut pad = Spike::default();
+        pad.parts = vec![scene::part_from_kind(
+            PartKind::MembraneKeypad,
+            Pos2::new(100.0, 100.0),
+            "pad".into(),
+        )
+        .expect("keypad")];
+        let centre = pad.parts[0].bounds().center();
+        pad.press_control(0, centre, Pos2::ZERO);
+        assert_eq!(pad.dragging, Some(0), "a keypad can be moved too");
     }
 
     #[test]
