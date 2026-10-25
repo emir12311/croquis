@@ -564,7 +564,43 @@ pub fn slide_pot_svg(svg: &str) -> String {
     format!("{}{}", &svg[..start], &svg[start + length + "</g>".len()..])
 }
 
-/// Rotate the stepper's shaft and rotor arrow to an angle./// Rotate the stepper's shaft and rotor arrow to an angle.
+/// The pushbutton with its cap held down.
+///
+/// The element swaps the cap's fill between `grad-up` and `grad-down` while the
+/// button is pressed, which is the whole visible difference.
+pub fn pushbutton_svg(svg: &str, pressed: bool) -> String {
+    if !pressed {
+        return svg.to_string();
+    }
+    svg.replacen(
+        "url(#grad-up-pushbutton1)",
+        "url(#grad-down-pushbutton1)",
+        1,
+    )
+}
+
+/// The board's own "L" LED, lit when pin 13 is high.
+///
+/// The element adds a red dot inside the LED's body group and changes nothing
+/// else. Pin 13 is port B, bit 5.
+pub fn uno_svg(svg: &str, led13: bool) -> String {
+    if !led13 {
+        return svg.to_string();
+    }
+    const GROUP: &str = "<g transform=\"translate(26.87,11.69)\">";
+    let Some(start) = svg.find(GROUP) else {
+        return svg.to_string();
+    };
+    let Some(end) = svg[start..].find("</g>") else {
+        return svg.to_string();
+    };
+    let lit = format!(
+        "{GROUP}\n          <use xlink:href=\"#led-body\"></use>\n          <circle cx=\"1.3\" cy=\"0.55\" r=\"1.3\" fill=\"#ff8080\" filter=\"url(#ledFilter)\"></circle>\n        "
+    );
+    format!("{}{}{}", &svg[..start], lit, &svg[start + end..])
+}
+
+/// Rotate the stepper's shaft and rotor arrow to an angle.
 ///
 /// The element draws both, in its own two forms: the arrow is
 /// `rotate(0, 28.65,28.65)` about the centre, the shaft is
