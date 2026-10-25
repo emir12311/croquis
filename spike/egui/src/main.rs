@@ -1190,6 +1190,15 @@ impl eframe::App for Spike {
             self.evaluate_now();
         }
         self.tick_input();
+        // A running simulation needs a steady frame: a press is solved on the
+        // next frame, and a tap has to survive a few of them. Without this the
+        // app only repaints when the simulator happens to change a pin, so a
+        // click could be solved at once, late, or only after the tap had
+        // expired — which is exactly what made it feel like it sometimes
+        // needed a hold or a double click.
+        if self.running {
+            ctx.request_repaint();
+        }
         self.buzzer.update(&self.outputs);
         ensure_textures(
             &ctx,
@@ -2775,6 +2784,73 @@ mod tests {
         if let Some(mut sim) = spike.sim.take() {
             sim.stop();
         }
+    }
+
+    #[test]
+    fn the_keypad_preset_reports_a_held_key() {
+        // The whole loop with no window: real simulator, real sketch, a key
+        // held, and the serial monitor checked for the key it should print.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/keypad.json");
+        let (parts, wires, sketch) = scene::load_diagram_file(&root);
+        let pad = parts
+            .iter()
+            .position(|part| part.kind == "membrane-keypad")
+            .expect("the preset has a keypad");
+
+        let workdir = std::env::temp_dir().join("croquis-egui-keypad-test");
+        let _ = std::fs::create_dir_all(&workdir);
+        let firmware = engine::compile(&sketch, &workdir).expect("the sketch compiles");
+
+        let serial: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+        let pins: Arc<Mutex<Vec<(String, bool)>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_serial = serial.clone();
+        let sink_pins = pins.clone();
+        let emit: engine::Emit = Arc::new(move |event| match event {
+            engine::SimEvent::Serial(byte) => {
+                sink_serial.lock().unwrap().push(byte as char);
+            }
+            engine::SimEvent::Pin { port, pin, high } => {
+                let key = format!("{}{}", port as char, pin);
+                sink_pins.lock().unwrap().push((key, high));
+            }
+            _ => {}
+        });
+        let sim = engine::Simulator::start(Path::new(&firmware.elf), emit, false)
+            .expect("the simulator starts");
+
+        let mut spike = Spike::default();
+        spike.parts = parts;
+        spike.wires = wires;
+        spike.sim = Some(sim);
+        spike.selected = Some(pad);
+
+        // The centre of the first cell.
+        let unit = spike.parts[pad].bounds().width() / KEYPAD_VIEW.x;
+        let world = spike.parts[pad].bounds().min
+            + Vec2::new(
+                KEYPAD_COLUMNS[0] + KEYPAD_KEY.x * 0.5,
+                KEYPAD_ROWS[0] + KEYPAD_KEY.y * 0.5,
+            ) * unit;
+
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while Instant::now() < deadline {
+            for (key, high) in pins.lock().unwrap().drain(..) {
+                spike.avr_pins.insert(key, high);
+            }
+            // Held down, so the tap never lapses while the sketch scans.
+            spike.press_control(pad, world, Pos2::ZERO);
+            spike.evaluate_now();
+            if serial.lock().unwrap().contains("key ") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if let Some(mut sim) = spike.sim.take() {
+            sim.stop();
+        }
+        let text = serial.lock().unwrap().clone();
+        println!("serial: {text:?}");
+        assert!(text.contains("key "), "the keypad should print its key: {text:?}");
     }
 
     #[test]
