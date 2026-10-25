@@ -447,6 +447,10 @@ struct Spike {
     parts: Vec<Part>,
     wires: Vec<Wire>,
     wire_start: Option<PinRef>,
+    /// Bends pinned while routing: click empty space (or a part's body) to hold
+    /// the wire's last corner, so the rest can be routed around things. v0.2
+    /// does the same, and the model already carries `waypoints` per wire.
+    wire_waypoints: Vec<Pos2>,
     selected: Option<usize>,
     dragging: Option<usize>,
     hovered_pin: Option<PinRef>,
@@ -568,6 +572,7 @@ impl Default for Spike {
             parts,
             wires,
             wire_start: None,
+            wire_waypoints: Vec::new(),
             selected: None,
             dragging: None,
             hovered_pin: None,
@@ -1174,6 +1179,19 @@ impl Spike {
         }
     }
 
+    /// Pin a bend at `world` while a wire is being routed.
+    fn wire_bend(&mut self, world: Pos2) {
+        if self.wire_start.is_some() {
+            self.wire_waypoints.push(world);
+        }
+    }
+
+    /// Give up on the wire being drawn.
+    fn cancel_wire(&mut self) {
+        self.wire_start = None;
+        self.wire_waypoints.clear();
+    }
+
     /// The pointer came up over `pin`, or over nothing at all.
     ///
     /// Releasing on a different pin finishes the wire; releasing anywhere else
@@ -1189,7 +1207,7 @@ impl Spike {
         self.wires.push(Wire {
             a: start,
             b: target,
-            waypoints: Vec::new(),
+            waypoints: std::mem::take(&mut self.wire_waypoints),
         });
         self.wire_start = None;
         self.reevaluate = true;
@@ -1554,7 +1572,7 @@ impl eframe::App for Spike {
         );
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.wire_start = None;
+            self.cancel_wire();
         }
 
         egui::Panel::top("topbar")
@@ -2053,10 +2071,14 @@ impl eframe::App for Spike {
 
             if response.clicked_by(PointerButton::Primary) && self.hovered_pin.is_none() {
                 if let Some(world) = world_pointer {
-                    self.selected = hit_part(&self.parts, world);
+                    if self.wire_start.is_some() {
+                        // Mid-wire, a click off a pin pins a bend where it
+                        // landed, which is how a wire is routed around things.
+                        self.wire_bend(world);
+                    } else {
+                        self.selected = hit_part(&self.parts, world);
+                    }
                 }
-                // A click that is not on a pin gives up on the wire.
-                self.wire_start = None;
             }
 
             if self.serial_open {
@@ -2193,10 +2215,17 @@ impl eframe::App for Spike {
                 let pa = self
                     .camera
                     .world_to_screen(rect, self.parts[start.0].pin_world(start.1));
-                let preview = expand_path(&[
-                    CorePoint::new(pa.x as f64, pa.y as f64),
-                    CorePoint::new(pointer.x as f64, pointer.y as f64),
-                ]);
+                let mut route = vec![CorePoint::new(pa.x as f64, pa.y as f64)];
+                route.extend(self.wire_waypoints.iter().map(|bend| {
+                    let at = self.camera.world_to_screen(rect, *bend);
+                    CorePoint::new(at.x as f64, at.y as f64)
+                }));
+                route.push(CorePoint::new(pointer.x as f64, pointer.y as f64));
+                for bend in &self.wire_waypoints {
+                    let at = self.camera.world_to_screen(rect, *bend);
+                    painter.circle_filled(at, 3.0, Color32::from_rgb(217, 164, 65));
+                }
+                let preview = expand_path(&route);
                 for pair in preview.windows(2) {
                     painter.line_segment(
                         [
@@ -3419,6 +3448,41 @@ mod tests {
             1,
             "one key held should print one letter, got {distinct:?} from {keys:?}"
         );
+    }
+
+    #[test]
+    fn a_bend_is_pinned_while_routing_and_kept_by_the_wire() {
+        let mut spike = Spike::default();
+        spike.wires.clear();
+        let (a, b) = ((0usize, 1usize), (2usize, 3usize));
+
+        // A bend with no wire being drawn means nothing.
+        spike.wire_bend(Pos2::new(10.0, 10.0));
+        assert!(spike.wire_waypoints.is_empty());
+
+        spike.wire_press(a);
+        spike.wire_bend(Pos2::new(100.0, 40.0));
+        spike.wire_bend(Pos2::new(140.0, 40.0));
+        assert_eq!(spike.wire_waypoints.len(), 2, "each click pins a bend");
+
+        spike.wire_release(Some(b));
+        assert_eq!(spike.wires.len(), 1);
+        assert_eq!(
+            spike.wires[0].waypoints,
+            vec![Pos2::new(100.0, 40.0), Pos2::new(140.0, 40.0)],
+            "the finished wire keeps the route it was given"
+        );
+        assert!(spike.wire_waypoints.is_empty(), "and the routing state is cleared");
+    }
+
+    #[test]
+    fn cancelling_gives_up_the_wire_and_its_bends() {
+        let mut spike = Spike::default();
+        spike.wire_press((0, 1));
+        spike.wire_bend(Pos2::new(50.0, 50.0));
+        spike.cancel_wire();
+        assert_eq!(spike.wire_start, None);
+        assert!(spike.wire_waypoints.is_empty());
     }
 
     #[test]
