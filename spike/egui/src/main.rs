@@ -45,6 +45,52 @@ use scene::{Part, PinRef, Wire};
 const GRID: f32 = 24.0;
 const PIN_HIT_RADIUS: f32 = 9.0;
 
+/// The shell's own chrome, from v0.2's tokens (`--surface`, `--border`,
+/// `--text-muted`, `--accent`).
+const SURFACE: Color32 = Color32::from_rgb(0x21, 0x21, 0x24);
+const BORDER: Color32 = Color32::from_rgb(0x35, 0x35, 0x3a);
+const MUTED: Color32 = Color32::from_rgb(0xa6, 0xa4, 0xa0);
+const ACCENT: Color32 = Color32::from_rgb(0xd9, 0xa4, 0x41);
+
+/// The chevron that closes a panel, as v0.2's `.icon-btn` in a head.
+fn panel_toggle(ui: &mut egui::Ui, open: &mut bool) -> bool {
+    let glyph = if *open { "▾" } else { "▸" };
+    if ui
+        .add(egui::Button::new(glyph).frame(false))
+        .on_hover_text(if *open { "Collapse" } else { "Expand" })
+        .clicked()
+    {
+        *open = !*open;
+        return true;
+    }
+    false
+}
+
+/// A panel's head, as v0.2's `.panel__head`: 32px tall, a muted uppercase title,
+/// a hairline under it, and room for controls on the right.
+fn panel_head(ui: &mut egui::Ui, title: &str, controls: impl FnOnce(&mut egui::Ui)) {
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 32.0), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 0.0, SURFACE);
+    painter.hline(
+        rect.x_range(),
+        rect.max.y - 0.5,
+        egui::Stroke::new(1.0, BORDER),
+    );
+    let mut head = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(Vec2::new(12.0, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    head.label(
+        egui::RichText::new(title.to_uppercase())
+            .size(12.0)
+            .color(MUTED),
+    );
+    head.with_layout(egui::Layout::right_to_left(egui::Align::Center), controls);
+}
+
 fn configure_style(ctx: &egui::Context) {
     use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
 
@@ -57,9 +103,13 @@ fn configure_style(ctx: &egui::Context) {
     let accent = Color32::from_rgb(0xd9, 0xa4, 0x41);
 
     let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = bg;
+    // v0.2 fills panels with `--surface` and only the canvas with `--bg`, which
+    // is what separates the docked chrome from the circuit.
+    visuals.panel_fill = surface;
     visuals.window_fill = surface;
-    visuals.extreme_bg_color = Color32::from_rgb(0x16, 0x16, 0x18);
+    // Text edits and scroll wells sit on the panel, not in a darker hole: v0.2's
+    // editor and lists are `--surface` with a 1px border.
+    visuals.extreme_bg_color = surface;
     visuals.faint_bg_color = surface;
     visuals.window_stroke = Stroke::new(1.0, border);
     // v0.2's shape rule: "no rounded corners on everything" — panels and menus
@@ -232,6 +282,11 @@ struct Spike {
     pin_frequency: HashMap<String, f64>,
     /// The board's own "L" LED, which follows pin 13.
     pin13: bool,
+    /// Which docked panels are open. A closed panel leaves a rail behind, which
+    /// is how v0.2 keeps the editor's history while clipping it to nothing.
+    sketch_open: bool,
+    components_open: bool,
+    serial_open: bool,
     segment_memory: HashMap<String, Vec<u8>>,
     /// When each single 7-segment display last changed, for the settle guard.
     seven_changed_at: HashMap<String, Instant>,
@@ -307,6 +362,9 @@ impl Default for Spike {
             pin_duty: HashMap::new(),
             pin_frequency: HashMap::new(),
             pin13: false,
+            sketch_open: true,
+            components_open: true,
+            serial_open: true,
             segment_memory: HashMap::new(),
             seven_changed_at: HashMap::new(),
             seven_stable: HashMap::new(),
@@ -1224,13 +1282,22 @@ impl eframe::App for Spike {
         }
 
         egui::Panel::top("topbar")
-            .exact_size(38.0)
+            .exact_size(40.0)
             .show(root, |ui| {
                 // Items sit flush, so the menu reads as a bar rather than as a
-                // row of separate buttons.
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.spacing_mut().button_padding = Vec2::new(12.0, 6.0);
-                ui.horizontal(|ui| {
+                // row of separate buttons: v0.2's `.menubar` uses a 2px gap.
+                ui.spacing_mut().item_spacing.x = 2.0;
+                ui.spacing_mut().button_padding = Vec2::new(8.0, 3.0);
+                let bar = ui.max_rect();
+                ui.painter().hline(
+                    bar.x_range(),
+                    bar.max.y,
+                    egui::Stroke::new(1.0, BORDER),
+                );
+                ui.horizontal_centered(|ui| {
+                    ui.add_space(2.0);
+                    ui.label(egui::RichText::new("Croquis").size(14.0).strong());
+                    ui.add_space(10.0);
                     ui.menu_button("File", |ui| {
                         if ui.button("New").clicked() {
                             self.new_document();
@@ -1305,136 +1372,180 @@ impl eframe::App for Spike {
 
         // Docked and fixed: a panel that can change height moves the canvas
         // beside it, and a canvas that shifts under a drag reads as a twitch.
-        egui::Panel::bottom("serial")
-            .exact_size(150.0)
-            .show(root, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Serial");
-                    if ui.button("Clear").clicked() {
-                        self.serial.clear();
+                if self.serial_open {
+    egui::Panel::bottom("serial")
+                .exact_size(150.0)
+                .show(root, |ui| {
+                    let mut open = self.serial_open;
+                    panel_head(ui, "Serial Monitor", |ui| {
+                        if ui.button("Clear").clicked() {
+                            self.serial.clear();
+                        }
+                        if panel_toggle(ui, &mut open) {
+                            self.serial_open = open;
+                        }
+                    });
+                    egui::ScrollArea::vertical()
+                        .id_salt("serial-output")
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            ui.monospace(&self.serial);
+                            if let Some(error) = &self.run_error {
+                                ui.colored_label(Color32::from_rgb(230, 120, 100), error);
+                            }
+                        });
+                });
+} else {
+            egui::Panel::bottom("serial-rail")
+                .exact_size(30.0)
+                .show(root, |ui| {
+                    if ui.small_button("▴  Serial Monitor").clicked() {
+                        self.serial_open = true;
                     }
                 });
-                egui::ScrollArea::vertical()
-                    .id_salt("serial-output")
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        ui.monospace(&self.serial);
-                        if let Some(error) = &self.run_error {
-                            ui.colored_label(Color32::from_rgb(230, 120, 100), error);
-                        }
-                    });
-            });
+        }
 
         let mut edited = false;
-        egui::Panel::right("components")
-            .exact_size(220.0)
-            .show(root, |ui| {
-                ui.heading("Components");
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .id_salt("component-list")
-                    .max_height(260.0)
-                    .show(ui, |ui| {
-                        for def in parts() {
-                            if ui.button(def.label).clicked() {
-                                let id = format!("{}-{}", def.kind.as_str(), self.next_id);
-                                // Drop it where the view is looking, stepped a little
-                                // so two adds do not land on each other. The origin
-                                // used to put every new part on top of the Arduino.
-                                let step = 12.0 * (self.next_id % 5) as f32;
-                                let at = Pos2::new(
-                                    -self.camera.pan.x / self.camera.zoom + step,
-                                    -self.camera.pan.y / self.camera.zoom + step,
-                                );
-                                if let Some(part) = scene::part_from_kind(def.kind, at, id) {
-                                    self.parts.push(part);
-                                    self.next_id += 1;
+        // v0.2's default width for this panel is 240, and its edge drags.
+                if self.components_open {
+    egui::Panel::right("components")
+                .resizable(true)
+                .default_size(240.0)
+                .min_size(180.0)
+                .show(root, |ui| {
+                    panel_head(ui, "Components", |_ui| {});
+                    egui::ScrollArea::vertical()
+                        .id_salt("component-list")
+                        .max_height(260.0)
+                        .show(ui, |ui| {
+                            for def in parts() {
+                                if ui.button(def.label).clicked() {
+                                    let id = format!("{}-{}", def.kind.as_str(), self.next_id);
+                                    // Drop it where the view is looking, stepped a little
+                                    // so two adds do not land on each other. The origin
+                                    // used to put every new part on top of the Arduino.
+                                    let step = 12.0 * (self.next_id % 5) as f32;
+                                    let at = Pos2::new(
+                                        -self.camera.pan.x / self.camera.zoom + step,
+                                        -self.camera.pan.y / self.camera.zoom + step,
+                                    );
+                                    if let Some(part) = scene::part_from_kind(def.kind, at, id) {
+                                        self.parts.push(part);
+                                        self.next_id += 1;
+                                    }
                                 }
                             }
-                        }
-                    });
-                ui.separator();
-                ui.heading("Properties");
-                egui::ScrollArea::vertical()
-                    .id_salt("properties")
-                    .show(ui, |ui| {
-                        match self.selected {
-                            Some(index) if index < self.parts.len() => {
-                                let part = &mut self.parts[index];
-                                edited = properties::show(ui, part);
+                        });
+                    ui.separator();
+                    ui.heading("Properties");
+                    egui::ScrollArea::vertical()
+                        .id_salt("properties")
+                        .show(ui, |ui| {
+                            match self.selected {
+                                Some(index) if index < self.parts.len() => {
+                                    let part = &mut self.parts[index];
+                                    edited = properties::show(ui, part);
+                                }
+                                _ => {
+                                    ui.weak("Select a part to edit it.");
+                                }
                             }
-                            _ => {
-                                ui.weak("Select a part to edit it.");
-                            }
-                        }
-                    });
-            });
+                        });
+                });
+} else {
+            egui::Panel::right("components-rail")
+                .exact_size(30.0)
+                .show(root, |ui| {
+                    if ui.small_button("▸").on_hover_text("Show components").clicked() {
+                        self.components_open = true;
+                    }
+                });
+        }
         if edited {
             self.reevaluate = true;
         }
 
-        egui::Panel::left("editor")
-            .exact_size(420.0)
-            .show(root, |ui| {
-                ui.heading("Sketch");
-                let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
-                    let mut job = editor::highlight(text.as_str());
-                    job.wrap.max_width = wrap_width;
-                    ui.fonts_mut(|fonts| fonts.layout_job(job))
-                };
-                egui::ScrollArea::vertical()
-                    .id_salt("sketch-editor")
-                    .max_height(320.0)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.sketch)
-                                .code_editor()
-                                .desired_width(f32::INFINITY)
-                                .desired_rows(20)
-                                .layouter(&mut layouter),
-                        );
-                    });
-                ui.separator();
-                ui.heading("Canvas");
-                ui.label("Canvas, pan/zoom, pin hit-testing, wiring.");
-                ui.separator();
-                ui.label(format!("Zoom: {:.0}%", self.camera.zoom * 100.0));
-                ui.label(format!(
-                    "Frame: {:.1} ms",
-                    ctx.input(|i| i.stable_dt) * 1000.0
-                ));
-                ui.label(format!(
-                    "Hovered pin: {}",
-                    self.hovered_pin
-                        .map(|(part, pin)| {
-                            format!(
-                                "{} · {}",
-                                self.parts[part].name, self.parts[part].pins[pin].name
-                            )
-                        })
-                        .unwrap_or_else(|| "—".into())
-                ));
-                ui.separator();
-                ui.label("Drag a part with the left button.");
-                ui.label("Drag the canvas with the middle or right button.");
-                ui.label("Wheel zooms toward the pointer.");
-                ui.label("Click a pin, then another, to wire them.");
-                ui.label("Esc cancels a wire.");
-                if ui.button("Reset view").clicked() {
-                    self.camera = Camera::default();
-                }
-                if ui.button("Clear wires").clicked() {
-                    self.wires.clear();
-                    self.wire_start = None;
-                }
-                ui.separator();
-                ui.label(format!("Wires: {}", self.wires.len()));
-                if let Some(selected) = self.selected {
-                    ui.label(format!("Selected: {}", self.parts[selected].name));
-                }
-            });
+                if self.sketch_open {
+    egui::Panel::left("editor")
+                .resizable(true)
+                .default_size(320.0)
+                .min_size(220.0)
+                .show(root, |ui| {
+                    panel_head(ui, "Sketch", |_ui| {});
+                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+                        let mut job = editor::highlight(text.as_str());
+                        job.wrap.max_width = wrap_width;
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    };
+                    egui::ScrollArea::vertical()
+                        .id_salt("sketch-editor")
+                        .max_height(320.0)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.sketch)
+                                    .code_editor()
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(20)
+                                    .layouter(&mut layouter),
+                            );
+                        });
+                    ui.separator();
+                    ui.heading("Canvas");
+                    ui.label("Canvas, pan/zoom, pin hit-testing, wiring.");
+                    ui.separator();
+                    ui.label(format!("Zoom: {:.0}%", self.camera.zoom * 100.0));
+                    ui.label(format!(
+                        "Frame: {:.1} ms",
+                        ctx.input(|i| i.stable_dt) * 1000.0
+                    ));
+                    ui.label(format!(
+                        "Hovered pin: {}",
+                        self.hovered_pin
+                            .map(|(part, pin)| {
+                                format!(
+                                    "{} · {}",
+                                    self.parts[part].name, self.parts[part].pins[pin].name
+                                )
+                            })
+                            .unwrap_or_else(|| "—".into())
+                    ));
+                    ui.separator();
+                    ui.label("Drag a part with the left button.");
+                    ui.label("Drag the canvas with the middle or right button.");
+                    ui.label("Wheel zooms toward the pointer.");
+                    ui.label("Click a pin, then another, to wire them.");
+                    ui.label("Esc cancels a wire.");
+                    if ui.button("Reset view").clicked() {
+                        self.camera = Camera::default();
+                    }
+                    if ui.button("Clear wires").clicked() {
+                        self.wires.clear();
+                        self.wire_start = None;
+                    }
+                    ui.separator();
+                    ui.label(format!("Wires: {}", self.wires.len()));
+                    if let Some(selected) = self.selected {
+                        ui.label(format!("Selected: {}", self.parts[selected].name));
+                    }
+                });
+} else {
+            egui::Panel::left("editor-rail")
+                .exact_size(30.0)
+                .show(root, |ui| {
+                    if ui.small_button("▸").on_hover_text("Show the sketch").clicked() {
+                        self.sketch_open = true;
+                    }
+                });
+        }
 
         egui::CentralPanel::default().show(root, |ui| {
+            panel_head(ui, "Circuit", |ui| {
+                ui.label(format!(
+                    "{} · {:.0}%",
+                    if self.running { "running" } else { "stopped" },
+                    self.camera.zoom * 100.0
+                ));
+            });
             if self.fit_requested {
                 self.camera = fit_camera(ui.available_rect_before_wrap(), &self.parts);
                 self.fit_requested = false;
