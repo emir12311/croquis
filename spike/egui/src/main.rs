@@ -50,7 +50,6 @@ const PIN_HIT_RADIUS: f32 = 9.0;
 const SURFACE: Color32 = Color32::from_rgb(0x21, 0x21, 0x24);
 const BORDER: Color32 = Color32::from_rgb(0x35, 0x35, 0x3a);
 const MUTED: Color32 = Color32::from_rgb(0xa6, 0xa4, 0xa0);
-const ACCENT: Color32 = Color32::from_rgb(0xd9, 0xa4, 0x41);
 
 /// A docked side panel, on whichever side it is asked for.
 fn side_panel(right: bool, id: &str) -> egui::Panel {
@@ -1438,7 +1437,6 @@ impl eframe::App for Spike {
                 });
         }
 
-        let mut edited = false;
         // v0.2's default width for this panel is 240, and its edge drags.
                 if self.components_open {
     side_panel(self.components_right, "components")
@@ -1474,21 +1472,6 @@ impl eframe::App for Spike {
                                 }
                             }
                         });
-                    ui.separator();
-                    ui.heading("Properties");
-                    egui::ScrollArea::vertical()
-                        .id_salt("properties")
-                        .show(ui, |ui| {
-                            match self.selected {
-                                Some(index) if index < self.parts.len() => {
-                                    let part = &mut self.parts[index];
-                                    edited = properties::show(ui, part);
-                                }
-                                _ => {
-                                    ui.weak("Select a part to edit it.");
-                                }
-                            }
-                        });
                 });
 } else {
             side_panel(self.components_right, "components-rail")
@@ -1498,9 +1481,6 @@ impl eframe::App for Spike {
                         self.components_open = true;
                     }
                 });
-        }
-        if edited {
-            self.reevaluate = true;
         }
 
                 if self.sketch_open {
@@ -1589,6 +1569,30 @@ impl eframe::App for Spike {
                     self.camera.zoom * 100.0
                 ));
             });
+            // The properties strip, docked under the circuit bar. Always present,
+            // so the canvas does not jump when the selection changes — v0.2's
+            // `.props`, and its comment says exactly that.
+            let strip = egui::Frame::new()
+                .fill(SURFACE)
+                .inner_margin(egui::Margin::symmetric(12, 5))
+                .show(ui, |ui| match self.selected {
+                    Some(index) if index < self.parts.len() => {
+                        let part = &mut self.parts[index];
+                        properties::row(ui, part)
+                    }
+                    _ => {
+                        ui.weak("Select a part to edit it.");
+                        false
+                    }
+                });
+            ui.painter().hline(
+                strip.response.rect.x_range(),
+                strip.response.rect.max.y,
+                egui::Stroke::new(1.0, BORDER),
+            );
+            if strip.inner {
+                self.reevaluate = true;
+            }
             if self.fit_requested {
                 self.camera = fit_camera(ui.available_rect_before_wrap(), &self.parts);
                 self.fit_requested = false;

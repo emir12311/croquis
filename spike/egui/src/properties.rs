@@ -12,9 +12,6 @@ use croquis_core::catalogue::{parse_kind, part_by_kind, FieldControl, PartField}
 
 use crate::scene::Part;
 
-/// What the strip is allowed to use. The panel it lives in is 220 wide; this
-/// leaves the margins and keeps every control inside it.
-const STRIP_WIDTH: f32 = 196.0;
 
 /// What an editor currently shows for a field.
 #[derive(Clone, Debug, PartialEq)]
@@ -93,23 +90,23 @@ pub fn field_commit(part: &mut Part, field: &PartField, value: EditorValue) -> b
 
 /// Draw the strip for one part. Returns true when something was edited, so the
 /// caller can re-solve the circuit.
-pub fn show(ui: &mut egui::Ui, part: &mut Part) -> bool {
+/// The properties strip, docked under the circuit bar as v0.2 has it.
+///
+/// One row, always present, so the canvas does not jump when the selection
+/// changes. Fields sit inline: v0.2's `.props` is a single flex row.
+pub fn row(ui: &mut egui::Ui, part: &mut Part) -> bool {
     let fields: Vec<PartField> = parse_kind(&part.kind)
         .map(|kind| part_by_kind(kind).fields.clone())
         .unwrap_or_default();
-    ui.label(format!("{} · {}", part.name, part.id));
-    if fields.is_empty() {
-        ui.weak("This part has nothing to set.");
-        return false;
-    }
-    // Fixed widths, not `available_width`: inside a scroll area that reads as
-    // far more than the strip has, so a slider was built wider than the panel
-    // and the panel grew to fit it — which narrowed the canvas beside it and
-    // shifted every part when a part was selected.
-    ui.set_max_width(STRIP_WIDTH);
-    ui.spacing_mut().slider_width = 110.0;
     let mut changed = false;
+    ui.spacing_mut().slider_width = 92.0;
+    ui.spacing_mut().item_spacing.x = 6.0;
+    ui.label(egui::RichText::new(&part.name).strong());
+    if fields.is_empty() {
+        ui.weak("nothing to set");
+    }
     for field in &fields {
+        ui.separator();
         changed |= edit(ui, part, field);
     }
     changed
