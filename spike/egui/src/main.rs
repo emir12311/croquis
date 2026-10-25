@@ -51,6 +51,32 @@ const SURFACE: Color32 = Color32::from_rgb(0x21, 0x21, 0x24);
 const BORDER: Color32 = Color32::from_rgb(0x35, 0x35, 0x3a);
 const MUTED: Color32 = Color32::from_rgb(0xa6, 0xa4, 0xa0);
 
+/// The palette's thumbnails: the part itself, small, rasterised once.
+///
+/// v0.2's palette is a list of pictures, not labels; the art is the same art the
+/// canvas uses, so this is the same drawing at a smaller size.
+fn ensure_palette_textures(
+    ctx: &egui::Context,
+    textures: &mut HashMap<String, egui::TextureHandle>,
+) {
+    for def in parts() {
+        let key = format!("palette:{}", def.kind.as_str());
+        if textures.contains_key(&key) {
+            continue;
+        }
+        let Some(part) = scene::part_from_kind(def.kind, Pos2::ZERO, key.clone()) else {
+            continue;
+        };
+        let height = 48.0_f32;
+        let width = (height * part.size.x / part.size.y.max(1.0)).clamp(8.0, 96.0);
+        let Some(image) = art::rasterize(&part.svg, width as u32, height as u32) else {
+            continue;
+        };
+        let texture = ctx.load_texture(key.clone(), image, egui::TextureOptions::LINEAR);
+        textures.insert(key, texture);
+    }
+}
+
 /// A docked side panel, on whichever side it is asked for.
 fn side_panel(right: bool, id: &str) -> egui::Panel {
     if right {
@@ -1277,6 +1303,7 @@ impl Spike {
 impl eframe::App for Spike {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
+        ensure_palette_textures(&ctx, &mut self.textures);
         self.poll_engine();
         if self.auto_run && !self.running {
             self.auto_run = false;
@@ -1455,7 +1482,35 @@ impl eframe::App for Spike {
                         .max_height(260.0)
                         .show(ui, |ui| {
                             for def in parts() {
-                                if ui.button(def.label).clicked() {
+                                let key = format!("palette:{}", def.kind.as_str());
+                                // The whole row is the button: the picture is part
+                                // of what you are picking.
+                                let row = ui
+                                    .horizontal(|ui| {
+                                        if let Some(texture) = self.textures.get(&key) {
+                                            let size = texture.size_vec2();
+                                            let height = 22.0;
+                                            let width =
+                                                (height * size.x / size.y.max(1.0)).max(4.0);
+                                            ui.add(
+                                                egui::Image::new(texture)
+                                                    .fit_to_exact_size(Vec2::new(width, height)),
+                                            );
+                                        } else {
+                                            ui.add_space(22.0);
+                                        }
+                                        ui.label(def.label);
+                                    })
+                                    .response
+                                    .interact(egui::Sense::click());
+                                if row.hovered() {
+                                    ui.painter().rect_filled(
+                                        row.rect.expand2(Vec2::new(4.0, 2.0)),
+                                        0.0,
+                                        Color32::from_rgb(0x2a, 0x2a, 0x2e),
+                                    );
+                                }
+                                if row.clicked() {
                                     let id = format!("{}-{}", def.kind.as_str(), self.next_id);
                                     // Drop it where the view is looking, stepped a little
                                     // so two adds do not land on each other. The origin
