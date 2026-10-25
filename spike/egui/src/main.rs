@@ -192,6 +192,11 @@ struct Spike {
     /// it *and* the solve on the next one; on a slow frame 80 ms is not enough,
     /// so a tap also holds for a few frames.
     keypad_frames: HashMap<String, u32>,
+    /// A press on a button or a keypad, waiting to become a drag. A click has a
+    /// pixel or two of hand jitter, and moving the part by that much walks it
+    /// under the cursor, so a press there only becomes a drag once the pointer
+    /// has actually travelled.
+    press_drag: Option<(usize, Pos2)>,
     /// The joystick being dragged, whether it has moved, and where the press was.
     joystick: Option<usize>,
     joystick_moved: bool,
@@ -279,6 +284,7 @@ impl Default for Spike {
             keypad_keys: HashMap::new(),
             keypad_until: HashMap::new(),
             keypad_frames: HashMap::new(),
+            press_drag: None,
             joystick: None,
             joystick_moved: false,
             joystick_start: None,
@@ -862,9 +868,9 @@ impl Spike {
         match self.parts[index].kind.as_str() {
             "pushbutton" => {
                 self.pressed.insert(id, true);
-                // A press is not a commitment to stay put: letting go without
-                // moving leaves it pressed-and-released, moving it moves it.
-                self.dragging = Some(index);
+                // Movable, but not by the jitter inside a click: a real drag
+                // promotes this in the drag branch.
+                self.press_drag = Some((index, screen));
             }
             "membrane-keypad" => {
                 if let Some(key) = keypad_key(&self.parts[index], world) {
@@ -872,7 +878,7 @@ impl Spike {
                     self.keypad_until.insert(id.clone(), Instant::now() + KEY_HOLD);
                     self.keypad_frames.insert(id, KEY_HOLD_FRAMES);
                 }
-                self.dragging = Some(index);
+                self.press_drag = Some((index, screen));
             }
             "analog-joystick" => {
                 if knobs::on_stick(&self.parts[index], world) {
@@ -1475,6 +1481,14 @@ impl eframe::App for Spike {
                 }
             }
             if response.dragged_by(PointerButton::Primary) {
+                if let Some((index, from)) = self.press_drag {
+                    // Four pixels of travel is a drag; less than that is a click
+                    // whose hand wobbled.
+                    if pointer.is_some_and(|now| now.distance(from) > 4.0) {
+                        self.dragging = Some(index);
+                        self.press_drag = None;
+                    }
+                }
                 if let Some(index) = self.joystick {
                     if !self.joystick_moved {
                         let moved = self
@@ -1510,6 +1524,7 @@ impl eframe::App for Spike {
             }
             if released_now || response.drag_stopped() {
                 self.dragging = None;
+                self.press_drag = None;
                 self.release_input();
             }
 
@@ -2840,8 +2855,14 @@ mod tests {
             // Held down, so the tap never lapses while the sketch scans.
             spike.press_control(pad, world, Pos2::ZERO);
             spike.evaluate_now();
-            if serial.lock().unwrap().contains("key ") {
-                break;
+            // Serial arrives a byte at a time, so wait for a whole line.
+            {
+                let seen = serial.lock().unwrap().clone();
+                if let Some(rest) = seen.split("key ").nth(1) {
+                    if rest.contains('\n') {
+                        break;
+                    }
+                }
             }
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -2851,6 +2872,20 @@ mod tests {
         let text = serial.lock().unwrap().clone();
         println!("serial: {text:?}");
         assert!(text.contains("key "), "the keypad should print its key: {text:?}");
+        // One key held means one letter printed: anything else is the sketch
+        // reading rows that changed underneath it.
+        let keys: Vec<char> = text
+            .split("key ")
+            .skip(1)
+            .filter_map(|rest| rest.chars().next())
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
+        let distinct: std::collections::HashSet<char> = keys.iter().copied().collect();
+        assert_eq!(
+            distinct.len(),
+            1,
+            "one key held should print one letter, got {distinct:?} from {keys:?}"
+        );
     }
 
     #[test]
@@ -2870,7 +2905,12 @@ mod tests {
         let centre = spike.parts[0].bounds().center();
         spike.press_control(0, centre, Pos2::ZERO);
         assert_eq!(spike.pressed.get("btn"), Some(&true), "the button is down");
-        assert_eq!(spike.dragging, Some(0), "and the same grab can move it");
+        assert_eq!(
+            spike.press_drag.map(|(index, _)| index),
+            Some(0),
+            "and the grab is remembered, so travel can turn it into a drag"
+        );
+        assert_eq!(spike.dragging, None, "a press alone must not move it");
 
         let mut pad = Spike::default();
         pad.parts = vec![scene::part_from_kind(
@@ -2881,7 +2921,11 @@ mod tests {
         .expect("keypad")];
         let centre = pad.parts[0].bounds().center();
         pad.press_control(0, centre, Pos2::ZERO);
-        assert_eq!(pad.dragging, Some(0), "a keypad can be moved too");
+        assert_eq!(
+            pad.press_drag.map(|(index, _)| index),
+            Some(0),
+            "a keypad can be moved too — once the pointer travels"
+        );
     }
 
     #[test]
