@@ -593,6 +593,12 @@ impl Spike {
     /// Take one evaluation: hold its inputs for the sketch, then keep the
     /// states the canvas draws from.
     fn store_eval(&mut self, eval: CircuitEval) {
+        // Hand the circuit's wishes to the simulator: a pressed button pulling
+        // its pin low, a keypad column, a potentiometer's voltage. Without this
+        // the netlist is computed, drawn, and never felt by the sketch — which
+        // is why buttons and keypads did nothing while the IR remote, which
+        // pulses the simulator directly, worked.
+        self.apply_drives(&eval.drives, &eval.analogs);
         self.led_states = eval.leds;
         self.led_brightness = eval.led_brightness;
         self.outputs = eval.outputs;
@@ -2669,6 +2675,48 @@ mod tests {
             "a press must drive the button's pin; got {:?}",
             pressed.drives
         );
+    }
+
+    #[test]
+    fn a_press_pushes_the_drive_to_the_simulator() {
+        // The whole app link without a window: load the preset, press the
+        // button, solve, and check what was actually handed to the simulator.
+        // `last_drives` is the record of exactly that.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/button.json");
+        let (parts, wires, sketch) = scene::load_diagram_file(&root);
+        let button = parts
+            .iter()
+            .position(|part| part.kind == "pushbutton")
+            .expect("the preset has a pushbutton");
+
+        let workdir = std::env::temp_dir().join("croquis-egui-press-test");
+        let _ = std::fs::create_dir_all(&workdir);
+        let firmware = engine::compile(&sketch, &workdir).expect("the sketch compiles");
+        let events: Arc<Mutex<Vec<engine::SimEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emit: engine::Emit = Arc::new(move |event| sink.lock().unwrap().push(event));
+        let sim = engine::Simulator::start(Path::new(&firmware.elf), emit, false)
+            .expect("the simulator starts");
+
+        let mut spike = Spike::default();
+        spike.parts = parts;
+        spike.wires = wires;
+        spike.sim = Some(sim);
+        spike.selected = Some(button);
+        spike.evaluate_now();
+        let idle = spike.last_drives.get(&('D', 2)).copied();
+
+        let centre = spike.parts[button].bounds().center();
+        spike.press_control(button, centre, Pos2::ZERO);
+        spike.reevaluate = false;
+        spike.evaluate_now();
+        let pressed = spike.last_drives.get(&('D', 2)).copied();
+        println!("D2: idle={idle:?} pressed={pressed:?}");
+
+        assert_eq!(pressed, Some(false), "a press must push D2 low to the sim");
+        if let Some(mut sim) = spike.sim.take() {
+            sim.stop();
+        }
     }
 
     #[test]
