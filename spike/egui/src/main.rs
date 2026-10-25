@@ -188,6 +188,10 @@ struct Spike {
     /// The key held on each keypad, and when its minimum hold ends.
     keypad_keys: HashMap<String, Option<KeyPosition>>,
     keypad_until: HashMap<String, Instant>,
+    /// Frames left in a keypad tap. A tap has to survive the frame that records
+    /// it *and* the solve on the next one; on a slow frame 80 ms is not enough,
+    /// so a tap also holds for a few frames.
+    keypad_frames: HashMap<String, u32>,
     /// The joystick being dragged, whether it has moved, and where the press was.
     joystick: Option<usize>,
     joystick_moved: bool,
@@ -272,6 +276,7 @@ impl Default for Spike {
             pressed: HashMap::new(),
             keypad_keys: HashMap::new(),
             keypad_until: HashMap::new(),
+            keypad_frames: HashMap::new(),
             joystick: None,
             joystick_moved: false,
             joystick_start: None,
@@ -836,7 +841,8 @@ impl Spike {
             "membrane-keypad" => {
                 if let Some(key) = keypad_key(&self.parts[index], world) {
                     self.keypad_keys.insert(id.clone(), Some(key));
-                    self.keypad_until.insert(id, Instant::now() + KEY_HOLD);
+                    self.keypad_until.insert(id.clone(), Instant::now() + KEY_HOLD);
+                    self.keypad_frames.insert(id, KEY_HOLD_FRAMES);
                 }
                 self.dragging = Some(index);
             }
@@ -909,14 +915,20 @@ impl Spike {
     /// End keypad taps whose minimum hold has passed.
     fn tick_input(&mut self) {
         let now = Instant::now();
+        for frames in self.keypad_frames.values_mut() {
+            *frames = frames.saturating_sub(1);
+        }
         let expired: Vec<String> = self
             .keypad_until
             .iter()
-            .filter(|(_, until)| **until <= now)
+            .filter(|(id, until)| {
+                **until <= now && self.keypad_frames.get(*id).copied().unwrap_or(0) == 0
+            })
             .map(|(id, _)| id.clone())
             .collect();
         for id in expired {
             self.keypad_until.remove(&id);
+            self.keypad_frames.remove(&id);
             self.keypad_keys.insert(id, None);
             self.reevaluate = true;
         }
@@ -2157,6 +2169,10 @@ const JOYSTICK_TRAVEL_Y: f32 = 10.6 / 31.8;
 
 /// A tap has to outlive one scan of the keypad matrix to be seen at all.
 const KEY_HOLD: std::time::Duration = std::time::Duration::from_millis(80);
+
+/// How many frames a tap is held for at least, so a slow frame cannot swallow
+/// it before the netlist is solved.
+const KEY_HOLD_FRAMES: u32 = 3;
 
 /// The keypad key under a canvas point, if the point is on one.
 fn keypad_key(part: &Part, world: Pos2) -> Option<KeyPosition> {
