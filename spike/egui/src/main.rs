@@ -1309,7 +1309,6 @@ impl eframe::App for Spike {
             self.auto_run = false;
             self.start_sim(&ctx);
         }
-        // Temporary: press one remote button so the IR chain can be checked.
         if self.reevaluate {
             self.reevaluate = false;
             self.evaluate_now();
@@ -1395,6 +1394,10 @@ impl eframe::App for Spike {
                             self.wires.clear();
                             self.wire_start = None;
                         }
+                        ui.separator();
+                        ui.checkbox(&mut self.sketch_open, "Sketch panel");
+                        ui.checkbox(&mut self.components_open, "Components panel");
+                        ui.checkbox(&mut self.serial_open, "Serial monitor");
                     });
                     ui.menu_button("Run", |ui| {
                         if self.running {
@@ -1405,14 +1408,6 @@ impl eframe::App for Spike {
                             self.start_sim(&ctx);
                         }
                     });
-                    ui.separator();
-                    if self.running {
-                        if ui.button("Stop").clicked() {
-                            self.stop_sim();
-                        }
-                    } else if ui.button("Run").clicked() {
-                        self.start_sim(&ctx);
-                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(if self.running { "Running" } else { "Stopped" });
                         if let Some(error) = &self.file_error {
