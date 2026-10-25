@@ -214,7 +214,64 @@ fn panel_head(ui: &mut egui::Ui, title: &str, controls: impl FnOnce(&mut egui::U
     head.with_layout(egui::Layout::right_to_left(egui::Align::Center), controls);
 }
 
+/// Install the bundled IBM Plex faces: Sans for the interface, Mono for code.
+///
+/// The Latin subset has no arrows or chevrons, so egui's own faces stay behind
+/// these as fallbacks rather than being replaced.
+fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    for (name, bytes) in [
+        (
+            "plex-sans",
+            include_bytes!("../../../assets/fonts/IBMPlexSans-Regular.ttf") as &[u8],
+        ),
+        (
+            "plex-sans-medium",
+            include_bytes!("../../../assets/fonts/IBMPlexSans-Medium.ttf"),
+        ),
+        (
+            "plex-sans-semibold",
+            include_bytes!("../../../assets/fonts/IBMPlexSans-SemiBold.ttf"),
+        ),
+        (
+            "plex-mono",
+            include_bytes!("../../../assets/fonts/IBMPlexMono-Regular.ttf"),
+        ),
+        (
+            "plex-mono-medium",
+            include_bytes!("../../../assets/fonts/IBMPlexMono-Medium.ttf"),
+        ),
+    ] {
+        fonts.font_data.insert(
+            name.to_owned(),
+            std::sync::Arc::new(egui::FontData::from_static(bytes)),
+        );
+    }
+
+    for (family, faces) in [
+        (
+            egui::FontFamily::Proportional,
+            &["plex-sans-semibold", "plex-sans-medium", "plex-sans"][..],
+        ),
+        (
+            egui::FontFamily::Monospace,
+            &["plex-mono-medium", "plex-mono"][..],
+        ),
+    ] {
+        let list = fonts.families.entry(family).or_default();
+        for face in faces.into_iter().rev() {
+            list.insert(0, (*face).to_owned());
+        }
+    }
+    fonts.families.insert(
+        egui::FontFamily::Name("semibold".into()),
+        vec!["plex-sans-semibold".to_owned(), "plex-sans".to_owned()],
+    );
+    ctx.set_fonts(fonts);
+}
+
 fn configure_style(ctx: &egui::Context) {
+    install_fonts(ctx);
     use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
 
     let bg = Color32::from_rgb(0x1a, 0x1a, 0x1c);
@@ -267,7 +324,7 @@ fn configure_style(ctx: &egui::Context) {
     style.spacing.button_padding = Vec2::new(10.0, 4.0);
     style
         .text_styles
-        .insert(TextStyle::Body, FontId::new(13.0, FontFamily::Proportional));
+        .insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
     style.text_styles.insert(
         TextStyle::Button,
         FontId::new(13.0, FontFamily::Proportional),
@@ -280,10 +337,9 @@ fn configure_style(ctx: &egui::Context) {
         TextStyle::Heading,
         FontId::new(15.0, FontFamily::Proportional),
     );
-    style.text_styles.insert(
-        TextStyle::Monospace,
-        FontId::new(12.5, FontFamily::Monospace),
-    );
+    style
+        .text_styles
+        .insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
     ctx.set_theme(egui::ThemePreference::Dark);
     ctx.set_style_of(egui::Theme::Dark, style);
 }
@@ -1431,7 +1487,11 @@ impl eframe::App for Spike {
                 );
                 ui.horizontal_centered(|ui| {
                     ui.add_space(2.0);
-                    ui.label(egui::RichText::new("Croquis").size(14.0).strong());
+                    ui.label(
+                        egui::RichText::new("Croquis")
+                            .size(14.0)
+                            .family(egui::FontFamily::Name("semibold".into())),
+                    );
                     ui.add_space(10.0);
                     ui.menu_button("File", |ui| {
                         if ui.button("New").clicked() {
