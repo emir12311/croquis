@@ -339,6 +339,10 @@ struct Spike {
     sketch_open: bool,
     components_open: bool,
     serial_open: bool,
+    /// What the netlist has to say about a part — an unpowered chip, an
+    /// untied MR pin. v0.2 shows these in the properties strip.
+    part_warnings: HashMap<String, String>,
+
     /// Which side a panel is docked on: "movable" in the old shell's sense —
     /// same panel, same size, docked elsewhere.
     sketch_right: bool,
@@ -421,6 +425,7 @@ impl Default for Spike {
             sketch_open: true,
             components_open: true,
             serial_open: true,
+            part_warnings: HashMap::new(),
             sketch_right: false,
             components_right: true,
             segment_memory: HashMap::new(),
@@ -745,6 +750,7 @@ impl Spike {
         // is why buttons and keypads did nothing while the IR remote, which
         // pulses the simulator directly, worked.
         self.apply_drives(&eval.drives, &eval.analogs);
+        self.part_warnings = eval.warnings;
         self.led_states = eval.leds;
         self.led_brightness = eval.led_brightness;
         self.outputs = eval.outputs;
@@ -1505,7 +1511,7 @@ impl eframe::App for Spike {
                                         Color32::from_rgb(0x2a, 0x2a, 0x2e),
                                     );
                                 }
-                                if row.clicked() {
+                                if row.clicked() && !self.running {
                                     let id = format!("{}-{}", def.kind.as_str(), self.next_id);
                                     // Drop it where the view is looking, stepped a little
                                     // so two adds do not land on each other. The origin
@@ -1613,6 +1619,14 @@ impl eframe::App for Spike {
 
         egui::CentralPanel::default().show(root, |ui| {
             panel_head(ui, "Circuit", |ui| {
+                if ui
+                    .add(egui::Button::new("▤").frame(false))
+                    .on_hover_text("Toggle the serial monitor")
+                    .clicked()
+                {
+                    self.serial_open = !self.serial_open;
+                }
+                ui.separator();
                 ui.label(format!(
                     "{} · {:.0}%",
                     if self.running { "running" } else { "stopped" },
@@ -1627,6 +1641,14 @@ impl eframe::App for Spike {
                 .inner_margin(egui::Margin::symmetric(12, 5))
                 .show(ui, |ui| match self.selected {
                     Some(index) if index < self.parts.len() => {
+                        let id = self.parts[index].id.clone();
+                        if let Some(warning) = self.part_warnings.get(&id) {
+                            ui.colored_label(
+                                Color32::from_rgb(0xd9, 0xa4, 0x41),
+                                warning,
+                            );
+                            ui.separator();
+                        }
                         let part = &mut self.parts[index];
                         properties::row(ui, part)
                     }
