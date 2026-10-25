@@ -107,15 +107,19 @@ fn palette_tile(
         egui::StrokeKind::Inside,
     );
 
-    // The picture, centred in the top two thirds.
+    // Two bands that cannot meet: the picture above, the name below. Scaling to
+    // the tile's height instead let a wide part like the resistor grow into the
+    // label, which is what put text on top of the artwork.
+    const PICTURE: f32 = 44.0;
     if let Some(texture) = textures.get(key) {
         let size = texture.size_vec2();
-        let scale = (52.0 / size.y.max(1.0)).min(84.0 / size.x.max(1.0));
-        let drawn = Vec2::new(size.x * scale, size.y * scale);
-        let at = egui::Rect::from_center_size(
-            egui::pos2(rect.center().x, rect.top() + 10.0 + drawn.y / 2.0),
-            drawn,
+        let band = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + 8.0, rect.top() + 5.0),
+            egui::pos2(rect.right() - 8.0, rect.top() + 5.0 + PICTURE),
         );
+        let scale = (band.width() / size.x.max(1.0)).min(band.height() / size.y.max(1.0));
+        let drawn = size * scale;
+        let at = egui::Rect::from_center_size(band.center(), drawn);
         painter.image(
             texture.id(),
             at,
