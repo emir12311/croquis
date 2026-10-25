@@ -158,7 +158,6 @@ fn palette_tile(
 enum Icon {
     Serial,
     Fit,
-    Dock,
     Close,
     Open,
 }
@@ -197,15 +196,6 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> bool {
                     colour,
                 );
             }
-            Icon::Dock => {
-                painter.rect_stroke(
-                    egui::Rect::from_center_size(c + Vec2::new(1.0, 0.0), Vec2::new(12.0, 10.0)),
-                    0.0,
-                    stroke,
-                    egui::StrokeKind::Inside,
-                );
-                painter.vline(c.x - 3.0, (c.y - 5.0)..=(c.y + 5.0), stroke);
-            }
             Icon::Close => {
                 // A chevron pointing in the direction the panel will go.
                 let left = ui.is_rect_visible(rect);
@@ -234,29 +224,6 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> bool {
         }
     }
     response.on_hover_text(hover).clicked()
-}
-
-/// The chevron that closes a panel, as v0.2's `.icon-btn` in a head.
-fn side_panel(right: bool, id: &str) -> egui::Panel {
-    if right {
-        egui::Panel::right(id)
-    } else {
-        egui::Panel::left(id)
-    }
-}
-
-/// The control that docks a panel on the other side.
-fn dock_toggle(ui: &mut egui::Ui, right: &mut bool) -> bool {
-    let hover = if *right {
-        "Dock on the left"
-    } else {
-        "Dock on the right"
-    };
-    if icon_button(ui, Icon::Dock, hover) {
-        *right = !*right;
-        return true;
-    }
-    false
 }
 
 /// The chevron that closes a panel, as v0.2's `.icon-btn` in a head.
@@ -560,8 +527,6 @@ struct Spike {
 
     /// Which side a panel is docked on: "movable" in the old shell's sense —
     /// same panel, same size, docked elsewhere.
-    sketch_right: bool,
-    components_right: bool,
     segment_memory: HashMap<String, Vec<u8>>,
     /// When each single 7-segment display last changed, for the settle guard.
     seven_changed_at: HashMap<String, Instant>,
@@ -642,8 +607,6 @@ impl Default for Spike {
             serial_open: false,
             palette_drag: None,
             part_warnings: HashMap::new(),
-            sketch_right: false,
-            components_right: true,
             segment_memory: HashMap::new(),
             seven_changed_at: HashMap::new(),
             seven_stable: HashMap::new(),
@@ -1660,15 +1623,15 @@ impl eframe::App for Spike {
 
         // v0.2's default width for this panel is 240, and its edge drags.
                 if self.components_open {
-    side_panel(self.components_right, "components")
+    egui::Panel::right("components")
                 .resizable(true)
                 .default_size(240.0)
                 .min_size(180.0)
                 .show(root, |ui| {
                     panel_head(ui, "Components", |ui| {
-                        let mut right = self.components_right;
-                        if dock_toggle(ui, &mut right) {
-                            self.components_right = right;
+                        let mut open = true;
+                        if panel_toggle(ui, &mut open) && !open {
+                            self.components_open = false;
                         }
                     });
                     egui::ScrollArea::vertical()
@@ -1748,25 +1711,25 @@ impl eframe::App for Spike {
                         });
                 });
 } else {
-            side_panel(self.components_right, "components-rail")
+            egui::Panel::right("components-rail")
                 .exact_size(30.0)
                 .show(root, |ui| {
-                    if ui.small_button("▸").on_hover_text("Show components").clicked() {
+                    if icon_button(ui, Icon::Open, "Show the components") {
                         self.components_open = true;
                     }
                 });
         }
 
                 if self.sketch_open {
-    side_panel(self.sketch_right, "editor")
+    egui::Panel::left("editor")
                 .resizable(true)
                 .default_size(320.0)
                 .min_size(220.0)
                 .show(root, |ui| {
                     panel_head(ui, "Sketch", |ui| {
-                        let mut right = self.sketch_right;
-                        if dock_toggle(ui, &mut right) {
-                            self.sketch_right = right;
+                        let mut open = true;
+                        if panel_toggle(ui, &mut open) && !open {
+                            self.sketch_open = false;
                         }
                     });
                     let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
@@ -1794,10 +1757,10 @@ impl eframe::App for Spike {
                         });
                 });
 } else {
-            side_panel(self.sketch_right, "editor-rail")
+            egui::Panel::left("editor-rail")
                 .exact_size(30.0)
                 .show(root, |ui| {
-                    if ui.small_button("▸").on_hover_text("Show the sketch").clicked() {
+                    if icon_button(ui, Icon::Open, "Show the sketch") {
                         self.sketch_open = true;
                     }
                 });
