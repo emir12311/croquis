@@ -101,10 +101,13 @@ pub fn row(ui: &mut egui::Ui, part: &mut Part) -> bool {
     let mut changed = false;
     ui.spacing_mut().slider_width = 92.0;
     ui.spacing_mut().item_spacing.x = 6.0;
-    ui.label(egui::RichText::new(&part.name).strong());
-    if fields.is_empty() {
-        ui.weak("nothing to set");
-    }
+    // The name reads as text, not as muted chrome: labels inherit the
+    // non-interactive foreground, which here is the muted colour.
+    ui.label(
+        egui::RichText::new(&part.name)
+            .color(egui::Color32::from_rgb(0xe6, 0xe4, 0xe0))
+            .strong(),
+    );
     for field in &fields {
         ui.separator();
         changed |= edit(ui, part, field);
