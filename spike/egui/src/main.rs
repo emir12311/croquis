@@ -1673,7 +1673,6 @@ impl eframe::App for Spike {
                     });
                     egui::ScrollArea::vertical()
                         .id_salt("component-list")
-                        .max_height(260.0)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             // v0.2's palette: two columns of picture tiles, the
@@ -1694,6 +1693,31 @@ impl eframe::App for Spike {
                                         );
                                         if tile.drag_started() && !self.running {
                                             self.palette_drag = Some(def.kind);
+                                            // Build the part and warm its canvas
+                                            // texture now: rasterising an SVG costs
+                                            // about 40 ms, and paying that on the
+                                            // drop is what made dragging feel slow.
+                                            let warm = format!(
+                                                "{}-{}",
+                                                def.kind.as_str(),
+                                                self.next_id
+                                            );
+                                            if let Some(part) = scene::part_from_kind(
+                                                def.kind,
+                                                Pos2::ZERO,
+                                                warm,
+                                            ) {
+                                                ensure_textures(
+                                                    &ctx,
+                                                    &mut self.textures,
+                                                    std::slice::from_ref(&part),
+                                                    &HashMap::new(),
+                                                    &HashMap::new(),
+                                                    &HashMap::new(),
+                                                    &self.pressed,
+                                                    self.pin13,
+                                                );
+                                            }
                                         }
                                         if tile.clicked() && !self.running {
                                             let id = format!(
@@ -1828,16 +1852,18 @@ impl eframe::App for Spike {
                 .inner_margin(egui::Margin::symmetric(12, 5))
                 .show(ui, |ui| match self.selected {
                     Some(index) if index < self.parts.len() => {
+                        // Properties first, the netlist's complaint under them:
+                        // what a part is set to matters more than what is wrong
+                        // with it, and the warning is the footnote.
                         let id = self.parts[index].id.clone();
-                        if let Some(warning) = self.part_warnings.get(&id) {
-                            ui.colored_label(
-                                Color32::from_rgb(0xd9, 0xa4, 0x41),
-                                warning,
-                            );
-                            ui.separator();
-                        }
+                        let warning = self.part_warnings.get(&id).cloned();
                         let part = &mut self.parts[index];
-                        properties::row(ui, part)
+                        let changed = properties::row(ui, part);
+                        if let Some(warning) = warning {
+                            ui.separator();
+                            ui.colored_label(Color32::from_rgb(0xd9, 0xa4, 0x41), warning);
+                        }
+                        changed
                     }
                     _ => {
                         ui.weak("Select a part to edit it.");
