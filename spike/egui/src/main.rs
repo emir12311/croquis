@@ -85,7 +85,8 @@ fn palette_tile(
     label: &str,
     enabled: bool,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(104.0, 84.0), egui::Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(104.0, 84.0), egui::Sense::click_and_drag());
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -143,12 +144,99 @@ fn palette_tile(
                 .size(11.0)
                 .color(if enabled { MUTED } else { Color32::from_rgb(0x64, 0x64, 0x68) }),
         )
+        .selectable(false)
         .wrap(),
     );
     response
 }
 
-/// A docked side panel, on whichever side it is asked for.
+/// The icons the shell needs, drawn rather than typed.
+///
+/// Plex's Latin subset has no arrows or box-drawing glyphs, and neither does
+/// egui's fallback, so glyph buttons came out as empty squares.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Icon {
+    Serial,
+    Fit,
+    Dock,
+    Close,
+    Open,
+}
+
+fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> bool {
+    let size = Vec2::splat(20.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if response.hovered() {
+            painter.rect_filled(rect, 0.0, Color32::from_rgb(0x2a, 0x2a, 0x2e));
+        }
+        let colour = if response.hovered() { Color32::WHITE } else { MUTED };
+        let stroke = egui::Stroke::new(1.3, colour);
+        let c = rect.center();
+        match icon {
+            Icon::Serial => {
+                for offset in [-4.0, 0.0, 4.0] {
+                    painter.hline(
+                        (c.x - 6.0)..=(c.x + 6.0),
+                        c.y + offset,
+                        stroke,
+                    );
+                }
+            }
+            Icon::Fit => {
+                painter.rect_stroke(
+                    egui::Rect::from_center_size(c, Vec2::splat(12.0)),
+                    0.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                painter.rect_filled(
+                    egui::Rect::from_center_size(c, Vec2::splat(4.0)),
+                    0.0,
+                    colour,
+                );
+            }
+            Icon::Dock => {
+                painter.rect_stroke(
+                    egui::Rect::from_center_size(c + Vec2::new(1.0, 0.0), Vec2::new(12.0, 10.0)),
+                    0.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                painter.vline(c.x - 3.0, (c.y - 5.0)..=(c.y + 5.0), stroke);
+            }
+            Icon::Close => {
+                // A chevron pointing in the direction the panel will go.
+                let left = ui.is_rect_visible(rect);
+                let _ = left;
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        egui::pos2(c.x - 4.0, c.y - 5.0),
+                        egui::pos2(c.x + 3.0, c.y),
+                        egui::pos2(c.x - 4.0, c.y + 5.0),
+                    ],
+                    colour,
+                    egui::Stroke::NONE,
+                ));
+            }
+            Icon::Open => {
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        egui::pos2(c.x + 4.0, c.y - 5.0),
+                        egui::pos2(c.x - 3.0, c.y),
+                        egui::pos2(c.x + 4.0, c.y + 5.0),
+                    ],
+                    colour,
+                    egui::Stroke::NONE,
+                ));
+            }
+        }
+    }
+    response.on_hover_text(hover).clicked()
+}
+
+/// The chevron that closes a panel, as v0.2's `.icon-btn` in a head.
 fn side_panel(right: bool, id: &str) -> egui::Panel {
     if right {
         egui::Panel::right(id)
@@ -164,11 +252,7 @@ fn dock_toggle(ui: &mut egui::Ui, right: &mut bool) -> bool {
     } else {
         "Dock on the right"
     };
-    if ui
-        .add(egui::Button::new("⇄").frame(false))
-        .on_hover_text(hover)
-        .clicked()
-    {
+    if icon_button(ui, Icon::Dock, hover) {
         *right = !*right;
         return true;
     }
@@ -177,12 +261,12 @@ fn dock_toggle(ui: &mut egui::Ui, right: &mut bool) -> bool {
 
 /// The chevron that closes a panel, as v0.2's `.icon-btn` in a head.
 fn panel_toggle(ui: &mut egui::Ui, open: &mut bool) -> bool {
-    let glyph = if *open { "▾" } else { "▸" };
-    if ui
-        .add(egui::Button::new(glyph).frame(false))
-        .on_hover_text(if *open { "Collapse" } else { "Expand" })
-        .clicked()
-    {
+    let (icon, hover) = if *open {
+        (Icon::Close, "Collapse")
+    } else {
+        (Icon::Open, "Expand")
+    };
+    if icon_button(ui, icon, hover) {
         *open = !*open;
         return true;
     }
@@ -249,14 +333,14 @@ fn install_fonts(ctx: &egui::Context) {
     }
 
     for (family, faces) in [
+        // Regular first: a family is a fallback order per glyph, not a weight
+        // scale. Putting the heavier faces first set the whole interface in
+        // SemiBold, which is not what the old shell looks like.
         (
             egui::FontFamily::Proportional,
-            &["plex-sans-semibold", "plex-sans-medium", "plex-sans"][..],
+            &["plex-sans"][..],
         ),
-        (
-            egui::FontFamily::Monospace,
-            &["plex-mono-medium", "plex-mono"][..],
-        ),
+        (egui::FontFamily::Monospace, &["plex-mono"][..]),
     ] {
         let list = fonts.families.entry(family).or_default();
         for face in faces.into_iter().rev() {
@@ -466,6 +550,10 @@ struct Spike {
     sketch_open: bool,
     components_open: bool,
     serial_open: bool,
+    /// The catalogue entry being dragged out of the palette, if any. v0.2 places
+    /// a part by dragging it onto the canvas, not by clicking a list.
+    palette_drag: Option<croquis_core::catalogue::PartKind>,
+
     /// What the netlist has to say about a part — an unpowered chip, an
     /// untied MR pin. v0.2 shows these in the properties strip.
     part_warnings: HashMap<String, String>,
@@ -552,6 +640,7 @@ impl Default for Spike {
             sketch_open: true,
             components_open: true,
             serial_open: false,
+            palette_drag: None,
             part_warnings: HashMap::new(),
             sketch_right: false,
             components_right: true,
@@ -1479,6 +1568,14 @@ impl eframe::App for Spike {
                 // row of separate buttons: v0.2's `.menubar` uses a 2px gap.
                 ui.spacing_mut().item_spacing.x = 2.0;
                 ui.spacing_mut().button_padding = Vec2::new(8.0, 3.0);
+                // No box around a menu name: v0.2's `.menubar__btn` is plain
+                // text with a transparent border until it is hovered or open.
+                let widgets = &mut ui.style_mut().visuals.widgets;
+                widgets.inactive.bg_fill = Color32::TRANSPARENT;
+                widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+                widgets.hovered.bg_fill = Color32::from_rgb(0x2a, 0x2a, 0x2e);
+                widgets.hovered.bg_stroke = egui::Stroke::new(1.0, BORDER);
                 let bar = ui.max_rect();
                 ui.painter().hline(
                     bar.x_range(),
@@ -1561,41 +1658,6 @@ impl eframe::App for Spike {
                 });
             });
 
-        // Docked and fixed: a panel that can change height moves the canvas
-        // beside it, and a canvas that shifts under a drag reads as a twitch.
-                if self.serial_open {
-    egui::Panel::bottom("serial")
-                .exact_size(150.0)
-                .show(root, |ui| {
-                    let mut open = self.serial_open;
-                    panel_head(ui, "Serial Monitor", |ui| {
-                        if ui.button("Clear").clicked() {
-                            self.serial.clear();
-                        }
-                        if panel_toggle(ui, &mut open) {
-                            self.serial_open = open;
-                        }
-                    });
-                    egui::ScrollArea::vertical()
-                        .id_salt("serial-output")
-                        .stick_to_bottom(true)
-                        .show(ui, |ui| {
-                            ui.monospace(&self.serial);
-                            if let Some(error) = &self.run_error {
-                                ui.colored_label(Color32::from_rgb(230, 120, 100), error);
-                            }
-                        });
-                });
-} else {
-            egui::Panel::bottom("serial-rail")
-                .exact_size(30.0)
-                .show(root, |ui| {
-                    if ui.small_button("▴  Serial Monitor").clicked() {
-                        self.serial_open = true;
-                    }
-                });
-        }
-
         // v0.2's default width for this panel is 240, and its edge drags.
                 if self.components_open {
     side_panel(self.components_right, "components")
@@ -1630,6 +1692,9 @@ impl eframe::App for Spike {
                                             def.label,
                                             !self.running,
                                         );
+                                        if tile.drag_started() && !self.running {
+                                            self.palette_drag = Some(def.kind);
+                                        }
                                         if tile.clicked() && !self.running {
                                             let id = format!(
                                                 "{}-{}",
@@ -1680,20 +1745,26 @@ impl eframe::App for Spike {
                             self.sketch_right = right;
                         }
                     });
-                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _wrap: f32| {
+                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
                         let mut job = editor::highlight(text.as_str());
-                        job.wrap.max_width = f32::INFINITY;
+                        job.wrap.max_width = wrap_width;
                         ui.fonts_mut(|fonts| fonts.layout_job(job))
                     };
-                    egui::ScrollArea::both()
+                    // The editor is the panel: no well, no border, no inset, and
+                    // it fills the height it is given.
+                    let widgets = &mut ui.style_mut().visuals.widgets;
+                    widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                    widgets.hovered.bg_stroke = egui::Stroke::NONE;
+                    widgets.active.bg_stroke = egui::Stroke::NONE;
+                    egui::ScrollArea::vertical()
                         .id_salt("sketch-editor")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.add(
+                            ui.add_sized(
+                                ui.available_size(),
                                 egui::TextEdit::multiline(&mut self.sketch)
                                     .code_editor()
                                     .desired_width(f32::INFINITY)
-                                    .desired_rows(40)
                                     .layouter(&mut layouter),
                             );
                         });
@@ -1735,25 +1806,17 @@ impl eframe::App for Spike {
                 }
                 ui.label(format!("{:.0}%", self.camera.zoom * 100.0));
                 if ui
-                    .add(egui::Button::new("−").frame(false))
+                    .add(egui::Button::new("-").frame(false))
                     .on_hover_text("Zoom out")
                     .clicked()
                 {
                     self.camera.zoom = (self.camera.zoom / 1.2).max(0.1);
                 }
                 ui.add_space(6.0);
-                if ui
-                    .add(egui::Button::new("⤢").frame(false))
-                    .on_hover_text("Fit the circuit")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::Fit, "Fit the circuit") {
                     self.fit_requested = true;
                 }
-                if ui
-                    .add(egui::Button::new("▤").frame(false))
-                    .on_hover_text("Toggle the serial monitor")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::Serial, "Toggle the serial monitor") {
                     self.serial_open = !self.serial_open;
                 }
             });
@@ -1793,12 +1856,55 @@ impl eframe::App for Spike {
                 self.camera = fit_camera(ui.available_rect_before_wrap(), &self.parts);
                 self.fit_requested = false;
             }
-            let (response, painter) =
-                ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+            // The serial monitor is docked under the canvas, inside the circuit
+            // panel, as in v0.2 — not across the whole window.
+            let serial_height = if self.serial_open { 150.0 } else { 0.0 };
+            let canvas_height = (ui.available_height() - serial_height).max(80.0);
+            let (response, painter) = ui.allocate_painter(
+                Vec2::new(ui.available_width(), canvas_height),
+                Sense::click_and_drag(),
+            );
             let rect = response.rect;
 
             painter.rect_filled(rect, 0.0, Color32::from_rgb(26, 26, 28));
             draw_grid(&painter, rect, self.camera);
+
+            // A part dragged out of the palette follows the pointer and lands
+            // where it is let go.
+            if let Some(kind) = self.palette_drag {
+                let at = ctx.input(|i| i.pointer.interact_pos());
+                let released = ctx.input(|i| i.pointer.primary_released());
+                if let Some(at) = at {
+                    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                    if let Some(texture) = self
+                        .textures
+                        .get(&format!("palette:{}", kind.as_str()))
+                    {
+                        let size = texture.size_vec2();
+                        let scale = 44.0 / size.y.max(1.0);
+                        let drawn = size * scale;
+                        let ghost = Rect::from_center_size(at, drawn);
+                        painter.image(
+                            texture.id(),
+                            ghost,
+                            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                            Color32::from_rgba_unmultiplied(255, 255, 255, 190),
+                        );
+                    }
+                }
+                if released {
+                    if let Some(at) = at.filter(|at| rect.contains(*at)) {
+                        let world = self.camera.screen_to_world(rect, at);
+                        let id = format!("{}-{}", kind.as_str(), self.next_id);
+                        if let Some(part) = scene::part_from_kind(kind, world, id) {
+                            self.parts.push(part);
+                            self.next_id += 1;
+                            self.reevaluate = true;
+                        }
+                    }
+                    self.palette_drag = None;
+                }
+            }
 
             let pointer = response.hover_pos();
             let world_pointer = pointer.map(|p| self.camera.screen_to_world(rect, p));
@@ -1903,6 +2009,28 @@ impl eframe::App for Spike {
                     self.selected = hit_part(&self.parts, world);
                     self.wire_start = None;
                 }
+            }
+
+            if self.serial_open {
+                panel_head(ui, "Serial Monitor", |ui| {
+                    if ui.button("Clear").clicked() {
+                        self.serial.clear();
+                    }
+                    let mut open = true;
+                    if panel_toggle(ui, &mut open) && !open {
+                        self.serial_open = false;
+                    }
+                });
+                egui::ScrollArea::vertical()
+                    .id_salt("serial-output")
+                    .auto_shrink([false, false])
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        ui.monospace(&self.serial);
+                        if let Some(error) = &self.run_error {
+                            ui.colored_label(Color32::from_rgb(230, 120, 100), error);
+                        }
+                    });
             }
 
             // A grab can change a part's art (a knob, a slider). Refresh the
