@@ -2622,6 +2622,56 @@ mod tests {
     }
 
     #[test]
+    fn the_button_preset_drives_its_pin_when_pressed() {
+        // The real preset, through the real loader and the real netlist — no UI.
+        // If this fails, nothing the app does afterwards can work.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/button.json");
+        let (parts, wires, _sketch) = scene::load_diagram_file(&root);
+
+        let ids: Vec<&str> = parts.iter().map(|part| part.id.as_str()).collect();
+        println!("parts: {ids:?}");
+        let button = parts
+            .iter()
+            .find(|part| part.kind == "pushbutton")
+            .map(|part| part.id.clone())
+            .expect("the preset has a pushbutton");
+
+        let avr = HashMap::new();
+        let idle = scene::evaluate_scene(
+            &parts,
+            &wires,
+            &HashMap::new(),
+            &avr,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        println!("idle drives: {:?}", idle.drives);
+
+        let mut held = HashMap::new();
+        held.insert(button.clone(), true);
+        let pressed = scene::evaluate_scene(
+            &parts,
+            &wires,
+            &held,
+            &avr,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        println!("pressed drives: {:?}", pressed.drives);
+        assert!(
+            pressed.drives.iter().any(|drive| drive.port == 'D' && drive.pin == 2),
+            "a press must drive the button's pin; got {:?}",
+            pressed.drives
+        );
+    }
+
+    #[test]
     fn a_press_takes_the_button_and_leaves_it_movable() {
         use croquis_core::catalogue::PartKind;
 
