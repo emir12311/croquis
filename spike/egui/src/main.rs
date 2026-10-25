@@ -77,6 +77,77 @@ fn ensure_palette_textures(
     }
 }
 
+/// One palette tile: the part's picture above its name, as v0.2's `.part`.
+fn palette_tile(
+    ui: &mut egui::Ui,
+    textures: &HashMap<String, egui::TextureHandle>,
+    key: &str,
+    label: &str,
+    enabled: bool,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(104.0, 84.0), egui::Sense::click());
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let raised = Color32::from_rgb(0x26, 0x26, 0x2a);
+    let painter = ui.painter();
+    painter.rect_filled(rect, 0.0, raised);
+    painter.rect_stroke(
+        rect,
+        0.0,
+        egui::Stroke::new(
+            1.0,
+            if response.hovered() && enabled {
+                Color32::from_rgb(0xd9, 0xa4, 0x41)
+            } else {
+                BORDER
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+
+    // The picture, centred in the top two thirds.
+    if let Some(texture) = textures.get(key) {
+        let size = texture.size_vec2();
+        let scale = (52.0 / size.y.max(1.0)).min(84.0 / size.x.max(1.0));
+        let drawn = Vec2::new(size.x * scale, size.y * scale);
+        let at = egui::Rect::from_center_size(
+            egui::pos2(rect.center().x, rect.top() + 10.0 + drawn.y / 2.0),
+            drawn,
+        );
+        painter.image(
+            texture.id(),
+            at,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            if enabled {
+                Color32::WHITE
+            } else {
+                Color32::from_rgba_unmultiplied(255, 255, 255, 110)
+            },
+        );
+    }
+
+    // The name, under it, centred and wrapped.
+    let label_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 4.0, rect.bottom() - 30.0),
+        egui::pos2(rect.right() - 4.0, rect.bottom() - 4.0),
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(label_rect)
+            .layout(egui::Layout::top_down(egui::Align::Center)),
+    );
+    child.add(
+        egui::Label::new(
+            egui::RichText::new(label)
+                .size(11.0)
+                .color(if enabled { MUTED } else { Color32::from_rgb(0x64, 0x64, 0x68) }),
+        )
+        .wrap(),
+    );
+    response
+}
+
 /// A docked side panel, on whichever side it is asked for.
 fn side_panel(right: bool, id: &str) -> egui::Panel {
     if right {
@@ -424,7 +495,7 @@ impl Default for Spike {
             pin13: false,
             sketch_open: true,
             components_open: true,
-            serial_open: true,
+            serial_open: false,
             part_warnings: HashMap::new(),
             sketch_right: false,
             components_right: true,
@@ -1481,52 +1552,50 @@ impl eframe::App for Spike {
                     egui::ScrollArea::vertical()
                         .id_salt("component-list")
                         .max_height(260.0)
+                        .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            for def in parts() {
-                                let key = format!("palette:{}", def.kind.as_str());
-                                // The whole row is the button: the picture is part
-                                // of what you are picking.
-                                let row = ui
-                                    .horizontal(|ui| {
-                                        if let Some(texture) = self.textures.get(&key) {
-                                            let size = texture.size_vec2();
-                                            let height = 22.0;
-                                            let width =
-                                                (height * size.x / size.y.max(1.0)).max(4.0);
-                                            ui.add(
-                                                egui::Image::new(texture)
-                                                    .fit_to_exact_size(Vec2::new(width, height)),
+                            // v0.2's palette: two columns of picture tiles, the
+                            // name under each, not a column of text buttons.
+                            egui::Grid::new("palette-grid")
+                                .num_columns(2)
+                                .spacing(Vec2::new(6.0, 6.0))
+                                .show(ui, |ui| {
+                                    for (index, def) in parts().into_iter().enumerate() {
+                                        let key =
+                                            format!("palette:{}", def.kind.as_str());
+                                        let tile = palette_tile(
+                                            ui,
+                                            &self.textures,
+                                            &key,
+                                            def.label,
+                                            !self.running,
+                                        );
+                                        if tile.clicked() && !self.running {
+                                            let id = format!(
+                                                "{}-{}",
+                                                def.kind.as_str(),
+                                                self.next_id
                                             );
-                                        } else {
-                                            ui.add_space(22.0);
+                                            // Drop it where the view is looking, stepped
+                                            // a little so two adds do not land on each
+                                            // other.
+                                            let step = 12.0 * (self.next_id % 5) as f32;
+                                            let at = Pos2::new(
+                                                -self.camera.pan.x / self.camera.zoom + step,
+                                                -self.camera.pan.y / self.camera.zoom + step,
+                                            );
+                                            if let Some(part) =
+                                                scene::part_from_kind(def.kind, at, id)
+                                            {
+                                                self.parts.push(part);
+                                                self.next_id += 1;
+                                            }
                                         }
-                                        ui.label(def.label);
-                                    })
-                                    .response
-                                    .interact(egui::Sense::click());
-                                if row.hovered() {
-                                    ui.painter().rect_filled(
-                                        row.rect.expand2(Vec2::new(4.0, 2.0)),
-                                        0.0,
-                                        Color32::from_rgb(0x2a, 0x2a, 0x2e),
-                                    );
-                                }
-                                if row.clicked() && !self.running {
-                                    let id = format!("{}-{}", def.kind.as_str(), self.next_id);
-                                    // Drop it where the view is looking, stepped a little
-                                    // so two adds do not land on each other. The origin
-                                    // used to put every new part on top of the Arduino.
-                                    let step = 12.0 * (self.next_id % 5) as f32;
-                                    let at = Pos2::new(
-                                        -self.camera.pan.x / self.camera.zoom + step,
-                                        -self.camera.pan.y / self.camera.zoom + step,
-                                    );
-                                    if let Some(part) = scene::part_from_kind(def.kind, at, id) {
-                                        self.parts.push(part);
-                                        self.next_id += 1;
+                                        if index % 2 == 1 {
+                                            ui.end_row();
+                                        }
                                     }
-                                }
-                            }
+                                });
                         });
                 });
 } else {
@@ -1551,61 +1620,23 @@ impl eframe::App for Spike {
                             self.sketch_right = right;
                         }
                     });
-                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _wrap: f32| {
                         let mut job = editor::highlight(text.as_str());
-                        job.wrap.max_width = wrap_width;
+                        job.wrap.max_width = f32::INFINITY;
                         ui.fonts_mut(|fonts| fonts.layout_job(job))
                     };
-                    egui::ScrollArea::vertical()
+                    egui::ScrollArea::both()
                         .id_salt("sketch-editor")
-                        .max_height(320.0)
+                        .auto_shrink([false, false])
                         .show(ui, |ui| {
                             ui.add(
                                 egui::TextEdit::multiline(&mut self.sketch)
                                     .code_editor()
                                     .desired_width(f32::INFINITY)
-                                    .desired_rows(20)
+                                    .desired_rows(40)
                                     .layouter(&mut layouter),
                             );
                         });
-                    ui.separator();
-                    ui.heading("Canvas");
-                    ui.label("Canvas, pan/zoom, pin hit-testing, wiring.");
-                    ui.separator();
-                    ui.label(format!("Zoom: {:.0}%", self.camera.zoom * 100.0));
-                    ui.label(format!(
-                        "Frame: {:.1} ms",
-                        ctx.input(|i| i.stable_dt) * 1000.0
-                    ));
-                    ui.label(format!(
-                        "Hovered pin: {}",
-                        self.hovered_pin
-                            .map(|(part, pin)| {
-                                format!(
-                                    "{} · {}",
-                                    self.parts[part].name, self.parts[part].pins[pin].name
-                                )
-                            })
-                            .unwrap_or_else(|| "—".into())
-                    ));
-                    ui.separator();
-                    ui.label("Drag a part with the left button.");
-                    ui.label("Drag the canvas with the middle or right button.");
-                    ui.label("Wheel zooms toward the pointer.");
-                    ui.label("Click a pin, then another, to wire them.");
-                    ui.label("Esc cancels a wire.");
-                    if ui.button("Reset view").clicked() {
-                        self.camera = Camera::default();
-                    }
-                    if ui.button("Clear wires").clicked() {
-                        self.wires.clear();
-                        self.wire_start = None;
-                    }
-                    ui.separator();
-                    ui.label(format!("Wires: {}", self.wires.len()));
-                    if let Some(selected) = self.selected {
-                        ui.label(format!("Selected: {}", self.parts[selected].name));
-                    }
                 });
 } else {
             side_panel(self.sketch_right, "editor-rail")
@@ -1619,6 +1650,45 @@ impl eframe::App for Spike {
 
         egui::CentralPanel::default().show(root, |ui| {
             panel_head(ui, "Circuit", |ui| {
+                // Right to left, as v0.2's circuit bar reads: the run button at
+                // the far edge, then zoom, then the view controls.
+                if self.running {
+                    if ui.button("Stop").clicked() {
+                        self.stop_sim();
+                    }
+                } else {
+                    let run = egui::Button::new(
+                        egui::RichText::new("Run").color(Color32::from_rgb(0x1a, 0x1a, 0x1c)),
+                    )
+                    .fill(Color32::from_rgb(0xd9, 0xa4, 0x41));
+                    if ui.add(run).clicked() {
+                        self.start_sim(&ctx);
+                    }
+                }
+                ui.add_space(6.0);
+                if ui
+                    .add(egui::Button::new("+").frame(false))
+                    .on_hover_text("Zoom in")
+                    .clicked()
+                {
+                    self.camera.zoom = (self.camera.zoom * 1.2).min(8.0);
+                }
+                ui.label(format!("{:.0}%", self.camera.zoom * 100.0));
+                if ui
+                    .add(egui::Button::new("−").frame(false))
+                    .on_hover_text("Zoom out")
+                    .clicked()
+                {
+                    self.camera.zoom = (self.camera.zoom / 1.2).max(0.1);
+                }
+                ui.add_space(6.0);
+                if ui
+                    .add(egui::Button::new("⤢").frame(false))
+                    .on_hover_text("Fit the circuit")
+                    .clicked()
+                {
+                    self.fit_requested = true;
+                }
                 if ui
                     .add(egui::Button::new("▤").frame(false))
                     .on_hover_text("Toggle the serial monitor")
@@ -1626,12 +1696,6 @@ impl eframe::App for Spike {
                 {
                     self.serial_open = !self.serial_open;
                 }
-                ui.separator();
-                ui.label(format!(
-                    "{} · {:.0}%",
-                    if self.running { "running" } else { "stopped" },
-                    self.camera.zoom * 100.0
-                ));
             });
             // The properties strip, docked under the circuit bar. Always present,
             // so the canvas does not jump when the selection changes — v0.2's
@@ -2569,7 +2633,7 @@ fn draw_part(
             Color32::WHITE,
         );
     } else {
-        painter.rect_filled(screen, 4.0, part.color);
+        painter.rect_filled(screen, 0.0, part.color);
     }
     if let Some(state) = rgb {
         draw_rgb_glow(painter, screen, state);
@@ -2577,17 +2641,14 @@ fn draw_part(
     if let Some(values) = segments {
         draw_segments(painter, screen, part, values);
     }
-    let border = if selected {
-        Color32::from_rgb(217, 164, 65)
-    } else {
-        Color32::from_rgb(90, 90, 96)
-    };
-    painter.rect_stroke(
-        screen,
-        4.0,
-        Stroke::new(if selected { 2.5 } else { 1.0 }, border),
-        egui::StrokeKind::Inside,
-    );
+    if selected {
+        painter.rect_stroke(
+            screen,
+            0.0,
+            Stroke::new(1.5, Color32::from_rgb(217, 164, 65)),
+            egui::StrokeKind::Outside,
+        );
+    }
     for (index, pin) in part.pins.iter().enumerate() {
         let hovered = hovered_pin.is_some_and(|(_, pin_index)| pin_index == index);
         // Match the app: no markers at rest, and only the hovered pin gets an
