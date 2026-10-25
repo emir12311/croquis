@@ -223,6 +223,8 @@ struct Spike {
     pin_duty: HashMap<String, f64>,
     /// The frequency measured on each pin, in hertz — a buzzer's pitch.
     pin_frequency: HashMap<String, f64>,
+    /// The board's own "L" LED, which follows pin 13.
+    pin13: bool,
     segment_memory: HashMap<String, Vec<u8>>,
     /// When each single 7-segment display last changed, for the settle guard.
     seven_changed_at: HashMap<String, Instant>,
@@ -296,6 +298,7 @@ impl Default for Spike {
             pin_pulses: HashMap::new(),
             pin_duty: HashMap::new(),
             pin_frequency: HashMap::new(),
+            pin13: false,
             segment_memory: HashMap::new(),
             seven_changed_at: HashMap::new(),
             seven_stable: HashMap::new(),
@@ -342,7 +345,17 @@ fn texture_key(
     lit: bool,
     outputs: &HashMap<String, OutputState>,
     led_brightness: &HashMap<String, f64>,
+    pressed: &HashMap<String, bool>,
+    pin13: bool,
 ) -> String {
+    if part.kind == "pushbutton" {
+        // The cap's fill is the whole difference, so two textures are enough.
+        let down = pressed.get(&part.id).copied().unwrap_or(false);
+        return format!("button:{down}");
+    }
+    if part.kind == "uno" {
+        return format!("uno:{pin13}");
+    }
     if part.kind == "led" {
         // A PWM LED is as bright as its duty cycle, so the art has to follow it.
         // Sixteen levels keep the cache small and the ramp smooth enough to read
@@ -408,12 +421,14 @@ fn ensure_textures(
     led_states: &HashMap<String, LedState>,
     outputs: &HashMap<String, OutputState>,
     led_brightness: &HashMap<String, f64>,
+    pressed: &HashMap<String, bool>,
+    pin13: bool,
 ) {
     for part in parts {
         let lit = led_states
             .get(&part.id)
             .is_some_and(|state| !matches!(state, LedState::Off));
-        let key = texture_key(part, lit, outputs, led_brightness);
+        let key = texture_key(part, lit, outputs, led_brightness, pressed, pin13);
         {
             if textures.contains_key(&key) {
                 continue;
@@ -440,6 +455,11 @@ fn ensure_textures(
                     values,
                     part.attrs.get("color").map(String::as_str).unwrap_or("red"),
                 )
+            } else if part.kind == "pushbutton" {
+                let down = pressed.get(&part.id).copied().unwrap_or(false);
+                scene::pushbutton_svg(&part.svg, down)
+            } else if part.kind == "uno" {
+                scene::uno_svg(&part.svg, pin13)
             } else if part.kind == "potentiometer" {
                 scene::potentiometer_svg(&part.svg)
             } else if part.kind == "slide-potentiometer" {
@@ -527,6 +547,8 @@ impl Spike {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &self.pressed,
+            self.pin13,
         );
         self.parts = parts;
         self.wires = wires;
@@ -1024,6 +1046,7 @@ impl Spike {
         self.pin_pulses.clear();
         self.pin_duty.clear();
         self.pin_frequency.clear();
+        self.pin13 = false;
         self.segment_memory.clear();
         self.seven_changed_at.clear();
         self.seven_stable.clear();
@@ -1059,6 +1082,10 @@ impl Spike {
             match event {
                 SimEvent::Pin { port, pin, high } => {
                     let key = format!("{}{}", port as char, pin);
+                    if port == b'B' && pin == 5 {
+                        // Pin 13's LED, as v0.2 ("pin13") lights it.
+                        self.pin13 = high;
+                    }
                     let previous = self.avr_pins.get(&key).copied();
                     self.avr_pins.insert(key.clone(), high);
                     changed = true;
@@ -1171,6 +1198,8 @@ impl eframe::App for Spike {
             &self.led_states,
             &self.outputs,
             &self.led_brightness,
+            &self.pressed,
+            self.pin13,
         );
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1502,6 +1531,8 @@ impl eframe::App for Spike {
                 &self.led_states,
                 &self.outputs,
                 &self.led_brightness,
+                &self.pressed,
+                self.pin13,
             );
             for (index, part) in self.parts.iter().enumerate() {
                 draw_part(
@@ -1519,6 +1550,8 @@ impl eframe::App for Spike {
                             .is_some_and(|state| !matches!(state, LedState::Off)),
                         &self.outputs,
                         &self.led_brightness,
+                        &self.pressed,
+                        self.pin13,
                     )),
                     self.rgb_leds.get(&part.id).copied(),
                     // Segments are a display's business. The LED bar carries ten
@@ -2569,6 +2602,31 @@ mod tests {
         let hard = disc_bands(10.0, 0.0, Color32::WHITE, 1.0);
         assert_eq!(hard.len(), 2, "no blur means one hard edge");
         assert_eq!(hard[1].0, 10.0);
+    }
+
+    #[test]
+    fn the_boards_led_and_a_pressed_button_are_both_in_the_art() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi");
+
+        let uno = std::fs::read_to_string(root.join("uno.svg")).expect("uno art");
+        let dark = scene::uno_svg(&uno, false);
+        let lit = scene::uno_svg(&uno, true);
+        assert_eq!(dark, uno, "an unlit LED leaves the art alone");
+        assert!(
+            lit.contains("#ff8080") && lit.contains("url(#ledFilter)"),
+            "pin 13 high puts the element's own red dot in the LED group"
+        );
+        assert_ne!(dark, lit);
+
+        let button = std::fs::read_to_string(root.join("pushbutton.svg")).expect("button art");
+        let up = scene::pushbutton_svg(&button, false);
+        let down = scene::pushbutton_svg(&button, true);
+        assert_eq!(up, button);
+        assert!(
+            down.contains("fill=\"url(#grad-down-pushbutton1)\"")
+                && !down.contains("fill=\"url(#grad-up-pushbutton1)\""),
+            "a held cap uses the element's own down gradient"
+        );
     }
 
     #[test]
