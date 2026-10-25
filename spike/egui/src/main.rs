@@ -1166,6 +1166,35 @@ impl Spike {
     /// Take a press on a part: hold a button, tap a key, grab the stick, or
     /// start dragging everything else. `screen` is where the pointer was, for
     /// the stick's movement threshold.
+    /// A press landed on a pin: that is the start of a wire, not a grab of the
+    /// part the pin belongs to.
+    fn wire_press(&mut self, pin: PinRef) {
+        if self.wire_start.is_none() {
+            self.wire_start = Some(pin);
+        }
+    }
+
+    /// The pointer came up over `pin`, or over nothing at all.
+    ///
+    /// Releasing on a different pin finishes the wire; releasing anywhere else
+    /// leaves it armed, which is what makes click-then-click work as well as
+    /// drag-and-drop.
+    fn wire_release(&mut self, pin: Option<PinRef>) {
+        let (Some(start), Some(target)) = (self.wire_start, pin) else {
+            return;
+        };
+        if start == target {
+            return;
+        }
+        self.wires.push(Wire {
+            a: start,
+            b: target,
+            waypoints: Vec::new(),
+        });
+        self.wire_start = None;
+        self.reevaluate = true;
+    }
+
     fn press_control(&mut self, index: usize, world: Pos2, screen: Pos2) {
         // A button or a key does not change a pin; it changes what the netlist
         // is told. Without this the press is recorded and never solved, which is
@@ -1957,9 +1986,18 @@ impl eframe::App for Spike {
                 if let Some(pos) = ctx.input(|input| input.pointer.interact_pos()) {
                     if rect.contains(pos) {
                         let world = self.camera.screen_to_world(rect, pos);
-                        self.selected = hit_part(&self.parts, world);
-                        if let Some(index) = self.selected {
-                            self.press_control(index, world, pos);
+                        if let Some(pin) =
+                            hit_pin(&self.parts, world, PIN_HIT_RADIUS / self.camera.zoom)
+                        {
+                            // Dragging from a pin draws a wire. Before this, the
+                            // press grabbed the part and dragged the Arduino out
+                            // from under itself.
+                            self.wire_press(pin);
+                        } else {
+                            self.selected = hit_part(&self.parts, world);
+                            if let Some(index) = self.selected {
+                                self.press_control(index, world, pos);
+                            }
                         }
                     }
                 }
@@ -2007,26 +2045,18 @@ impl eframe::App for Spike {
                 }
             }
             if released_now || response.drag_stopped() {
+                self.wire_release(self.hovered_pin);
                 self.dragging = None;
                 self.press_drag = None;
                 self.release_input();
             }
 
-            if response.clicked_by(PointerButton::Primary) {
-                if let Some(pin) = self.hovered_pin {
-                    match self.wire_start.take() {
-                        Some(start) if start != pin => self.wires.push(Wire {
-                            a: start,
-                            b: pin,
-                            waypoints: Vec::new(),
-                        }),
-                        Some(_) => {}
-                        None => self.wire_start = Some(pin),
-                    }
-                } else if let Some(world) = world_pointer {
+            if response.clicked_by(PointerButton::Primary) && self.hovered_pin.is_none() {
+                if let Some(world) = world_pointer {
                     self.selected = hit_part(&self.parts, world);
-                    self.wire_start = None;
                 }
+                // A click that is not on a pin gives up on the wire.
+                self.wire_start = None;
             }
 
             if self.serial_open {
@@ -3389,6 +3419,43 @@ mod tests {
             1,
             "one key held should print one letter, got {distinct:?} from {keys:?}"
         );
+    }
+
+    #[test]
+    fn a_wire_needs_two_different_pins() {
+        let mut spike = Spike::default();
+        // `default()` loads whatever preset is in the environment.
+        spike.wires.clear();
+        let (a, b) = ((0usize, 1usize), (2usize, 3usize));
+
+        spike.wire_press(a);
+        assert_eq!(spike.wire_start, Some(a), "the first pin arms the wire");
+
+        // Letting go on the same pin is not a wire; it stays armed, which is
+        // what makes click-then-click work.
+        spike.wire_release(Some(a));
+        assert!(spike.wires.is_empty(), "a pin cannot wire to itself");
+        assert_eq!(spike.wire_start, Some(a));
+
+        // A second press elsewhere keeps the first pin as the start.
+        spike.wire_press(b);
+        assert_eq!(spike.wire_start, Some(a));
+
+        spike.wire_release(Some(b));
+        assert_eq!(spike.wires.len(), 1);
+        assert_eq!((spike.wires[0].a, spike.wires[0].b), (a, b));
+        assert_eq!(spike.wire_start, None, "finishing a wire disarms it");
+        assert!(spike.reevaluate, "and the circuit is solved again");
+    }
+
+    #[test]
+    fn a_release_away_from_a_pin_leaves_the_wire_armed() {
+        let mut spike = Spike::default();
+        spike.wires.clear();
+        spike.wire_press((0, 1));
+        spike.wire_release(None);
+        assert!(spike.wires.is_empty());
+        assert_eq!(spike.wire_start, Some((0, 1)), "still waiting for a second pin");
     }
 
     #[test]
