@@ -1630,7 +1630,8 @@ impl eframe::App for Spike {
     egui::Panel::right("components")
                 .resizable(true)
                 .default_size(240.0)
-                .min_size(180.0)
+                .min_size(200.0)
+                .max_size(560.0)
                 .show(root, |ui| {
                     panel_head(ui, "Components", |ui| {
                         let mut open = true;
@@ -1644,8 +1645,12 @@ impl eframe::App for Spike {
                         .show(ui, |ui| {
                             // v0.2's palette: two columns of picture tiles, the
                             // name under each, not a column of text buttons.
+                            // As many 104px tiles as fit: a wider panel shows
+                            // more columns instead of a growing gap.
+                            let columns =
+                                (((ui.available_width() + 6.0) / 110.0).floor() as usize).max(1);
                             egui::Grid::new("palette-grid")
-                                .num_columns(2)
+                                .num_columns(columns)
                                 .spacing(Vec2::new(6.0, 6.0))
                                 .show(ui, |ui| {
                                     for (index, def) in parts().into_iter().enumerate() {
@@ -1707,7 +1712,7 @@ impl eframe::App for Spike {
                                                 self.next_id += 1;
                                             }
                                         }
-                                        if index % 2 == 1 {
+                                        if (index + 1) % columns == 0 {
                                             ui.end_row();
                                         }
                                     }
@@ -1728,7 +1733,8 @@ impl eframe::App for Spike {
     egui::Panel::left("editor")
                 .resizable(true)
                 .default_size(320.0)
-                .min_size(220.0)
+                .min_size(200.0)
+                .max_size(560.0)
                 .show(root, |ui| {
                     panel_head(ui, "Sketch", |ui| {
                         let mut open = true;
@@ -1814,28 +1820,47 @@ impl eframe::App for Spike {
             // The properties strip, docked under the circuit bar. Always present,
             // so the canvas does not jump when the selection changes — v0.2's
             // `.props`, and its comment says exactly that.
+            // One row, fixed height. The strip used to stack its fields and its
+            // warning, so selecting a part with more of either grew it and
+            // pushed the canvas down — under the pointer, while wiring.
+            const STRIP_HEIGHT: f32 = 36.0;
             let strip = egui::Frame::new()
                 .fill(SURFACE)
-                .inner_margin(egui::Margin::symmetric(12, 5))
-                .show(ui, |ui| match self.selected {
-                    Some(index) if index < self.parts.len() => {
-                        // Properties first, the netlist's complaint under them:
-                        // what a part is set to matters more than what is wrong
-                        // with it, and the warning is the footnote.
-                        let id = self.parts[index].id.clone();
-                        let warning = self.part_warnings.get(&id).cloned();
-                        let part = &mut self.parts[index];
-                        let changed = properties::row(ui, part);
-                        if let Some(warning) = warning {
-                            ui.separator();
-                            ui.colored_label(Color32::from_rgb(0xd9, 0xa4, 0x41), warning);
-                        }
-                        changed
-                    }
-                    _ => {
-                        ui.weak("Select a part to edit it.");
-                        false
-                    }
+                .inner_margin(egui::Margin::symmetric(12, 0))
+                .show(ui, |ui| {
+                    ui.set_height(STRIP_HEIGHT);
+                    egui::ScrollArea::horizontal()
+                        .id_salt("properties-strip")
+                        // No scrollbar: it would add its own height to the strip
+                        // and the canvas would move after all.
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                        )
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.horizontal_centered(|ui| match self.selected {
+                                Some(index) if index < self.parts.len() => {
+                                    let id = self.parts[index].id.clone();
+                                    let warning = self.part_warnings.get(&id).cloned();
+                                    let part = &mut self.parts[index];
+                                    let changed = properties::row(ui, part);
+                                    if let Some(warning) = warning {
+                                        ui.separator();
+                                        ui.colored_label(
+                                            Color32::from_rgb(0xd9, 0xa4, 0x41),
+                                            warning,
+                                        );
+                                    }
+                                    changed
+                                }
+                                _ => {
+                                    ui.weak("Select a part to edit it.");
+                                    false
+                                }
+                            })
+                            .inner
+                        })
+                        .inner
                 });
             ui.painter().hline(
                 strip.response.rect.x_range(),
