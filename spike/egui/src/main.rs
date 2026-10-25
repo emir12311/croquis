@@ -62,8 +62,10 @@ fn configure_style(ctx: &egui::Context) {
     visuals.extreme_bg_color = Color32::from_rgb(0x16, 0x16, 0x18);
     visuals.faint_bg_color = surface;
     visuals.window_stroke = Stroke::new(1.0, border);
-    visuals.window_corner_radius = CornerRadius::same(4);
-    visuals.menu_corner_radius = CornerRadius::same(4);
+    // v0.2's shape rule: "no rounded corners on everything" — panels and menus
+    // are square, controls carry the 2px token.
+    visuals.window_corner_radius = CornerRadius::ZERO;
+    visuals.menu_corner_radius = CornerRadius::ZERO;
     visuals.override_text_color = Some(text);
     visuals.selection.bg_fill = accent;
     visuals.selection.stroke = Stroke::new(1.0, accent);
@@ -1224,6 +1226,10 @@ impl eframe::App for Spike {
         egui::Panel::top("topbar")
             .exact_size(38.0)
             .show(root, |ui| {
+                // Items sit flush, so the menu reads as a bar rather than as a
+                // row of separate buttons.
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.spacing_mut().button_padding = Vec2::new(12.0, 6.0);
                 ui.horizontal(|ui| {
                     ui.menu_button("File", |ui| {
                         if ui.button("New").clicked() {
