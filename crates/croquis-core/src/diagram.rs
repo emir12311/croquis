@@ -40,7 +40,7 @@ pub struct DiagramFile {
     pub editor: String,
     pub parts: Vec<DiagramPart>,
     /// Wokwi's connection shape: `[from, to, colour, route]`.
-    pub connections: Vec<Vec<String>>,
+    pub connections: Vec<Vec<Value>>,
     pub sketch: String,
 }
 
@@ -131,15 +131,25 @@ pub fn build_diagram(
         let (Some(a), Some(b)) = (pin_point(&wire.a), pin_point(&wire.b)) else {
             continue;
         };
-        let mut connection = vec![
-            format!("{}:{}", wire.a.instance_id, wire.a.pin),
-            format!("{}:{}", wire.b.instance_id, wire.b.pin),
-            wire.colour
-                .clone()
-                .unwrap_or_else(|| WIRE_COLOR.to_string()),
-        ];
-        connection.extend(encode_route(a, b, &wire.waypoints));
-        connections.push(connection);
+        // `[from, to, colour, route]`, with the route as one nested array of
+        // relative moves — what Wokwi writes, and what `parse_diagram` reads back.
+        // Spreading the moves flat put a string where the reader wanted an array,
+        // so every bent wire silently lost its bends when the file was reopened.
+        connections.push(vec![
+            Value::String(format!("{}:{}", wire.a.instance_id, wire.a.pin)),
+            Value::String(format!("{}:{}", wire.b.instance_id, wire.b.pin)),
+            Value::String(
+                wire.colour
+                    .clone()
+                    .unwrap_or_else(|| WIRE_COLOR.to_string()),
+            ),
+            Value::Array(
+                encode_route(a, b, &wire.waypoints)
+                    .into_iter()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        ]);
     }
 
     DiagramFile {
@@ -424,6 +434,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(second, first);
+    }
+
+    #[test]
+    fn a_bend_survives_a_save_and_a_load() {
+        // The route rides in one nested array of relative moves. Written flat, the
+        // reader found a string where it wanted an array and dropped the whole
+        // route, so every bent wire straightened itself on the way back in.
+        let (parts, _, sketch) = circuit();
+        let tags = TestTags::new();
+        let wires = vec![RoutedWire {
+            a: PinRef {
+                instance_id: "r1".into(),
+                pin: "2".into(),
+            },
+            b: PinRef {
+                instance_id: "led1".into(),
+                pin: "A".into(),
+            },
+            colour: None,
+            waypoints: vec![crate::route::Point::new(500.0, 150.0)],
+        }];
+        let text =
+            serde_json::to_string(&build_diagram(&parts, &wires, &sketch, &tags, &point)).unwrap();
+        let parsed = parse_diagram(&text, &tags).unwrap();
+        let wire = &parsed.wires[0];
+        let back = crate::route::decode_route(point(&wire.a).unwrap(), &wire.route);
+        assert!(
+            !back.is_empty(),
+            "a bent wire keeps its route through the file: {text}"
+        );
     }
 
     #[test]
