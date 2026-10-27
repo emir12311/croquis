@@ -453,6 +453,9 @@ struct Spike {
     wire_waypoints: Vec<Pos2>,
     selected: Option<usize>,
     dragging: Option<usize>,
+    /// A left-drag that started on empty canvas. v0.2 pans by dragging the
+    /// background, so the press is claimed here before any part can take it.
+    panning: bool,
     hovered_pin: Option<PinRef>,
     textures: HashMap<String, egui::TextureHandle>,
     led_states: HashMap<String, LedState>,
@@ -575,6 +578,7 @@ impl Default for Spike {
             wire_waypoints: Vec::new(),
             selected: None,
             dragging: None,
+            panning: false,
             hovered_pin: None,
             textures: HashMap::new(),
             led_states: HashMap::new(),
@@ -2016,11 +2020,17 @@ impl eframe::App for Spike {
                             if let Some(index) = self.selected {
                                 self.press_control(index, world, pos);
                             }
+                            // Nothing under the pointer: the press is a canvas
+                            // grab, which is how v0.2 pans.
+                            self.panning = self.selected.is_none();
                         }
                     }
                 }
             }
-            if response.dragged_by(PointerButton::Primary) {
+            if response.dragged_by(PointerButton::Primary) && self.panning {
+                self.camera.pan += response.drag_delta();
+            }
+            if response.dragged_by(PointerButton::Primary) && !self.panning {
                 if let Some((index, from)) = self.press_drag {
                     // Four pixels of travel is a drag; less than that is a click
                     // whose hand wobbled.
@@ -2062,10 +2072,22 @@ impl eframe::App for Spike {
                     self.parts[index].center += response.drag_delta() / self.camera.zoom;
                 }
             }
+            // The canvas is a grab surface: an open hand over empty space, a
+            // closed one while it is being dragged.
+            let over_empty = world_pointer.is_some_and(|p| {
+                self.hovered_pin.is_none() && hit_part(&self.parts, p).is_none()
+            });
+            if self.panning {
+                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            } else if over_empty {
+                ctx.set_cursor_icon(egui::CursorIcon::Grab);
+            }
+
             if released_now || response.drag_stopped() {
                 self.wire_release(self.hovered_pin);
                 self.dragging = None;
                 self.press_drag = None;
+                self.panning = false;
                 self.release_input();
             }
 
