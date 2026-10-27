@@ -22,7 +22,7 @@ use croquis_core::netlist::{
     AnalogReading, CircuitEval, Drive, IrReceiver, KeyPosition, LcdWiring, LedState, OutputState,
     RgbState, SensorState, StepperWiring,
 };
-use croquis_core::route::{expand_path, Point as CorePoint};
+use croquis_core::route::{expand_path, leg_bend, Point as CorePoint};
 use croquis_core::shift_register::{step_shift_register, ShiftState, ShiftWiring};
 use croquis_sim::engine::{self, SimEvent};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
@@ -1184,10 +1184,29 @@ impl Spike {
     }
 
     /// Pin a bend at `world` while a wire is being routed.
+    ///
+    /// The corner of the current leg is committed, not the cursor: the next leg
+    /// then starts where the wire visibly turns. Storing the cursor instead puts
+    /// the wire through the pointer and needs two extra elbows to do it, which is
+    /// what made a routed wire look like it wandered. A leg that is already
+    /// straight has no corner, so the cursor stands.
     fn wire_bend(&mut self, world: Pos2) {
-        if self.wire_start.is_some() {
-            self.wire_waypoints.push(world);
-        }
+        let Some(start) = self.wire_start else {
+            return
+        };
+        let last = self
+            .wire_waypoints
+            .last()
+            .copied()
+            .unwrap_or_else(|| self.parts[start.0].pin_world(start.1));
+        let corner = leg_bend(
+            self.wire_waypoints.len(),
+            CorePoint::new(last.x as f64, last.y as f64),
+            CorePoint::new(world.x as f64, world.y as f64),
+        )
+        .map(|bend| Pos2::new(bend.x as f32, bend.y as f32))
+        .unwrap_or(world);
+        self.wire_waypoints.push(corner);
     }
 
     /// Give up on the wire being drawn.
@@ -2215,11 +2234,13 @@ impl eframe::App for Spike {
                     .camera
                     .world_to_screen(rect, self.parts[wire.b.0].pin_world(wire.b.1));
                 let mut route = vec![CorePoint::new(a.x as f64, a.y as f64)];
-                route.extend(
-                    wire.waypoints
-                        .iter()
-                        .map(|point| CorePoint::new(point.x as f64, point.y as f64)),
-                );
+                route.extend(wire.waypoints.iter().map(|point| {
+                    // Waypoints are world coordinates, like the pins either side of
+                    // them. Drawing them raw put the wire near the top-left corner
+                    // — a wire with a bend in it appeared to shoot off the canvas.
+                    let at = self.camera.world_to_screen(rect, *point);
+                    CorePoint::new(at.x as f64, at.y as f64)
+                }));
                 route.push(CorePoint::new(b.x as f64, b.y as f64));
                 let line = expand_path(&route);
                 for pair in line.windows(2) {
@@ -3483,15 +3504,22 @@ mod tests {
         assert!(spike.wire_waypoints.is_empty());
 
         spike.wire_press(a);
+        let start = spike.parts[a.0].pin_world(a.1);
         spike.wire_bend(Pos2::new(100.0, 40.0));
+        let bend = spike.wire_waypoints[0];
+        assert!(
+            bend.x == start.x || bend.y == start.y,
+            "a bend is pinned at the corner of the leg, not under the cursor: {bend:?} from {start:?}"
+        );
+
         spike.wire_bend(Pos2::new(140.0, 40.0));
         assert_eq!(spike.wire_waypoints.len(), 2, "each click pins a bend");
+        let pinned = spike.wire_waypoints.clone();
 
         spike.wire_release(Some(b));
         assert_eq!(spike.wires.len(), 1);
         assert_eq!(
-            spike.wires[0].waypoints,
-            vec![Pos2::new(100.0, 40.0), Pos2::new(140.0, 40.0)],
+            spike.wires[0].waypoints, pinned,
             "the finished wire keeps the route it was given"
         );
         assert!(spike.wire_waypoints.is_empty(), "and the routing state is cleared");
