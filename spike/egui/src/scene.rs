@@ -27,21 +27,48 @@ pub struct Part {
     pub kind: String,
     pub name: String,
     pub center: Pos2,
+    /// The part's unrotated size. `rotated_size` is what it occupies on screen.
     pub size: Vec2,
+    /// Clockwise degrees, a quarter turn at a time: 0, 90, 180 or 270.
+    pub rotation: f32,
     pub color: Color32,
+    /// Pin offsets from the centre, in the part's own unrotated frame.
     pub pins: Vec<Pin>,
     pub attrs: HashMap<String, String>,
     pub svg: String,
 }
 
 impl Part {
+    /// The box the part takes up once turned: a quarter turn swaps its sides.
+    pub fn rotated_size(&self) -> Vec2 {
+        if (self.rotation.round() as i32).rem_euclid(180) == 90 {
+            Vec2::new(self.size.y, self.size.x)
+        } else {
+            self.size
+        }
+    }
+
     pub fn bounds(&self) -> eframe::egui::Rect {
+        eframe::egui::Rect::from_center_size(self.center, self.rotated_size())
+    }
+
+    /// The unrotated box: the frame a part's drawings are measured in, before
+    /// its quarter turn is applied.
+    pub fn rect(&self) -> eframe::egui::Rect {
         eframe::egui::Rect::from_center_size(self.center, self.size)
     }
 
+    /// A pin's position, with the part's own rotation applied — which is what
+    /// the netlist, the wires and the hit-test all have to agree on.
     pub fn pin_world(&self, index: usize) -> Pos2 {
-        self.center + self.pins[index].offset
+        self.center + rotate_offset(self.pins[index].offset, self.rotation)
     }
+}
+
+/// Rotate an offset clockwise by a multiple of 90 degrees (screen space, y down).
+pub fn rotate_offset(offset: Vec2, degrees: f32) -> Vec2 {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    Vec2::new(offset.x * cos - offset.y * sin, offset.x * sin + offset.y * cos)
 }
 
 #[derive(Deserialize)]
@@ -123,6 +150,7 @@ pub fn load_diagram_file(path: &Path) -> (Vec<Part>, Vec<Wire>, String) {
             name: part_by_kind(kind).label.to_string(),
             center: Pos2::new(source.x as f32 + width / 2.0, source.y as f32 + height / 2.0),
             size: Vec2::new(width, height),
+            rotation: source.rotate as f32,
             color: Color32::from_rgb(70, 100, 130),
             pins,
             attrs: source.attrs.clone(),
@@ -158,8 +186,50 @@ pub fn load_diagram_file(path: &Path) -> (Vec<Part>, Vec<Wire>, String) {
     (parts, wires, parsed.sketch.unwrap_or_default())
 }
 
-/// Read the shipped preset titles and paths for the File menu.
-pub fn presets() -> Vec<(String, PathBuf)> {
+/// Which tab a preset sits under in File → Presets. v0.2's grouping: the parts
+/// every lesson uses, then inputs, then outputs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PresetGroup {
+    Basics,
+    Sensors,
+    Outputs,
+}
+
+impl PresetGroup {
+    /// In the order the tabs read, which is also the teaching order.
+    pub const ALL: [PresetGroup; 3] = [Self::Basics, Self::Sensors, Self::Outputs];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Basics => "Basics",
+            Self::Sensors => "Sensors",
+            Self::Outputs => "Outputs",
+        }
+    }
+
+    /// The group a preset id belongs to. An id nobody listed is a basic: it is
+    /// still reachable, which is the point of a fallback rather than a filter.
+    fn of(id: &str) -> Self {
+        match id {
+            "photoresistor" | "thermometer" | "gas-sensor" | "joystick" | "digital-sensors"
+            | "dht22" | "ir-remote" | "keypad" | "ultrasonic" => Self::Sensors,
+            "rgb" | "seven-segment" | "four-digit" | "led-bar" | "buzzer-relay" | "lcd" | "servo"
+            | "stepper" | "shift-register" => Self::Outputs,
+            _ => Self::Basics,
+        }
+    }
+}
+
+/// One shipped circuit: its file, its title, and the tab it opens from.
+pub struct Preset {
+    pub id: String,
+    pub title: String,
+    pub path: PathBuf,
+    pub group: PresetGroup,
+}
+
+/// The shipped presets, in the id order v0.2 lists them.
+pub fn presets() -> Vec<Preset> {
     let mut entries = Vec::new();
     let Ok(dir) = fs::read_dir(root().join("presets")) else {
         return entries;
@@ -172,6 +242,11 @@ pub fn presets() -> Vec<(String, PathBuf)> {
         let Ok(text) = fs::read_to_string(&path) else {
             continue;
         };
+        let id = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("untitled")
+            .to_string();
         let title = serde_json::from_str::<serde_json::Value>(&text)
             .ok()
             .and_then(|value| {
@@ -180,15 +255,15 @@ pub fn presets() -> Vec<(String, PathBuf)> {
                     .and_then(|title| title.as_str())
                     .map(str::to_string)
             })
-            .or_else(|| {
-                path.file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .map(str::to_string)
-            })
-            .unwrap_or_else(|| "Untitled".into());
-        entries.push((title, path));
+            .unwrap_or_else(|| id.clone());
+        entries.push(Preset {
+            group: PresetGroup::of(&id),
+            id,
+            title,
+            path,
+        });
     }
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries.sort_by(|a, b| a.id.cmp(&b.id));
     entries
 }
 
@@ -206,7 +281,9 @@ pub fn save_diagram_file(
             kind: part.kind.clone(),
             x: (part.center.x - part.size.x / 2.0) as f64,
             y: (part.center.y - part.size.y / 2.0) as f64,
-            rotate: None,
+            // Left/top stay the unrotated box, as Wokwi's own files have them,
+            // and the turn is carried beside them.
+            rotate: (part.rotation != 0.0).then_some(part.rotation as f64),
             attrs: part.attrs.clone(),
         })
         .collect();
@@ -475,6 +552,7 @@ pub fn part_from_kind(kind: PartKind, center: Pos2, id: String) -> Option<Part> 
         name: meta.label.to_string(),
         center,
         size: Vec2::new(width, height),
+        rotation: 0.0,
         color: Color32::from_rgb(70, 100, 130),
         pins,
         attrs: meta.attrs.clone(),
@@ -564,17 +642,35 @@ pub fn slide_pot_svg(svg: &str) -> String {
     format!("{}{}", &svg[..start], &svg[start + length + "</g>".len()..])
 }
 
+/// The art a part rests with when nothing is driving it: the palette's picture,
+/// and the canvas's starting point before a state is layered on. These patches
+/// are the ones that are not state — the joystick's invisible hit-areas, the
+/// knobs the elements draw themselves.
+pub fn resting_svg(part: &Part) -> String {
+    match part.kind.as_str() {
+        "potentiometer" => potentiometer_svg(&part.svg),
+        "slide-potentiometer" => slide_pot_svg(&part.svg),
+        "analog-joystick" => joystick_svg(&part.svg),
+        // A resting button, not the element's stale pressed cap.
+        "pushbutton" => pushbutton_svg(&part.svg, false),
+        _ => part.svg.clone(),
+    }
+}
+
 /// The pushbutton with its cap held down.
 ///
-/// The element swaps the cap's fill between `grad-up` and `grad-down` while the
-/// button is pressed, which is the whole visible difference.
+/// The element keeps two concentric circles and a stylesheet rule that hides the
+/// `button-active-circle` until the button is held. The extraction lost the
+/// rule, so the down circle sat on top of the up one and both states looked
+/// pressed — a press was invisible except for the seam. Restore the rule rather
+/// than swapping a gradient on a circle nothing can see.
 pub fn pushbutton_svg(svg: &str, pressed: bool) -> String {
-    if !pressed {
+    if pressed {
         return svg.to_string();
     }
     svg.replacen(
-        "url(#grad-up-pushbutton1)",
-        "url(#grad-down-pushbutton1)",
+        "<circle class=\"button-active-circle\"",
+        "<circle class=\"button-active-circle\" style=\"display: none\"",
         1,
     )
 }

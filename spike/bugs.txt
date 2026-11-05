@@ -1,0 +1,16 @@
+resistor is wide in the tab
+joystick shows gray squares on the tab
+no turning pieces or selection
+cant delete with del key
+no copy paste cut
+the components tab acts weird when resized. a resize should just make the component boxes and pictures scale up not keep them the same just make the grid bigger
+the presets should be grouped like in v0.2
+push buttons pushed state doesnt show when clicked.
+cant move the ir remote
+no visual way to understand if the keypad is being clicked
+no snapping to pins
+cant sleect wires
+no drag select
+cant multi select via shift
+code editor is bad. (we could change it, it just doesnt have many QoL featres)
+no language system

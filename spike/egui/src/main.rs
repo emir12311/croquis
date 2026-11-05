@@ -25,6 +25,7 @@ use croquis_core::netlist::{
 use croquis_core::route::{expand_path, leg_bend, Point as CorePoint};
 use croquis_core::shift_register::{step_shift_register, ShiftState, ShiftWiring};
 use croquis_sim::engine::{self, SimEvent};
+use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod art;
@@ -44,17 +45,47 @@ use scene::{Part, PinRef, Wire};
 
 const GRID: f32 = 24.0;
 const PIN_HIT_RADIUS: f32 = 9.0;
+/// How close a click has to be to a wire, in screen pixels, to select it. A
+/// wire is two and a half pixels wide, so this is the tolerance a hand needs.
+const WIRE_HIT_RADIUS: f32 = 6.0;
 
 /// The shell's own chrome, from v0.2's tokens (`--surface`, `--border`,
 /// `--text-muted`, `--accent`).
 const SURFACE: Color32 = Color32::from_rgb(0x21, 0x21, 0x24);
 const BORDER: Color32 = Color32::from_rgb(0x35, 0x35, 0x3a);
 const MUTED: Color32 = Color32::from_rgb(0xa6, 0xa4, 0xa0);
+const ERROR_TEXT: Color32 = Color32::from_rgb(0xe5, 0x48, 0x4d);
+const WARNING_TEXT: Color32 = Color32::from_rgb(0xd9, 0xa4, 0x41);
+
+/// The sketch editor's id. A diagnostic jump writes the caret through
+/// `TextEditState`, and that needs the widget to keep one id across frames.
+fn sketch_editor_id() -> egui::Id {
+    egui::Id::unique("croquis-sketch-editor")
+}
+
+/// Put the caret where a diagnostic points. `false` means the editor has not
+/// written its state yet (it has not been shown), so there is nothing to move.
+fn place_caret(ctx: &egui::Context, sketch: &str, line: usize, column: usize) -> bool {
+    let index = editor::line_col_to_char_index(sketch, line, column);
+    let Some(mut state) = egui::text_edit::TextEditState::load(ctx, sketch_editor_id()) else {
+        return false;
+    };
+    state
+        .cursor
+        .set_char_range(Some(CCursorRange::one(CCursor::new(index))));
+    state.store(ctx, sketch_editor_id());
+    true
+}
 
 /// The palette's thumbnails: the part itself, small, rasterised once.
 ///
 /// v0.2's palette is a list of pictures, not labels; the art is the same art the
 /// canvas uses, so this is the same drawing at a smaller size.
+/// The raster height palette pictures are baked at. Tiles scale with the panel,
+/// so the art is baked larger than any tile and drawn down: a fixed-size bake
+/// would go soft the first time the panel was widened.
+const PALETTE_ART_HEIGHT: u32 = 128;
+
 fn ensure_palette_textures(
     ctx: &egui::Context,
     textures: &mut HashMap<String, egui::TextureHandle>,
@@ -67,9 +98,12 @@ fn ensure_palette_textures(
         let Some(part) = scene::part_from_kind(def.kind, Pos2::ZERO, key.clone()) else {
             continue;
         };
-        let height = 48.0_f32;
-        let width = (height * part.size.x / part.size.y.max(1.0)).clamp(8.0, 96.0);
-        let Some(image) = art::rasterize(&part.svg, width as u32, height as u32) else {
+        // The picture's own aspect, not a clamped box: rasterising a resistor
+        // into 96×48 squashed it to half its height and it read as a fat bar.
+        let aspect = part.size.x / part.size.y.max(1.0);
+        let height = PALETTE_ART_HEIGHT;
+        let width = ((height as f32 * aspect).round() as u32).clamp(8, 1024);
+        let Some(image) = art::rasterize(&scene::resting_svg(&part), width, height) else {
             continue;
         };
         let texture = ctx.load_texture(key.clone(), image, egui::TextureOptions::LINEAR);
@@ -78,15 +112,18 @@ fn ensure_palette_textures(
 }
 
 /// One palette tile: the part's picture above its name, as v0.2's `.part`.
+///
+/// The tile is as wide as its column, so resizing the panel makes the boxes and
+/// the pictures grow rather than just fitting more of them.
 fn palette_tile(
     ui: &mut egui::Ui,
     textures: &HashMap<String, egui::TextureHandle>,
     key: &str,
     label: &str,
     enabled: bool,
+    tile: Vec2,
 ) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(104.0, 84.0), egui::Sense::click_and_drag());
+    let (rect, response) = ui.allocate_exact_size(tile, egui::Sense::click_and_drag());
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -110,12 +147,14 @@ fn palette_tile(
     // Two bands that cannot meet: the picture above, the name below. Scaling to
     // the tile's height instead let a wide part like the resistor grow into the
     // label, which is what put text on top of the artwork.
-    const PICTURE: f32 = 44.0;
+    const LABEL_BAND: f32 = 30.0;
+    const PAD: f32 = 8.0;
+    let picture = (tile.y - LABEL_BAND - 5.0).max(8.0);
     if let Some(texture) = textures.get(key) {
         let size = texture.size_vec2();
         let band = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + 8.0, rect.top() + 5.0),
-            egui::pos2(rect.right() - 8.0, rect.top() + 5.0 + PICTURE),
+            egui::pos2(rect.left() + PAD, rect.top() + 5.0),
+            egui::pos2(rect.right() - PAD, rect.top() + 5.0 + picture),
         );
         let scale = (band.width() / size.x.max(1.0)).min(band.height() / size.y.max(1.0));
         let drawn = size * scale;
@@ -134,7 +173,7 @@ fn palette_tile(
 
     // The name, under it, centred and wrapped.
     let label_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 4.0, rect.bottom() - 30.0),
+        egui::pos2(rect.left() + 4.0, rect.bottom() - LABEL_BAND),
         egui::pos2(rect.right() - 4.0, rect.bottom() - 4.0),
     );
     let mut child = ui.new_child(
@@ -442,6 +481,82 @@ impl Camera {
     }
 }
 
+/// What is selected: indices into `parts` and `wires`.
+///
+/// v0.2 lets a part and a wire be picked together, so this holds two lists
+/// rather than one choice. The properties strip edits the single selected part.
+#[derive(Default, Clone)]
+struct Selection {
+    parts: Vec<usize>,
+    wires: Vec<usize>,
+}
+
+impl Selection {
+    fn clear(&mut self) {
+        self.parts.clear();
+        self.wires.clear();
+    }
+
+    fn is_empty(&self) -> bool {
+        self.parts.is_empty() && self.wires.is_empty()
+    }
+
+    fn has_part(&self, index: usize) -> bool {
+        self.parts.contains(&index)
+    }
+
+    fn has_wire(&self, index: usize) -> bool {
+        self.wires.contains(&index)
+    }
+
+    /// The part whose fields the properties strip shows: exactly one, or none.
+    fn only_part(&self) -> Option<usize> {
+        match self.parts.as_slice() {
+            [index] if self.wires.is_empty() => Some(*index),
+            _ => None,
+        }
+    }
+
+    fn select_part(&mut self, index: usize) {
+        self.clear();
+        self.parts.push(index);
+    }
+
+    fn select_wire(&mut self, index: usize) {
+        self.clear();
+        self.wires.push(index);
+    }
+
+    fn toggle_part(&mut self, index: usize) {
+        match self.parts.iter().position(|part| *part == index) {
+            Some(at) => {
+                self.parts.remove(at);
+            }
+            None => self.parts.push(index),
+        }
+    }
+
+    fn toggle_wire(&mut self, index: usize) {
+        match self.wires.iter().position(|wire| *wire == index) {
+            Some(at) => {
+                self.wires.remove(at);
+            }
+            None => self.wires.push(index),
+        }
+    }
+}
+
+/// Parts and the wires between them, as they were copied. A wire is kept as a
+/// pair of indices into `parts`, so a paste connects the pasted copies to each
+/// other rather than back to the originals.
+#[derive(Clone, Default)]
+struct Clipboard {
+    parts: Vec<Part>,
+    /// A wire as the indices of the copied parts it joins, the pins at each end,
+    /// and its bends — so a paste is wired to its own copies.
+    wires: Vec<(PinRef, PinRef, Vec<Pos2>)>,
+}
+
 struct Spike {
     camera: Camera,
     parts: Vec<Part>,
@@ -451,7 +566,10 @@ struct Spike {
     /// the wire's last corner, so the rest can be routed around things. v0.2
     /// does the same, and the model already carries `waypoints` per wire.
     wire_waypoints: Vec<Pos2>,
-    selected: Option<usize>,
+    selection: Selection,
+    /// The rubber band a right-drag is drawing, in screen coordinates.
+    marquee: Option<(Pos2, Pos2)>,
+    clipboard: Clipboard,
     dragging: Option<usize>,
     /// A left-drag that started on empty canvas. v0.2 pans by dragging the
     /// background, so the press is claimed here before any part can take it.
@@ -552,9 +670,18 @@ struct Spike {
     avr_pins: HashMap<String, bool>,
     serial: String,
     run_error: Option<String>,
+    /// What the compiler said, one entry per problem. The raw transcript stays
+    /// in `run_error`, because a linker failure has no line to point at.
+    diagnostics: Vec<editor::Diagnostic>,
+    /// A line and column a click asked the editor to put the caret on. Taken by
+    /// the sketch panel on the frame after the click.
+    pending_jump: Option<(usize, usize)>,
     path: Option<PathBuf>,
     file_error: Option<String>,
-    presets: Vec<(String, PathBuf)>,
+    presets: Vec<scene::Preset>,
+    /// Whether File → Presets is open, and which of its tabs is showing.
+    presets_open: bool,
+    preset_group: scene::PresetGroup,
     auto_run: bool,
     fit_requested: bool,
 }
@@ -576,7 +703,9 @@ impl Default for Spike {
             wires,
             wire_start: None,
             wire_waypoints: Vec::new(),
-            selected: None,
+            selection: Selection::default(),
+            marquee: None,
+            clipboard: Clipboard::default(),
             dragging: None,
             panning: false,
             hovered_pin: None,
@@ -632,9 +761,13 @@ impl Default for Spike {
             avr_pins: HashMap::new(),
             serial: String::new(),
             run_error: None,
+            diagnostics: Vec::new(),
+            pending_jump: None,
             path,
             file_error: None,
             presets: scene::presets(),
+            presets_open: false,
+            preset_group: scene::PresetGroup::Basics,
             auto_run,
             fit_requested: true,
         }
@@ -659,6 +792,88 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
         }
     }
     None
+}
+
+/// A wire's route in screen space: the pins either end, the bends between them,
+/// and the orthogonal corners the router adds — the polyline the painter draws.
+fn wire_screen_path(part_list: &[Part], wire: &Wire, camera: Camera, rect: Rect) -> Vec<Pos2> {
+    let a = camera.world_to_screen(rect, part_list[wire.a.0].pin_world(wire.a.1));
+    let b = camera.world_to_screen(rect, part_list[wire.b.0].pin_world(wire.b.1));
+    let mut route = vec![CorePoint::new(a.x as f64, a.y as f64)];
+    route.extend(wire.waypoints.iter().map(|point| {
+        let at = camera.world_to_screen(rect, *point);
+        CorePoint::new(at.x as f64, at.y as f64)
+    }));
+    route.push(CorePoint::new(b.x as f64, b.y as f64));
+    expand_path(&route)
+        .into_iter()
+        .map(|point| Pos2::new(point.x as f32, point.y as f32))
+        .collect()
+}
+
+/// Distance from a point to a line segment.
+fn distance_to_segment(point: Pos2, a: Pos2, b: Pos2) -> f32 {
+    let along = b - a;
+    let length_sq = along.length_sq();
+    if length_sq <= f32::EPSILON {
+        return point.distance(a);
+    }
+    let t = ((point - a).dot(along) / length_sq).clamp(0.0, 1.0);
+    point.distance(a + along * t)
+}
+
+/// The topmost wire within `tolerance` screen pixels of a point.
+fn hit_wire(
+    part_list: &[Part],
+    wires: &[Wire],
+    camera: Camera,
+    rect: Rect,
+    screen: Pos2,
+    tolerance: f32,
+) -> Option<usize> {
+    wires.iter().enumerate().rev().find_map(|(index, wire)| {
+        let path = wire_screen_path(part_list, wire, camera, rect);
+        let near = path
+            .windows(2)
+            .any(|pair| distance_to_segment(screen, pair[0], pair[1]) <= tolerance);
+        near.then_some(index)
+    })
+}
+
+/// Whether a segment crosses a rectangle at all. Liang–Barsky, so a wire drawn
+/// right through the marquee counts even though neither end is inside it.
+fn segment_hits_rect(a: Pos2, b: Pos2, rect: Rect) -> bool {
+    if rect.contains(a) || rect.contains(b) {
+        return true;
+    }
+    let direction = b - a;
+    let (mut t0, mut t1) = (0.0_f32, 1.0_f32);
+    for (p, q) in [
+        (-direction.x, a.x - rect.min.x),
+        (direction.x, rect.max.x - a.x),
+        (-direction.y, a.y - rect.min.y),
+        (direction.y, rect.max.y - a.y),
+    ] {
+        if p.abs() <= f32::EPSILON {
+            if q < 0.0 {
+                return false;
+            }
+        } else {
+            let r = q / p;
+            if p < 0.0 {
+                if r > t1 {
+                    return false;
+                }
+                t0 = t0.max(r);
+            } else {
+                if r < t0 {
+                    return false;
+                }
+                t1 = t1.min(r);
+            }
+        }
+    }
+    true
 }
 
 fn texture_key(
@@ -823,7 +1038,7 @@ impl Spike {
         self.parts.clear();
         self.wires.clear();
         self.sketch.clear();
-        self.selected = None;
+        self.selection.clear();
         self.wire_start = None;
         self.led_states.clear();
         self.led_brightness.clear();
@@ -846,6 +1061,8 @@ impl Spike {
         self.servo_angles.clear();
         self.serial.clear();
         self.run_error = None;
+        self.diagnostics.clear();
+        self.pending_jump = None;
         self.file_error = None;
         self.path = None;
         self.textures.clear();
@@ -875,10 +1092,12 @@ impl Spike {
         self.wires = wires;
         self.sketch = sketch;
         self.path = Some(path);
-        self.selected = None;
+        self.selection.clear();
         self.wire_start = None;
         self.serial.clear();
         self.run_error = None;
+        self.diagnostics.clear();
+        self.pending_jump = None;
         self.file_error = None;
         self.camera = Camera::default();
         let eval =
@@ -1293,6 +1512,10 @@ impl Spike {
                 if let Some((button, command)) = remote::button_at(&self.parts[index], world) {
                     self.remote_hold = Some((index, button));
                     self.send_ir(command);
+                } else {
+                    // Every button has a code; the body is not a button, so a
+                    // press there picks the remote up and moves it.
+                    self.dragging = Some(index);
                 }
             }
             _ => self.dragging = Some(index),
@@ -1323,6 +1546,181 @@ impl Spike {
         self.joystick_start = None;
     }
 
+    /// The keyboard's share of the canvas. Skipped while the sketch has the
+    /// keyboard, so Ctrl+C in the editor copies text and Delete deletes a
+    /// character rather than a part.
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        let (delete, copy, cut, paste) = ctx.input(|input| {
+            (
+                input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace),
+                input.modifiers.command && input.key_pressed(egui::Key::C),
+                input.modifiers.command && input.key_pressed(egui::Key::X),
+                input.modifiers.command && input.key_pressed(egui::Key::V),
+            )
+        });
+        // R turns a quarter clockwise, Shift+R half a turn — v0.2's bindings.
+        let (turn, half_turn) = ctx.input(|input| {
+            (
+                !input.modifiers.command && !input.modifiers.shift && input.key_pressed(egui::Key::R),
+                !input.modifiers.command && input.modifiers.shift && input.key_pressed(egui::Key::R),
+            )
+        });
+        if half_turn {
+            self.rotate_selection(180.0);
+        } else if turn {
+            self.rotate_selection(90.0);
+        }
+        if copy {
+            self.copy_selection();
+        }
+        if cut {
+            self.copy_selection();
+            self.delete_selection();
+        }
+        if delete {
+            self.delete_selection();
+        }
+        if paste {
+            self.paste();
+        }
+    }
+
+    /// Turn the selected parts. The pins move with them, because `pin_world`
+    /// applies the rotation, so the wires follow without being touched.
+    fn rotate_selection(&mut self, degrees: f32) {
+        if self.selection.parts.is_empty() || self.running {
+            return;
+        }
+        for index in self.selection.parts.clone() {
+            if let Some(part) = self.parts.get_mut(index) {
+                part.rotation = (part.rotation + degrees).rem_euclid(360.0);
+            }
+        }
+        self.reevaluate = true;
+    }
+
+    /// Copy the selected parts and the wires among them.
+    fn copy_selection(&mut self) {
+        if self.selection.parts.is_empty() {
+            return;
+        }
+        let mut picked = self.selection.parts.clone();
+        picked.sort_unstable();
+        let clipboard_parts: Vec<Part> = picked
+            .iter()
+            .filter_map(|index| self.parts.get(*index).cloned())
+            .collect();
+        let mut clipboard_wires = Vec::new();
+        for wire in &self.wires {
+            let a = picked.iter().position(|index| *index == wire.a.0);
+            let b = picked.iter().position(|index| *index == wire.b.0);
+            if let (Some(a), Some(b)) = (a, b) {
+                clipboard_wires.push(((a, wire.a.1), (b, wire.b.1), wire.waypoints.clone()));
+            }
+        }
+        self.clipboard = Clipboard {
+            parts: clipboard_parts,
+            wires: clipboard_wires,
+        };
+    }
+
+    /// Paste the clipboard a grid step down and right, and select the copies.
+    fn paste(&mut self) {
+        if self.clipboard.parts.is_empty() || self.running {
+            return;
+        }
+        self.selection.clear();
+        let base = self.parts.len();
+        let offset = Vec2::new(GRID, GRID);
+        for (index, original) in self.clipboard.parts.iter().enumerate() {
+            let mut copy = original.clone();
+            copy.id = format!("{}-{}", original.kind, self.next_id + index);
+            copy.center += offset;
+            self.parts.push(copy);
+            self.selection.parts.push(base + index);
+        }
+        self.next_id += self.clipboard.parts.len();
+        for (a, b, waypoints) in &self.clipboard.wires {
+            self.wires.push(Wire {
+                a: (base + a.0, a.1),
+                b: (base + b.0, b.1),
+                // The bends come along, so a routed wire pastes routed.
+                waypoints: waypoints.iter().map(|point| *point + offset).collect(),
+            });
+        }
+        self.reevaluate = true;
+    }
+
+    /// Delete the selection: the wires outright, the parts and anything wired to
+    /// them. Indices are walked high to low so a removal cannot move the next.
+    fn delete_selection(&mut self) {
+        if self.selection.is_empty() || self.running {
+            return;
+        }
+        let mut wires = self.selection.wires.clone();
+        wires.sort_unstable_by(|a, b| b.cmp(a));
+        for index in wires {
+            if index < self.wires.len() {
+                self.wires.remove(index);
+            }
+        }
+        let mut parts = self.selection.parts.clone();
+        parts.sort_unstable_by(|a, b| b.cmp(a));
+        for index in parts {
+            if index >= self.parts.len() {
+                continue;
+            }
+            self.parts.remove(index);
+            self.wires.retain(|wire| wire.a.0 != index && wire.b.0 != index);
+            for wire in &mut self.wires {
+                if wire.a.0 > index {
+                    wire.a.0 -= 1;
+                }
+                if wire.b.0 > index {
+                    wire.b.0 -= 1;
+                }
+            }
+        }
+        self.selection.clear();
+        self.reevaluate = true;
+    }
+
+    /// Select everything inside a world-space box (the marquee's release), or
+    /// add to the selection when `additive`.
+    fn select_in(&mut self, area: Rect, additive: bool) {
+        if !additive {
+            self.selection.clear();
+        }
+        for index in 0..self.parts.len() {
+            let inside = self.parts[index].bounds().intersects(area);
+            if inside && !self.selection.has_part(index) {
+                self.selection.parts.push(index);
+            }
+        }
+        let mut inside_wires = Vec::new();
+        for (index, wire) in self.wires.iter().enumerate() {
+            let a = self.parts[wire.a.0].pin_world(wire.a.1);
+            let b = self.parts[wire.b.0].pin_world(wire.b.1);
+            let mut points = vec![a];
+            points.extend(wire.waypoints.iter().copied());
+            points.push(b);
+            let inside = points
+                .windows(2)
+                .any(|pair| segment_hits_rect(pair[0], pair[1], area));
+            if inside {
+                inside_wires.push(index);
+            }
+        }
+        for index in inside_wires {
+            if !self.selection.has_wire(index) {
+                self.selection.wires.push(index);
+            }
+        }
+    }
+
     /// End keypad taps whose minimum hold has passed.
     fn tick_input(&mut self) {
         let now = Instant::now();
@@ -1347,6 +1745,7 @@ impl Spike {
 
     fn start_sim(&mut self, ctx: &egui::Context) {
         self.run_error = None;
+        self.diagnostics.clear();
         self.serial.clear();
         self.avr_pins.clear();
         self.last_drives.clear();
@@ -1412,7 +1811,16 @@ impl Spike {
                     Err(error) => self.run_error = Some(error),
                 }
             }
-            Err(error) => self.run_error = Some(error),
+            Err(error) => {
+                // The raw transcript still goes in the run error: a linker
+                // failure has nothing the caret can be put on, and dropping it
+                // would leave the top bar saying only "failed".
+                self.diagnostics = editor::parse_diagnostics(&error);
+                self.run_error = Some(error);
+                // v0.2 shows these in the serial panel, so it opens with them
+                // rather than waiting to be found under the View menu.
+                self.serial_open = true;
+            }
         }
     }
 
@@ -1564,6 +1972,7 @@ impl eframe::App for Spike {
         let ctx = root.ctx().clone();
         ensure_palette_textures(&ctx, &mut self.textures);
         self.poll_engine();
+        self.handle_shortcuts(&ctx);
         if self.auto_run && !self.running {
             self.auto_run = false;
             self.start_sim(&ctx);
@@ -1640,13 +2049,37 @@ impl eframe::App for Spike {
                         if ui.button("Save as…").clicked() {
                             self.save_as();
                         }
-                        ui.menu_button("Presets", |ui| {
-                            for (title, path) in self.presets.clone() {
-                                if ui.button(title).clicked() {
-                                    self.open_path(path, &ctx);
+                        // v0.2 keeps the presets behind a disclosure with three
+                        // tabs, in the same menu rather than a stacked one. The
+                        // word rather than a triangle: the bundled font has no
+                        // triangles and egui's fallback draws them as tofu.
+                        let state = if self.presets_open { "Hide" } else { "Open" };
+                        if ui.button(format!("Presets    {state}")).clicked() {
+                            self.presets_open = !self.presets_open;
+                        }
+                        if self.presets_open {
+                            ui.horizontal(|ui| {
+                                for group in scene::PresetGroup::ALL {
+                                    let active = self.preset_group == group;
+                                    if ui.selectable_label(active, group.label()).clicked() {
+                                        self.preset_group = group;
+                                    }
+                                }
+                            });
+                            let mut choice = None;
+                            for preset in self
+                                .presets
+                                .iter()
+                                .filter(|preset| preset.group == self.preset_group)
+                            {
+                                if ui.button(&preset.title).clicked() {
+                                    choice = Some(preset.path.clone());
                                 }
                             }
-                        });
+                            if let Some(path) = choice {
+                                self.open_path(path, &ctx);
+                            }
+                        }
                         ui.separator();
                         if ui.button("Quit").clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1685,11 +2118,16 @@ impl eframe::App for Spike {
                             ui.colored_label(Color32::from_rgb(0xe5, 0x48, 0x4d), error);
                         }
                         if let Some(error) = &self.run_error {
-                            ui.colored_label(
-                                Color32::from_rgb(0xe5, 0x48, 0x4d),
-                                "Compile/run failed",
-                            );
-                            ui.label(error.lines().next().unwrap_or(""));
+                            // Right to left, so the detail is added first and
+                            // reads to the right of the status word.
+                            match self.diagnostics.first() {
+                                Some(problem) => ui.label(format!(
+                                    "line {}: {}",
+                                    problem.line, problem.message
+                                )),
+                                None => ui.label(error.lines().next().unwrap_or("")),
+                            };
+                            ui.colored_label(ERROR_TEXT, "Compile/run failed");
                         }
                     });
                 });
@@ -1714,14 +2152,22 @@ impl eframe::App for Spike {
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             // v0.2's palette: two columns of picture tiles, the
-                            // name under each, not a column of text buttons.
-                            // As many 104px tiles as fit: a wider panel shows
-                            // more columns instead of a growing gap.
-                            let columns =
-                                (((ui.available_width() + 6.0) / 110.0).floor() as usize).max(1);
+                            // name under each, not a column of text buttons. A
+                            // wider panel makes the tiles larger, which is what
+                            // resizing a palette should do — the grid keeps two
+                            // columns rather than turning into more, smaller
+                            // ones.
+                            const COLUMNS: usize = 2;
+                            const GAP: f32 = 6.0;
+                            let tile_width = ((ui.available_width() - GAP) / COLUMNS as f32)
+                                .clamp(60.0, 400.0);
+                            // v0.2's tile is 104×84; keep that shape as it grows.
+                            let tile_size = Vec2::new(tile_width, (tile_width * 0.81).max(58.0));
                             egui::Grid::new("palette-grid")
-                                .num_columns(columns)
-                                .spacing(Vec2::new(6.0, 6.0))
+                                .num_columns(COLUMNS)
+                                .min_col_width(tile_width)
+                                .max_col_width(tile_width)
+                                .spacing(Vec2::new(GAP, GAP))
                                 .show(ui, |ui| {
                                     for (index, def) in parts().into_iter().enumerate() {
                                         let key =
@@ -1732,6 +2178,7 @@ impl eframe::App for Spike {
                                             &key,
                                             def.label,
                                             !self.running,
+                                            tile_size,
                                         );
                                         if tile.drag_started() && !self.running {
                                             self.palette_drag = Some(def.kind);
@@ -1782,7 +2229,7 @@ impl eframe::App for Spike {
                                                 self.next_id += 1;
                                             }
                                         }
-                                        if (index + 1) % columns == 0 {
+                                        if (index + 1) % COLUMNS == 0 {
                                             ui.end_row();
                                         }
                                     }
@@ -1827,13 +2274,27 @@ impl eframe::App for Spike {
                         .id_salt("sketch-editor")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.add_sized(
+                            let editor = ui.add_sized(
                                 ui.available_size(),
                                 egui::TextEdit::multiline(&mut self.sketch)
+                                    .id(sketch_editor_id())
                                     .code_editor()
                                     .desired_width(f32::INFINITY)
                                     .layouter(&mut layouter),
                             );
+                            // A click on a problem in the serial panel asks for
+                            // the caret here. The state is written after the
+                            // widget has run, so the next frame both shows the
+                            // caret and scrolls it into view.
+                            if let Some((line, column)) = self.pending_jump.take() {
+                                // Written after the widget has run, so the next
+                                // frame shows the caret and scrolls it into view:
+                                // TextEdit scrolls when the range changes.
+                                if place_caret(&ctx, &self.sketch, line, column) {
+                                    editor.request_focus();
+                                    ctx.request_repaint();
+                                }
+                            }
                         });
                 });
 } else {
@@ -1908,7 +2369,7 @@ impl eframe::App for Spike {
                         )
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.horizontal_centered(|ui| match self.selected {
+                            ui.horizontal_centered(|ui| match self.selection.only_part() {
                                 Some(index) if index < self.parts.len() => {
                                     let id = self.parts[index].id.clone();
                                     let warning = self.part_warnings.get(&id).cloned();
@@ -2023,6 +2484,7 @@ impl eframe::App for Spike {
             // not work on a click.
             let pressed_now = ctx.input(|input| input.pointer.primary_pressed());
             let released_now = ctx.input(|input| input.pointer.primary_released());
+            let shift = ctx.input(|input| input.modifiers.shift);
             if pressed_now {
                 if let Some(pos) = ctx.input(|input| input.pointer.interact_pos()) {
                     if rect.contains(pos) {
@@ -2034,17 +2496,69 @@ impl eframe::App for Spike {
                             // press grabbed the part and dragged the Arduino out
                             // from under itself.
                             self.wire_press(pin);
+                        } else if self.wire_start.is_some() {
+                            // Mid-wire, the click branch below pins a bend.
+                            self.panning = false;
+                        } else if let Some(index) = hit_part(&self.parts, world) {
+                            // Shift adds to or takes from the selection; a plain
+                            // press on something already selected keeps the rest,
+                            // so a multi-part drag does not collapse to one part.
+                            if shift {
+                                self.selection.toggle_part(index);
+                            } else if !self.selection.has_part(index) {
+                                self.selection.select_part(index);
+                            }
+                            self.press_control(index, world, pos);
+                            self.panning = false;
+                        } else if let Some(index) = hit_wire(
+                            &self.parts,
+                            &self.wires,
+                            self.camera,
+                            rect,
+                            pos,
+                            WIRE_HIT_RADIUS,
+                        ) {
+                            if shift {
+                                self.selection.toggle_wire(index);
+                            } else {
+                                self.selection.select_wire(index);
+                            }
+                            self.panning = false;
                         } else {
-                            self.selected = hit_part(&self.parts, world);
-                            if let Some(index) = self.selected {
-                                self.press_control(index, world, pos);
+                            if !shift {
+                                self.selection.clear();
                             }
                             // Nothing under the pointer: the press is a canvas
                             // grab, which is how v0.2 pans.
-                            self.panning = self.selected.is_none();
+                            self.panning = true;
                         }
                     }
                 }
+            }
+            // Right-drag is the marquee, as in v0.2; the middle button pans.
+            if ctx.input(|input| input.pointer.secondary_pressed()) {
+                if let Some(pos) = ctx.input(|input| input.pointer.interact_pos()) {
+                    if rect.contains(pos) {
+                        self.marquee = Some((pos, pos));
+                    }
+                }
+            }
+            if let Some((start, _)) = self.marquee {
+                if let Some(now) = pointer {
+                    self.marquee = Some((start, now));
+                }
+            }
+            if ctx.input(|input| input.pointer.secondary_released()) {
+                if let Some((start, end)) = self.marquee.take() {
+                    let area = Rect::from_two_pos(
+                        self.camera.screen_to_world(rect, start),
+                        self.camera.screen_to_world(rect, end),
+                    );
+                    self.select_in(area, shift);
+                }
+            }
+            if response.dragged_by(PointerButton::Middle) {
+                self.camera.pan += response.drag_delta();
             }
             if response.dragged_by(PointerButton::Primary) && self.panning {
                 self.camera.pan += response.drag_delta();
@@ -2054,6 +2568,11 @@ impl eframe::App for Spike {
                     // Four pixels of travel is a drag; less than that is a click
                     // whose hand wobbled.
                     if pointer.is_some_and(|now| now.distance(from) > 4.0) {
+                        // Dragging one part of a selection drags all of it, the
+                        // way v0.2 moves the whole pick.
+                        if !self.selection.has_part(index) {
+                            self.selection.select_part(index);
+                        }
                         self.dragging = Some(index);
                         self.press_drag = None;
                     }
@@ -2087,8 +2606,13 @@ impl eframe::App for Spike {
                     if let Some(world) = world_pointer {
                         self.drag_knob(index, world);
                     }
-                } else if let Some(index) = self.dragging {
-                    self.parts[index].center += response.drag_delta() / self.camera.zoom;
+                } else if self.dragging.is_some() {
+                    let delta = response.drag_delta() / self.camera.zoom;
+                    for index in self.selection.parts.clone() {
+                        if let Some(part) = self.parts.get_mut(index) {
+                            part.center += delta;
+                        }
+                    }
                 }
             }
             // The canvas is a grab surface: an open hand over empty space, a
@@ -2116,8 +2640,21 @@ impl eframe::App for Spike {
                         // Mid-wire, a click off a pin pins a bend where it
                         // landed, which is how a wire is routed around things.
                         self.wire_bend(world);
-                    } else {
-                        self.selected = hit_part(&self.parts, world);
+                    } else if let Some(index) = hit_part(&self.parts, world) {
+                        if !self.selection.has_part(index) {
+                            self.selection.select_part(index);
+                        }
+                    } else if let Some(pos) = pointer {
+                        if let Some(index) = hit_wire(
+                            &self.parts,
+                            &self.wires,
+                            self.camera,
+                            rect,
+                            pos,
+                            WIRE_HIT_RADIUS,
+                        ) {
+                            self.selection.select_wire(index);
+                        }
                     }
                 }
             }
@@ -2132,6 +2669,48 @@ impl eframe::App for Spike {
                         self.serial_open = false;
                     }
                 });
+                // The compiler's problems, each one clickable: v0.2 puts the
+                // caret on the line a clicked error names, so this does too.
+                if !self.diagnostics.is_empty() {
+                    let mut jump = None;
+                    egui::ScrollArea::vertical()
+                        .id_salt("compile-problems")
+                        .max_height(96.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            for problem in &self.diagnostics {
+                                let colour = match problem.severity {
+                                    editor::Severity::Error => ERROR_TEXT,
+                                    editor::Severity::Warning => WARNING_TEXT,
+                                };
+                                let text = format!(
+                                    "{}:{}  {}",
+                                    problem.line, problem.column, problem.message
+                                );
+                                let row = egui::RichText::new(text).monospace().color(colour);
+                                if problem.in_sketch() {
+                                    let clicked = ui
+                                        .add(egui::Label::new(row).sense(Sense::click()))
+                                        .on_hover_text("Put the caret on this line")
+                                        .clicked();
+                                    if clicked {
+                                        jump = Some((problem.line, problem.column));
+                                    }
+                                } else {
+                                    // A library's line is not in this editor, so
+                                    // the row says what it is and does nothing.
+                                    ui.label(row);
+                                }
+                            }
+                        });
+                    if let Some((line, column)) = jump {
+                        self.pending_jump = Some((line, column));
+                        self.sketch_open = true;
+                        ctx.request_repaint();
+                    }
+                    ui.separator();
+                }
                 egui::ScrollArea::vertical()
                     .id_salt("serial-output")
                     .auto_shrink([false, false])
@@ -2163,7 +2742,7 @@ impl eframe::App for Spike {
                     rect,
                     self.camera,
                     part,
-                    self.selected == Some(index),
+                    self.selection.has_part(index),
                     self.hovered_pin
                         .filter(|(part_index, _)| *part_index == index),
                     self.textures.get(&texture_key(
@@ -2212,9 +2791,28 @@ impl eframe::App for Spike {
                         );
                     }
                 }
+                if part.kind == "membrane-keypad" {
+                    // The element shows nothing for a tap, so a held key gets a
+                    // mark of its own — otherwise a click is invisible.
+                    if let Some(Some(key)) = self.keypad_keys.get(&part.id) {
+                        if let Some(area) = keypad_key_world(part, *key) {
+                            let min = self.camera.world_to_screen(rect, area.min);
+                            let max = self.camera.world_to_screen(rect, area.max);
+                            Turned::new(
+                                &painter,
+                                part,
+                                self.camera.world_to_screen(rect, part.center),
+                            )
+                            .rect_filled(
+                                Rect::from_min_max(min, max),
+                                2.0,
+                                Color32::from_rgba_unmultiplied(217, 164, 65, 110),
+                            );
+                        }
+                    }
+                }
                 if part.kind == "lcd1602" {
-                    if let Some(state) = self.lcd_states.get(&part.id) {
-                        draw_lcd_text(
+                    if let Some(state) = self.lcd_states.get(&part.id) {                        draw_lcd_text(
                             &painter,
                             rect,
                             self.camera,
@@ -2226,7 +2824,7 @@ impl eframe::App for Spike {
                 }
             }
 
-            for wire in &self.wires {
+            for (index, wire) in self.wires.iter().enumerate() {
                 let a = self
                     .camera
                     .world_to_screen(rect, self.parts[wire.a.0].pin_world(wire.a.1));
@@ -2242,6 +2840,13 @@ impl eframe::App for Spike {
                     CorePoint::new(at.x as f64, at.y as f64)
                 }));
                 route.push(CorePoint::new(b.x as f64, b.y as f64));
+                let selected = self.selection.has_wire(index);
+                let colour = if selected {
+                    Color32::from_rgb(217, 164, 65)
+                } else {
+                    Color32::from_rgb(108, 203, 123)
+                };
+                let thickness = if selected { 3.5 } else { 2.5 };
                 let line = expand_path(&route);
                 for pair in line.windows(2) {
                     painter.line_segment(
@@ -2249,9 +2854,25 @@ impl eframe::App for Spike {
                             Pos2::new(pair[0].x as f32, pair[0].y as f32),
                             Pos2::new(pair[1].x as f32, pair[1].y as f32),
                         ],
-                        Stroke::new(2.5, Color32::from_rgb(108, 203, 123)),
+                        Stroke::new(thickness, colour),
                     );
                 }
+            }
+
+            // The marquee is drawn last, over the circuit it is selecting.
+            if let Some((start, end)) = self.marquee {
+                let band = Rect::from_two_pos(start, end);
+                painter.rect_filled(
+                    band,
+                    0.0,
+                    Color32::from_rgba_unmultiplied(217, 164, 65, 26),
+                );
+                painter.rect_stroke(
+                    band,
+                    0.0,
+                    Stroke::new(1.0, Color32::from_rgb(217, 164, 65)),
+                    egui::StrokeKind::Inside,
+                );
             }
 
             if let (Some(start), Some(pointer)) = (self.wire_start, pointer) {
@@ -2340,7 +2961,118 @@ fn segment_color(color: &str) -> Color32 {
     }
 }
 
-fn draw_segments(painter: &egui::Painter, screen: Rect, part: &Part, values: &[u8]) {
+/// A painter for everything drawn on top of a part's sprite: geometry is given
+/// in the part's own unrotated frame and mapped through its quarter turn.
+///
+/// egui has no canvas transform, so a turned part's sprite is a rotated mesh and
+/// its overlays go through here. Only quarter turns exist, which keeps a turned
+/// rectangle a rectangle.
+struct Turned<'a> {
+    painter: &'a egui::Painter,
+    centre: Pos2,
+    radians: f32,
+}
+
+impl<'a> Turned<'a> {
+    fn new(painter: &'a egui::Painter, part: &Part, centre: Pos2) -> Self {
+        Self {
+            painter,
+            centre,
+            radians: part.rotation.to_radians(),
+        }
+    }
+
+    /// For things a turn cannot change — the centre of a disc, a radial glow.
+    fn painter(&self) -> &egui::Painter {
+        self.painter
+    }
+
+    fn point(&self, point: Pos2) -> Pos2 {
+        if self.radians == 0.0 {
+            return point;
+        }
+        let (sin, cos) = self.radians.sin_cos();
+        let offset = point - self.centre;
+        self.centre
+            + Vec2::new(
+                offset.x * cos - offset.y * sin,
+                offset.x * sin + offset.y * cos,
+            )
+    }
+
+    fn rect(&self, rect: Rect) -> Rect {
+        Rect::from_two_pos(self.point(rect.min), self.point(rect.max))
+    }
+
+    fn rect_filled(&self, rect: Rect, rounding: f32, colour: Color32) {
+        self.painter.rect_filled(self.rect(rect), rounding, colour);
+    }
+
+    fn circle_filled(&self, centre: Pos2, radius: f32, colour: Color32) {
+        self.painter.circle_filled(self.point(centre), radius, colour);
+    }
+
+    fn circle_stroke(&self, centre: Pos2, radius: f32, stroke: Stroke) {
+        self.painter.circle_stroke(self.point(centre), radius, stroke);
+    }
+
+    fn convex_polygon(&self, points: Vec<Pos2>, fill: Color32, stroke: Stroke) {
+        let points = points.into_iter().map(|point| self.point(point)).collect();
+        self.painter
+            .add(egui::Shape::convex_polygon(points, fill, stroke));
+    }
+
+    fn mesh(&self, mut mesh: egui::Mesh) {
+        for vertex in &mut mesh.vertices {
+            vertex.pos = self.point(vertex.pos);
+        }
+        self.painter.add(egui::Shape::mesh(mesh));
+    }
+
+    fn image(&self, texture: &egui::TextureHandle, rect: Rect, uv: Rect, tint: Color32) {
+        if self.radians == 0.0 {
+            self.painter.image(texture.id(), rect, uv, tint);
+            return;
+        }
+        let mut mesh = egui::Mesh::with_texture(texture.id());
+        let corners = [
+            rect.left_top(),
+            rect.right_top(),
+            rect.right_bottom(),
+            rect.left_bottom(),
+        ];
+        let uvs = [
+            uv.left_top(),
+            uv.right_top(),
+            uv.right_bottom(),
+            uv.left_bottom(),
+        ];
+        for (corner, uv) in corners.into_iter().zip(uvs) {
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: self.point(corner),
+                uv,
+                color: tint,
+            });
+        }
+        mesh.add_triangle(0, 1, 2);
+        mesh.add_triangle(0, 2, 3);
+        self.painter.add(egui::Shape::mesh(mesh));
+    }
+
+    fn text(&self, pos: Pos2, anchor: Align2, text: &str, font: FontId, colour: Color32) {
+        if self.radians == 0.0 {
+            self.painter.text(pos, anchor, text, font, colour);
+            return;
+        }
+        let galley = self.painter.layout_no_wrap(text.to_owned(), font, colour);
+        let at = anchor.anchor_size(self.point(pos), galley.size());
+        let mut shape = egui::epaint::TextShape::new(at.min, galley, colour);
+        shape.angle = self.radians;
+        self.painter.add(shape);
+    }
+}
+
+fn draw_segments(painter: &Turned, screen: Rect, part: &Part, values: &[u8]) {
     const DIGITS: [[(f32, f32); 6]; 7] = [
         [
             (2.0, 0.0),
@@ -2425,11 +3157,7 @@ fn draw_segments(painter: &egui::Painter, screen: Rect, part: &Part, values: &[u
                 continue;
             }
             let points = shape.iter().map(|(x, y)| point(*x, *y)).collect();
-            painter.add(egui::Shape::convex_polygon(
-                points,
-                color,
-                egui::Stroke::NONE,
-            ));
+            painter.convex_polygon(points, color, egui::Stroke::NONE);
         }
         if bits.get(7).copied().unwrap_or(0) != 0 {
             let center = egui::pos2(
@@ -2519,7 +3247,7 @@ const RGB_VIEW_Y: f32 = -10.0;
 /// This has to be drawn rather than rasterised: one resvg pass over the
 /// element's four Gaussian filters costs about a third of a second here, and
 /// the state changes as soon as PWM duty drifts.
-fn draw_rgb_glow(painter: &egui::Painter, screen: Rect, state: RgbState) {
+fn draw_rgb_glow(paint: &Turned, screen: Rect, state: RgbState) {
     // The asset is fitted into the part rect with `preserveAspectRatio="meet"`,
     // so the glow uses the same mapping to land on the drawn LED.
     let unit = (screen.width() / RGB_VIEW_WIDTH).min(screen.height() / RGB_VIEW_HEIGHT);
@@ -2537,7 +3265,7 @@ fn draw_rgb_glow(painter: &egui::Painter, screen: Rect, state: RgbState) {
         } else {
             disc_bands(glow.radius * unit, glow.sigma * unit, glow.colour, glow.alpha)
         };
-        soft_radial(painter, at(glow.x, glow.y), &bands);
+        soft_radial(paint.painter(), paint.point(at(glow.x, glow.y)), &bands);
     }
 }
 
@@ -2640,21 +3368,21 @@ fn smoothstep(t: f32) -> f32 {
 /// not resolve the custom property that drives it.
 fn draw_pot_tick(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part) {
     const VIEW_WIDTH: f32 = 20.0;
-    let bounds = part.bounds();
+    let bounds = part.rect();
     let screen = Rect::from_min_max(
         camera.world_to_screen(rect, bounds.min),
         camera.world_to_screen(rect, bounds.max),
     );
     let unit = screen.width() / VIEW_WIDTH;
     let corners = knobs::pot_tick(attr_number(part, "value", 0.0));
-    painter.add(egui::Shape::convex_polygon(
+    Turned::new(painter, part, screen.center()).convex_polygon(
         corners
             .iter()
             .map(|corner| screen.min + Vec2::new(corner.0, corner.1) * unit)
             .collect(),
         Color32::from_rgb(0x1a, 0x1a, 0x1a),
         Stroke::NONE,
-    ));
+    );
 }
 
 /// The slide pot's tip, at the position its value asks for.
@@ -2663,7 +3391,7 @@ fn draw_pot_tick(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Par
 /// baking it per value costs ~36 ms a state.
 fn draw_slide_tip(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part) {
     const VIEW_WIDTH: f32 = 55.0;
-    let bounds = part.bounds();
+    let bounds = part.rect();
     let screen = Rect::from_min_max(
         camera.world_to_screen(rect, bounds.min),
         camera.world_to_screen(rect, bounds.max),
@@ -2696,19 +3424,16 @@ fn draw_slide_tip(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Pa
     mesh.add_triangle(0, 3, 2);
     mesh.add_triangle(2, 3, 5);
     mesh.add_triangle(2, 5, 4);
-    painter.add(egui::Shape::mesh(mesh));
+    let paint = Turned::new(painter, part, screen.center());
+    paint.mesh(mesh);
 
     // The light strip down its right side, and the dark band across it.
-    painter.rect_filled(
+    paint.rect_filled(
         quad(22.2, 0.0, 22.8, 19.0),
         0.0,
         Color32::from_rgb(0xef, 0xef, 0xef),
     );
-    painter.rect_filled(
-        quad(19.75, 8.6, 25.25, 10.4),
-        0.0,
-        dark,
-    );
+    paint.rect_filled(quad(19.75, 8.6, 25.25, 10.4), 0.0, dark);
 }
 
 /// The joystick's ball, drawn where its axes say it is.
@@ -2719,7 +3444,7 @@ fn draw_slide_tip(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Pa
 fn draw_joystick_knob(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part) {
     const VIEW_WIDTH: f32 = 27.2;
     const REST: Vec2 = Vec2::new(13.6, 13.6);
-    let bounds = part.bounds();
+    let bounds = part.rect();
     let screen = Rect::from_min_max(
         camera.world_to_screen(rect, bounds.min),
         camera.world_to_screen(rect, bounds.max),
@@ -2735,8 +3460,9 @@ fn draw_joystick_knob(painter: &egui::Painter, rect: Rect, camera: Camera, part:
     let offset = Vec2::new((axis("x") - 50.0) / 50.0, -(axis("y") - 50.0) / 50.0) * 2.5;
     let centre = screen.min + (REST + offset) * unit;
     let radius = 10.6 * unit;
-    painter.circle_filled(centre, radius, Color32::from_rgb(0x22, 0x22, 0x22));
-    painter.circle_stroke(
+    let paint = Turned::new(painter, part, screen.center());
+    paint.circle_filled(centre, radius, Color32::from_rgb(0x22, 0x22, 0x22));
+    paint.circle_stroke(
         centre,
         radius,
         Stroke::new(1.2 * unit, Color32::from_rgb(0x77, 0x77, 0x77)),
@@ -2772,11 +3498,12 @@ fn draw_lcd_text(
     if !state.display_on {
         return;
     }
-    let bounds = part.bounds();
+    let bounds = part.rect();
     let screen = Rect::from_min_max(
         camera.world_to_screen(rect, bounds.min),
         camera.world_to_screen(rect, bounds.max),
     );
+    let paint = Turned::new(painter, part, screen.center());
     let unit = screen.width() / LCD_VIEW.x;
     let at = |x: f32, y: f32| screen.min + Vec2::new(x, y) * unit;
     let dwell = |column: f32, row: f32| LCD_ORIGIN + Vec2::new(column, row) * Vec2::new(LCD_CELL.x, LCD_CELL.y);
@@ -2805,7 +3532,7 @@ fn draw_lcd_text(
                     LCD_DOT_SIZE.x + LCD_DOT.x * (run - 1) as f32,
                     LCD_DOT_SIZE.y,
                 ) * unit;
-                painter.rect_filled(Rect::from_min_size(origin, size), 0.0, Color32::WHITE);
+                paint.rect_filled(Rect::from_min_size(origin, size), 0.0, Color32::WHITE);
                 column += run;
             }
         }
@@ -2818,12 +3545,12 @@ fn draw_lcd_text(
     if state.blink_on && (now % 1.0) < 0.5 {
         let origin = at(cell.x, cell.y);
         let size = Vec2::new(2.95, 5.55) * unit;
-        painter.rect_filled(Rect::from_min_size(origin, size), 0.0, Color32::WHITE);
+        paint.rect_filled(Rect::from_min_size(origin, size), 0.0, Color32::WHITE);
     }
     if state.cursor_on {
         let origin = at(cell.x, cell.y + LCD_DOT.y * 7.0);
         let size = Vec2::new(2.95, 0.65) * unit;
-        painter.rect_filled(Rect::from_min_size(origin, size), 0.0, Color32::WHITE);
+        paint.rect_filled(Rect::from_min_size(origin, size), 0.0, Color32::WHITE);
     }
 }
 
@@ -2846,6 +3573,17 @@ const KEY_HOLD: std::time::Duration = std::time::Duration::from_millis(80);
 const KEY_HOLD_FRAMES: u32 = 3;
 
 /// The keypad key under a canvas point, if the point is on one.
+/// Where a key's face sits, in world coordinates — the inverse of
+/// `keypad_key`, used to mark the key a tap landed on.
+fn keypad_key_world(part: &Part, key: KeyPosition) -> Option<Rect> {
+    let bounds = part.bounds();
+    let unit = bounds.width() / KEYPAD_VIEW.x;
+    let x = *KEYPAD_COLUMNS.get(key.column)?;
+    let y = *KEYPAD_ROWS.get(key.row)?;
+    let min = bounds.min + Vec2::new(x, y) * unit;
+    Some(Rect::from_min_size(min, KEYPAD_KEY * unit))
+}
+
 fn keypad_key(part: &Part, world: Pos2) -> Option<KeyPosition> {
     let bounds = part.bounds();
     let local = (world - bounds.min) / (bounds.width() / KEYPAD_VIEW.x);
@@ -2909,10 +3647,12 @@ fn shows_active(
 
 /// The oracle's `drawActive`: a five-unit dot just inside the top-left corner.
 fn draw_active_dot(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part) {
-    let centre = camera.world_to_screen(rect, part.bounds().min + Vec2::new(4.0, 4.0));
+    // The dot sits in the part's own top-left corner, so it turns with it.
+    let paint = Turned::new(painter, part, camera.world_to_screen(rect, part.center));
+    let centre = camera.world_to_screen(rect, part.rect().min + Vec2::new(4.0, 4.0));
     let radius = 5.0 * camera.zoom;
-    painter.circle_filled(centre, radius, Color32::from_rgb(108, 203, 123));
-    painter.circle_stroke(
+    paint.circle_filled(centre, radius, Color32::from_rgb(108, 203, 123));
+    paint.circle_stroke(
         centre,
         radius,
         Stroke::new(1.0, Color32::from_rgb(26, 26, 28)),
@@ -2930,28 +3670,37 @@ fn draw_part(
     rgb: Option<RgbState>,
     segments: Option<&[u8]>,
 ) {
-    let min = camera.world_to_screen(rect, part.bounds().min);
-    let max = camera.world_to_screen(rect, part.bounds().max);
-    let screen = Rect::from_min_max(min, max);
+    let centre = camera.world_to_screen(rect, part.center);
+    let paint = Turned::new(painter, part, centre);
+    // The sprite is measured in the part's own frame and turned into place;
+    // every overlay below follows the same turn.
+    let unrotated = part.rect();
+    let screen = Rect::from_min_max(
+        camera.world_to_screen(rect, unrotated.min),
+        camera.world_to_screen(rect, unrotated.max),
+    );
     if let Some(texture) = texture {
-        painter.image(
-            texture.id(),
+        paint.image(
+            texture,
             screen,
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             Color32::WHITE,
         );
     } else {
-        painter.rect_filled(screen, 0.0, part.color);
+        paint.rect_filled(screen, 0.0, part.color);
     }
     if let Some(state) = rgb {
-        draw_rgb_glow(painter, screen, state);
+        draw_rgb_glow(&paint, screen, state);
     }
     if let Some(values) = segments {
-        draw_segments(painter, screen, part, values);
+        draw_segments(&paint, screen, part, values);
     }
     if selected {
+        // The box the part takes up on screen is the turned one.
+        let min = camera.world_to_screen(rect, part.bounds().min);
+        let max = camera.world_to_screen(rect, part.bounds().max);
         painter.rect_stroke(
-            screen,
+            Rect::from_min_max(min, max),
             0.0,
             Stroke::new(1.5, Color32::from_rgb(217, 164, 65)),
             egui::StrokeKind::Outside,
@@ -2974,7 +3723,7 @@ fn draw_part(
             Stroke::new(1.0, Color32::from_rgb(26, 26, 28)),
             egui::StrokeKind::Inside,
         );
-        painter.text(
+        paint.text(
             p + Vec2::new(8.0, -8.0),
             Align2::LEFT_BOTTOM,
             &pin.name,
@@ -3093,10 +3842,356 @@ mod tests {
     }
 
     #[test]
+    fn presets_are_grouped_into_v0_2s_three_tabs() {
+        use scene::PresetGroup;
+
+        let presets = scene::presets();
+        let group = |id: &str| {
+            presets
+                .iter()
+                .find(|preset| preset.id == id)
+                .map(|preset| preset.group)
+        };
+        assert_eq!(group("blink"), Some(PresetGroup::Basics));
+        assert_eq!(group("slide-pot"), Some(PresetGroup::Basics));
+        assert_eq!(group("photoresistor"), Some(PresetGroup::Sensors));
+        assert_eq!(group("ultrasonic"), Some(PresetGroup::Sensors));
+        assert_eq!(group("lcd"), Some(PresetGroup::Outputs));
+        assert_eq!(group("shift-register"), Some(PresetGroup::Outputs));
+        // A preset hidden behind no tab is a preset nobody can open.
+        let listed: usize = PresetGroup::ALL
+            .iter()
+            .map(|group| presets.iter().filter(|preset| preset.group == *group).count())
+            .sum();
+        assert_eq!(listed, presets.len());
+        assert!(
+            PresetGroup::ALL
+                .iter()
+                .all(|group| presets.iter().any(|preset| preset.group == *group)),
+            "every tab has to hold something"
+        );
+        // Id order, the teaching order v0.2 lists them in.
+        let ids: Vec<&str> = presets.iter().map(|preset| preset.id.as_str()).collect();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        assert_eq!(ids, sorted);
+    }
+
+    #[test]
+    fn a_palette_picture_keeps_the_parts_aspect() {
+        // The resistor is 5.2:1. Rasterising it into a 2:1 box squashed it into
+        // the fat bar the tile used to show.
+        let resistor = scene::part_from_kind(
+            croquis_core::catalogue::PartKind::Resistor,
+            Pos2::ZERO,
+            "r".into(),
+        )
+        .expect("the catalogue has a resistor");
+        let aspect = resistor.size.x / resistor.size.y;
+        assert!(
+            (aspect - 5.22).abs() < 0.05,
+            "the manifest's resistor is wide: {aspect}"
+        );
+        let height = PALETTE_ART_HEIGHT;
+        let width = ((height as f32 * aspect).round() as u32).clamp(8, 1024);
+        assert!(
+            (width as f32 / height as f32 - aspect).abs() < 0.05,
+            "the picture is baked at the part's own aspect"
+        );
+    }
+
+    #[test]
+    fn a_quarter_turn_swaps_the_box_and_carries_the_pins() {
+        let mut spike = Spike::default();
+        let led = spike
+            .parts
+            .iter()
+            .position(|part| part.kind == "led")
+            .expect("blink has an LED");
+        let centre = spike.parts[led].center;
+        let size = spike.parts[led].size;
+        let before = spike.parts[led].pin_world(0) - centre;
+
+        spike.selection.select_part(led);
+        spike.rotate_selection(90.0);
+
+        let part = &spike.parts[led];
+        assert_eq!(part.rotation, 90.0);
+        assert_eq!(part.rotated_size(), Vec2::new(size.y, size.x));
+        assert_eq!(part.bounds().center(), centre);
+        let after = part.pin_world(0) - centre;
+        assert!((after.length() - before.length()).abs() < 0.01);
+        // A quarter turn clockwise sends "up" to "right".
+        assert!(
+            (after - Vec2::new(-before.y, before.x)).length() < 0.01,
+            "the pin turned with the part: {before:?} -> {after:?}"
+        );
+    }
+
+    #[test]
+    fn four_quarter_turns_come_back_where_they_started() {
+        let mut spike = Spike::default();
+        spike.selection.parts = vec![0, 1, 2];
+        let before: Vec<Pos2> = (0..spike.parts.len())
+            .map(|index| spike.parts[index].pin_world(0))
+            .collect();
+        for _ in 0..4 {
+            spike.rotate_selection(90.0);
+        }
+        for index in 0..spike.parts.len() {
+            assert_eq!(spike.parts[index].rotation, 0.0);
+            assert!((spike.parts[index].pin_world(0) - before[index]).length() < 0.01);
+        }
+    }
+
+    #[test]
+    fn a_turn_survives_a_save_and_a_load() {
+        let mut spike = Spike::default();
+        spike.selection.parts = vec![0, 1, 2];
+        spike.rotate_selection(90.0);
+        let path = std::env::temp_dir().join("croquis-rotate-roundtrip.json");
+        scene::save_diagram_file(&path, &spike.parts, &spike.wires, &spike.sketch).expect("save");
+
+        let (parts, wires, _sketch) = scene::load_diagram_file(&path);
+        assert_eq!(parts.len(), spike.parts.len());
+        assert_eq!(wires.len(), spike.wires.len());
+        for (before, after) in spike.parts.iter().zip(parts.iter()) {
+            assert_eq!(after.rotation, 90.0, "{} lost its turn", before.id);
+            assert_eq!(after.center, before.center);
+            for index in 0..before.pins.len() {
+                assert!(
+                    (after.pin_world(index) - before.pin_world(index)).length() < 0.01,
+                    "{} pin {} moved",
+                    before.id,
+                    index
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn deleting_a_parts_takes_its_wires_and_leaves_the_rest_alone() {
+        // Blink: the Uno, a resistor and an LED, wired end to end.
+        let mut spike = Spike::default();
+        assert_eq!(spike.parts.len(), 3);
+        assert_eq!(spike.wires.len(), 3);
+
+        // The resistor in the middle: its two wires go, the LED–Uno wire stays.
+        spike.selection.select_part(1);
+        spike.delete_selection();
+
+        assert_eq!(spike.parts.len(), 2);
+        assert_eq!(
+            spike.wires.len(),
+            1,
+            "only the wire that joins the two survivors is left"
+        );
+        assert!(spike.selection.is_empty());
+        for wire in &spike.wires {
+            assert!(wire.a.0 < spike.parts.len() && wire.b.0 < spike.parts.len());
+        }
+    }
+
+    #[test]
+    fn deleting_one_of_two_parts_keeps_the_others_wires_indexed() {
+        // Four parts, wired 0-1, 1-2, 2-3: removing part 1 must drop the first
+        // two wires and pull the third's indices down with it.
+        let mut spike = Spike::default();
+        let kinds = [
+            croquis_core::catalogue::PartKind::Resistor,
+            croquis_core::catalogue::PartKind::Resistor,
+        ];
+        for (offset, kind) in kinds.into_iter().enumerate() {
+            let id = format!("extra-{offset}");
+            let mut part = scene::part_from_kind(kind, Pos2::new(600.0 + 40.0 * offset as f32, 600.0), id)
+                .expect("resistor");
+            part.pins = vec![part.pins[0].clone(), part.pins[1].clone()];
+            spike.parts.push(part);
+        }
+        spike.wires.push(Wire {
+            a: (3, 1),
+            b: (4, 0),
+            waypoints: Vec::new(),
+        });
+
+        spike.selection.select_part(1);
+        spike.delete_selection();
+
+        assert_eq!(spike.parts.len(), 4);
+        let wire = spike.wires.last().expect("the far wire survives");
+        assert!(
+            wire.a.0 < spike.parts.len() && wire.b.0 < spike.parts.len(),
+            "indices above the hole move down: {} -> {}",
+            wire.a.0,
+            wire.b.0
+        );
+        assert_eq!(wire.a.0, 2);
+        assert_eq!(wire.b.0, 3);
+    }
+
+    #[test]
+    fn copy_and_paste_copies_the_wiring_between_the_parts() {
+        let mut spike = Spike::default();
+        spike.selection.parts = vec![0, 1, 2];
+        spike.copy_selection();
+        spike.paste();
+
+        assert_eq!(spike.parts.len(), 6);
+        assert_eq!(spike.wires.len(), 6, "the pasted parts are wired to each other");
+        assert_eq!(spike.selection.parts, vec![3, 4, 5]);
+        // The pasted copies are new parts, offset by a grid step, not the same
+        // parts moved.
+        assert_ne!(spike.parts[3].id, spike.parts[0].id);
+        assert_eq!(
+            spike.parts[3].center - spike.parts[0].center,
+            Vec2::new(GRID, GRID)
+        );
+        for wire in &spike.wires[3..] {
+            assert!(
+                wire.a.0 >= 3 && wire.b.0 >= 3,
+                "wired to the copies: {} -> {}",
+                wire.a.0,
+                wire.b.0
+            );
+        }
+    }
+
+    #[test]
+    fn a_pasted_wire_keeps_its_bends() {
+        let mut spike = Spike::default();
+        spike.wires[0].waypoints = vec![Pos2::new(80.0, 90.0)];
+        spike.selection.parts = vec![0, 1, 2];
+        spike.copy_selection();
+        spike.paste();
+        let pasted = &spike.wires[3];
+        assert_eq!(pasted.waypoints.len(), 1);
+        assert_eq!(
+            pasted.waypoints[0],
+            Pos2::new(80.0, 90.0) + Vec2::new(GRID, GRID)
+        );
+    }
+
+    #[test]
+    fn the_marquee_selects_the_parts_it_covers() {
+        let mut spike = Spike::default();
+        let led = spike
+            .parts
+            .iter()
+            .position(|part| part.kind == "led")
+            .expect("blink has an LED");
+        let area = spike.parts[led].bounds();
+        spike.select_in(area, false);
+        assert!(spike.selection.has_part(led));
+        assert_eq!(spike.selection.parts.len(), 1, "only what it covers");
+
+        // Shift-marquee adds rather than replaces.
+        let uno = spike
+            .parts
+            .iter()
+            .position(|part| part.kind == "uno")
+            .expect("blink has an Uno");
+        spike.select_in(spike.parts[uno].bounds(), true);
+        assert!(spike.selection.has_part(led) && spike.selection.has_part(uno));
+    }
+
+    #[test]
+    fn a_wire_can_be_clicked_and_a_point_away_from_it_cannot() {
+        let spike = Spike::default();
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let path = wire_screen_path(&spike.parts, &spike.wires[0], camera, rect);
+        let middle = path[0] + (path[1] - path[0]) * 0.5;
+
+        assert_eq!(
+            hit_wire(&spike.parts, &spike.wires, camera, rect, middle, WIRE_HIT_RADIUS),
+            Some(0),
+            "a click on the wire selects it"
+        );
+        assert_eq!(
+            hit_wire(
+                &spike.parts,
+                &spike.wires,
+                camera,
+                rect,
+                middle + Vec2::new(0.0, 200.0),
+                WIRE_HIT_RADIUS
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_marquee_catches_a_wire_that_crosses_it() {
+        let spike = Spike::default();
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let path = wire_screen_path(&spike.parts, &spike.wires[0], camera, rect);
+        // A world box that holds the middle of the wire and neither end.
+        let middle = (path[0] + (path[1] - path[0]) * 0.5 - rect.center()).to_pos2();
+        let area = Rect::from_center_size(middle, Vec2::splat(4.0));
+        assert!(segment_hits_rect(
+            (path[0] - rect.center()).to_pos2(),
+            (path[1] - rect.center()).to_pos2(),
+            area
+        ));
+        assert!(!segment_hits_rect(
+            Pos2::new(-500.0, -500.0),
+            Pos2::new(-400.0, -500.0),
+            area
+        ));
+    }
+
+    #[test]
+    fn the_keypad_mark_covers_the_key_the_tap_landed_on() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/keypad.json");
+        let (parts, _wires, _sketch) = scene::load_diagram_file(&root);
+        let pad = parts
+            .iter()
+            .find(|part| part.kind == "membrane-keypad")
+            .expect("the preset has a keypad");
+        for row in 0..4 {
+            for column in 0..4 {
+                let key = KeyPosition { row, column };
+                let area = keypad_key_world(pad, key).expect("a key has a face");
+                assert_eq!(
+                    keypad_key(pad, area.center()),
+                    Some(key),
+                    "the mark and the hit-test disagree at {row},{column}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_joysticks_invisible_hit_areas_are_not_in_its_palette_art() {
+        let joystick = scene::part_from_kind(
+            croquis_core::catalogue::PartKind::AnalogJoystick,
+            Pos2::ZERO,
+            "j".into(),
+        )
+        .expect("the catalogue has a joystick");
+        let art = scene::resting_svg(&joystick);
+        let regions = joystick.svg.matches("class=\"region\"").count();
+        assert!(
+            regions > 0,
+            "the element's hit-areas are what rendered as grey blocks"
+        );
+        assert_eq!(
+            art.matches("class=\"region\" fill=\"none\"").count(),
+            regions,
+            "every hit-area keeps its outline and loses its fill"
+        );
+        assert!(
+            !art.contains("<circle id=\"knob\""),
+            "the knob is drawn live, so it must not be baked into palette art"
+        );
+    }
+
+    #[test]
     fn presets_load_through_the_generic_loader() {
         let presets = scene::presets();
         assert!(presets.len() >= 20, "shipped presets are discoverable");
-        let (parts, wires, sketch) = scene::load_diagram_file(&presets[0].1);
+        let (parts, wires, sketch) = scene::load_diagram_file(&presets[0].path);
         assert!(!parts.is_empty());
         assert!(!wires.is_empty());
         assert!(!sketch.is_empty());
@@ -3250,12 +4345,15 @@ mod tests {
         let button = std::fs::read_to_string(root.join("pushbutton.svg")).expect("button art");
         let up = scene::pushbutton_svg(&button, false);
         let down = scene::pushbutton_svg(&button, true);
-        assert_eq!(up, button);
         assert!(
-            down.contains("fill=\"url(#grad-down-pushbutton1)\"")
-                && !down.contains("fill=\"url(#grad-up-pushbutton1)\""),
-            "a held cap uses the element's own down gradient"
+            up.contains("style=\"display: none\""),
+            "a resting cap hides the element's pressed circle"
         );
+        assert!(
+            !down.contains("style=\"display: none\""),
+            "a held cap shows the pressed circle"
+        );
+        assert_ne!(up, down);
     }
 
     #[test]
@@ -3389,7 +4487,7 @@ mod tests {
         spike.parts = parts;
         spike.wires = wires;
         spike.sim = Some(sim);
-        spike.selected = Some(button);
+        spike.selection.select_part(button);
         spike.evaluate_now();
         let idle = spike.last_drives.get(&('D', 2)).copied();
 
@@ -3404,6 +4502,68 @@ mod tests {
         if let Some(mut sim) = spike.sim.take() {
             sim.stop();
         }
+    }
+
+    #[test]
+    fn a_diagnostic_jump_writes_the_caret_into_the_editor_state() {
+        // The half of a jump that is not the pointer: given the editor's state,
+        // the caret lands on the character the compiler named.
+        let ctx = egui::Context::default();
+        egui::text_edit::TextEditState::default().store(&ctx, sketch_editor_id());
+        let sketch = "void setup() {\n  pinModee(13, OUTPUT);\n}\n";
+        assert!(place_caret(&ctx, sketch, 2, 3));
+        let state = egui::text_edit::TextEditState::load(&ctx, sketch_editor_id())
+            .expect("the state is still there");
+        assert_eq!(
+            state.cursor.char_range(),
+            Some(CCursorRange::one(CCursor::new(17))),
+            "line 2, column 3 is the 'p' of pinModee"
+        );
+    }
+
+    #[test]
+    fn a_held_button_looks_different_from_a_resting_one() {
+        // The element swaps the cap's gradient while the button is held. If the
+        // two rasters differ by a handful of pixels the press cannot be seen,
+        // which is what "the pressed state does not show" feels like.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi");
+        let button = std::fs::read_to_string(root.join("pushbutton.svg")).expect("button art");
+        let up = art::rasterize(&scene::pushbutton_svg(&button, false), 200, 135)
+            .expect("the resting cap rasterises");
+        let down = art::rasterize(&scene::pushbutton_svg(&button, true), 200, 135)
+            .expect("the held cap rasterises");
+        let different = up
+            .pixels
+            .iter()
+            .zip(&down.pixels)
+            .filter(|(a, b)| a != b)
+            .count();
+        assert!(
+            different > 500,
+            "a held cap has to look held: {different} pixels differ"
+        );
+    }
+
+    #[test]
+    fn a_broken_sketch_names_the_line_the_compiler_stopped_on() {
+        // The real compiler through the real engine: the caret can only land on
+        // the typo's line if the parser reads avr-gcc's output and the `#line`
+        // directive puts the sketch's own name and numbering in it.
+        let workdir = std::env::temp_dir().join("croquis-egui-diagnostics-test");
+        let _ = std::fs::create_dir_all(&workdir);
+        let sketch = "void setup() {\n  pinModee(13, OUTPUT);\n}\n\nvoid loop() {}\n";
+        let error = engine::compile(sketch, &workdir).expect_err("the typo cannot compile");
+        let diagnostics = editor::parse_diagnostics(&error);
+        assert!(!diagnostics.is_empty(), "no diagnostics in: {error}");
+        let first = &diagnostics[0];
+        assert_eq!(first.line, 2, "wrong line in {diagnostics:?}");
+        assert!(first.in_sketch(), "not the sketch's own file: {diagnostics:?}");
+        assert_eq!(first.severity, editor::Severity::Error);
+        assert!(
+            first.message.contains("pinModee"),
+            "the message has to name the typo: {}",
+            first.message
+        );
     }
 
     #[test]
@@ -3442,7 +4602,7 @@ mod tests {
         spike.parts = parts;
         spike.wires = wires;
         spike.sim = Some(sim);
-        spike.selected = Some(pad);
+        spike.selection.select_part(pad);
 
         // The centre of the first cell.
         let unit = spike.parts[pad].bounds().width() / KEYPAD_VIEW.x;
