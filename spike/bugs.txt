@@ -13,18 +13,31 @@ list of finished work.
 Still open — real work, not bugs
 --------------------------------
 
-1. No language system.
-   The UI's strings are hard-coded English in `spike/egui/src/main.rs`, and the
-   part and field labels come from `crates/croquis-core/src/catalogue.rs` as
-   `&'static str`. Needs a design decision: where the strings live, and whether
-   the catalogue keeps its English labels as the canonical keys or grows a
-   per-locale shape. No test covers this, because there is nothing to cover yet.
-
-2. The code editor's QoL is poor.
+1. The code editor's QoL is poor.
    Multiline edit, syntax colouring, completion and diagnostic jumps all work
    (see Spike B), but there is no bracket matching, no auto-indent, no comment
    toggle and no grouped undo. Judgement call, not a defect: it needs a
    decision about which of those are worth having before it needs code.
+
+
+Done — the language system (landed 2026-11-10)
+----------------------------------------------
+
+   Strings live in assets/locales/en.json and tr.json, one flat object per
+   language. croquis-core no longer holds display text: parts and fields carry
+   keys (part.<kind>, field.*, value.*) and the shell resolves them, so a new
+   part cannot ship an untranslated name without a test failing.
+   View -> Language switches, and the choice is saved to
+   $XDG_CONFIG_HOME/croquis/locale.
+
+     -> a_catalogue_matches_english_key_for_key
+     -> every_key_the_catalogue_declares_has_a_translation
+     -> every_key_the_shell_asks_for_has_a_translation
+     -> no_catalogue_ships_an_empty_string
+     -> a_missing_key_falls_back_to_english_then_to_the_key
+     -> the_chosen_language_survives_a_round_trip
+     -> a_saved_tag_no_language_claims_starts_in_english
+     -> the_app_starts_in_the_language_it_is_given
 
 
 Done — with the test that proves it
