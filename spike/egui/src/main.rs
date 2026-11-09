@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use croquis_core::catalogue::parts;
+use croquis_core::catalogue::{parse_kind, parts, PartKind};
 use croquis_core::netlist::{
     AnalogReading, CircuitEval, Drive, IrReceiver, KeyPosition, LcdWiring, LedState, OutputState,
     RgbState, SensorState, StepperWiring,
@@ -54,6 +54,54 @@ const WIRE_HIT_RADIUS: f32 = 6.0;
 /// it locks onto it. A little larger than the hit radius: the pull should start
 /// just before the hand has to be exact.
 const SNAP_RADIUS: f32 = 10.0;
+/// The height a docked panel's head occupies. A collapsed serial monitor keeps
+/// exactly this much of itself, so it can be unfolded again.
+const SERIAL_HEAD_HEIGHT: f32 = 32.0;
+/// How tall the serial monitor's log is when it is unfolded.
+const SERIAL_LOG_HEIGHT: f32 = 150.0;
+
+/// The prefix every palette thumbnail is keyed with. A part's canvas art is
+/// keyed by anything else, so this is what tells them apart.
+const PALETTE_PREFIX: &str = "palette:";
+
+/// Drop the canvas art and keep the palette's.
+///
+/// A new document has no parts, so their textures are dead — but the palette's
+/// thumbnails are the catalogue's, not the document's. Clearing those too made the
+/// pictures vanish for a frame and then rasterised thirty-one SVGs to get them
+/// back, which is what made File → New feel like it had hung.
+fn keep_palette<T>(textures: &mut HashMap<String, T>) {
+    textures.retain(|key, _| key.starts_with(PALETTE_PREFIX));
+}
+
+/// What a new sketch starts as.
+///
+/// This is code a reader copies, not interface text: the comments stay in English
+/// so the template goes on matching every Arduino tutorial on the internet.
+const SKETCH_TEMPLATE: &str = "\
+void setup() {
+  // write your setup code here, to run once
+}
+
+void loop() {
+  // write your main code here, to run repeatedly
+}
+";
+
+/// How much of the circuit panel the serial monitor takes: nothing while it is
+/// off, its head while it is folded, its log while it is open.
+///
+/// The folded case is never zero — a panel that takes no space is a panel with no
+/// chevron left to unfold it, which is what made collapsing it feel like losing it.
+fn serial_height(open: bool, collapsed: bool) -> f32 {
+    if !open {
+        0.0
+    } else if collapsed {
+        SERIAL_HEAD_HEIGHT
+    } else {
+        SERIAL_LOG_HEIGHT
+    }
+}
 
 /// The shell's own chrome, from v0.2's tokens (`--surface`, `--border`,
 /// `--text-muted`, `--accent`).
@@ -207,8 +255,61 @@ fn palette_tile(
 enum Icon {
     Serial,
     Fit,
-    Close,
-    Open,
+    Chevron(Chevron),
+}
+
+/// The way a chevron points.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Chevron {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// The edge a panel is docked to, which is also the way it folds.
+///
+/// A collapse control has to agree with what it collapses: a panel docked at the
+/// left folds leftward, and a chevron pointing right is then pointing at the
+/// wrong half of the screen. The serial monitor is docked along the bottom, so
+/// its chevron points down.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Dock {
+    Left,
+    Right,
+    Bottom,
+}
+
+impl Dock {
+    /// The way the chevron points while the panel is open: toward the edge it
+    /// will fold into.
+    fn closing(self) -> Chevron {
+        match self {
+            Self::Left => Chevron::Left,
+            Self::Right => Chevron::Right,
+            Self::Bottom => Chevron::Down,
+        }
+    }
+
+    /// And the way back out, which is the opposite.
+    fn opening(self) -> Chevron {
+        match self {
+            Self::Left => Chevron::Right,
+            Self::Right => Chevron::Left,
+            Self::Bottom => Chevron::Up,
+        }
+    }
+}
+
+/// A chevron as two points and an apex, measured from the button's centre, with
+/// the apex pointing `direction`.
+fn chevron_wedge(direction: Chevron) -> ((f32, f32), [(f32, f32); 2]) {
+    match direction {
+        Chevron::Right => ((4.0, 0.0), [(-4.0, -5.0), (-4.0, 5.0)]),
+        Chevron::Left => ((-4.0, 0.0), [(4.0, -5.0), (4.0, 5.0)]),
+        Chevron::Down => ((0.0, 4.0), [(-5.0, -4.0), (5.0, -4.0)]),
+        Chevron::Up => ((0.0, -4.0), [(-5.0, 4.0), (5.0, 4.0)]),
+    }
 }
 
 fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> bool {
@@ -245,26 +346,13 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> bool {
                     colour,
                 );
             }
-            Icon::Close => {
-                // A chevron pointing in the direction the panel will go.
-                let left = ui.is_rect_visible(rect);
-                let _ = left;
+            Icon::Chevron(direction) => {
+                let (apex, wings) = chevron_wedge(direction);
                 painter.add(egui::Shape::convex_polygon(
                     vec![
-                        egui::pos2(c.x - 4.0, c.y - 5.0),
-                        egui::pos2(c.x + 3.0, c.y),
-                        egui::pos2(c.x - 4.0, c.y + 5.0),
-                    ],
-                    colour,
-                    egui::Stroke::NONE,
-                ));
-            }
-            Icon::Open => {
-                painter.add(egui::Shape::convex_polygon(
-                    vec![
-                        egui::pos2(c.x + 4.0, c.y - 5.0),
-                        egui::pos2(c.x - 3.0, c.y),
-                        egui::pos2(c.x + 4.0, c.y + 5.0),
+                        egui::pos2(c.x + apex.0, c.y + apex.1),
+                        egui::pos2(c.x + wings[0].0, c.y + wings[0].1),
+                        egui::pos2(c.x + wings[1].0, c.y + wings[1].1),
                     ],
                     colour,
                     egui::Stroke::NONE,
@@ -276,11 +364,11 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> bool {
 }
 
 /// The chevron that closes a panel, as v0.2's `.icon-btn` in a head.
-fn panel_toggle(ui: &mut egui::Ui, open: &mut bool, texts: &Texts) -> bool {
+fn panel_toggle(ui: &mut egui::Ui, open: &mut bool, texts: &Texts, dock: Dock) -> bool {
     let (icon, hover) = if *open {
-        (Icon::Close, texts.t("panel.collapse"))
+        (Icon::Chevron(dock.closing()), texts.t("panel.collapse"))
     } else {
-        (Icon::Open, texts.t("panel.expand"))
+        (Icon::Chevron(dock.opening()), texts.t("panel.expand"))
     };
     if icon_button(ui, icon, hover) {
         *open = !*open;
@@ -301,9 +389,17 @@ fn panel_head(ui: &mut egui::Ui, title: &str, controls: impl FnOnce(&mut egui::U
         rect.max.y - 0.5,
         egui::Stroke::new(1.0, BORDER),
     );
+    // The rule is drawn along the bottom edge, so the controls sit in a band
+    // that stops short of it. Centred in the full height, a filled button like
+    // Run came within a couple of pixels of the rule and read as part of it.
+    const RULE_CLEARANCE: f32 = 5.0;
+    let band = egui::Rect::from_min_max(
+        rect.min,
+        egui::pos2(rect.max.x, rect.max.y - RULE_CLEARANCE),
+    );
     let mut head = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect.shrink2(Vec2::new(12.0, 0.0)))
+            .max_rect(band.shrink2(Vec2::new(12.0, 0.0)))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     head.label(
@@ -581,9 +677,15 @@ struct Spike {
     marquee: Option<(Pos2, Pos2)>,
     clipboard: Clipboard,
     dragging: Option<usize>,
-    /// A left-drag that started on empty canvas. v0.2 pans by dragging the
-    /// background, so the press is claimed here before any part can take it.
-    panning: bool,
+    /// Where each dragged part was when the drag began, and how far the pointer
+    /// has travelled since.
+    ///
+    /// Positions are rebuilt from these every frame rather than accumulated.
+    /// A snap that was added straight into `center` was baked in: the next frame
+    /// found the pin already on its target and pulled it back again, so the part
+    /// had to be ripped off the hole instead of simply dragged away.
+    drag_origin: Vec<(usize, Pos2)>,
+    drag_travel: Vec2,
     hovered_pin: Option<PinRef>,
     textures: HashMap<String, egui::TextureHandle>,
     led_states: HashMap<String, LedState>,
@@ -656,6 +758,9 @@ struct Spike {
     sketch_open: bool,
     components_open: bool,
     serial_open: bool,
+    /// Folded down to its head, still docked. The monitor used to switch itself
+    /// off when collapsed, which took away the very control that brought it back.
+    serial_collapsed: bool,
     /// The catalogue entry being dragged out of the palette, if any. v0.2 places
     /// a part by dragging it onto the canvas, not by clicking a list.
     palette_drag: Option<croquis_core::catalogue::PartKind>,
@@ -693,9 +798,6 @@ struct Spike {
     path: Option<PathBuf>,
     file_error: Option<String>,
     presets: Vec<scene::Preset>,
-    /// Whether File → Presets is open, and which of its tabs is showing.
-    presets_open: bool,
-    preset_group: scene::PresetGroup,
     auto_run: bool,
     fit_requested: bool,
 }
@@ -735,7 +837,8 @@ impl Default for Spike {
             marquee: None,
             clipboard: Clipboard::default(),
             dragging: None,
-            panning: false,
+            drag_origin: Vec::new(),
+            drag_travel: Vec2::ZERO,
             hovered_pin: None,
             textures: HashMap::new(),
             led_states: HashMap::new(),
@@ -775,6 +878,7 @@ impl Default for Spike {
             sketch_open: true,
             components_open: true,
             serial_open: false,
+            serial_collapsed: false,
             palette_drag: None,
             // English, always: `Default` is the shell the tests build, and it
             // must not depend on whatever language this machine saved last. The
@@ -798,8 +902,6 @@ impl Default for Spike {
             path,
             file_error: None,
             presets: scene::presets(),
-            presets_open: false,
-            preset_group: scene::PresetGroup::Basics,
             auto_run,
             fit_requested: true,
         }
@@ -836,17 +938,31 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
 /// can be the one that locks, and the nudge moves them all, which keeps the pick's
 /// own shape.
 fn snap_nudge(parts: &[Part], moving: &[usize], radius: f32) -> Option<Vec2> {
+    let centres: Vec<(usize, Pos2)> = moving
+        .iter()
+        .filter_map(|&index| parts.get(index).map(|part| (index, part.center)))
+        .collect();
+    snap_nudge_at(parts, &centres, radius)
+}
+
+/// The same nudge, measured from positions the pick does not occupy yet.
+///
+/// A drag works out where the pick *would* be from the pointer's travel, and the
+/// snap has to be measured there. Measured at the snapped position it produced
+/// last frame, the gap is always zero, so the nudge re-applies every frame and the
+/// part cannot be dragged off the pin — it has to be ripped.
+fn snap_nudge_at(parts: &[Part], moving: &[(usize, Pos2)], radius: f32) -> Option<Vec2> {
     let mut best: Option<(f32, Vec2)> = None;
-    for index in moving {
+    for (index, centre) in moving {
         let Some(part) = parts.get(*index) else {
             continue;
         };
         for pin in 0..part.pins.len() {
-            let from = part.pin_world(pin);
+            let from = *centre + scene::rotate_offset(part.pins[pin].offset, part.rotation);
             for (other_index, other) in parts.iter().enumerate() {
                 // A pick cannot snap to itself, or a wire's two ends would pull
                 // the part back to where it already is.
-                if moving.contains(&other_index) {
+                if moving.iter().any(|(index, _)| *index == other_index) {
                     continue;
                 }
                 for other_pin in 0..other.pins.len() {
@@ -863,6 +979,72 @@ fn snap_nudge(parts: &[Part], moving: &[usize], radius: f32) -> Option<Vec2> {
         }
     }
     best.map(|(_, offset)| offset)
+}
+
+/// The parts a drag has to carry: the pick itself, plus anything seated in a
+/// breadboard that is part of the pick.
+///
+/// A breadboard is a part like any other, so moving one used to slide the board
+/// out from under the circuit built on it and leave the legs hanging in space. A
+/// leg that is in a hole sits within a hole's width of the hole's own pin, so
+/// proximity is the whole test — the same coincidence the netlist uses to join a
+/// strip.
+fn seated_with(parts: &[Part], pick: &[usize]) -> Vec<usize> {
+    /// How close a leg has to be to a hole to count as being in it, in world
+    /// units. A breadboard hole is about 2.5 units across.
+    const SEATED_RADIUS: f32 = 2.5;
+
+    let mut moving: Vec<usize> = pick.to_vec();
+    for &index in pick {
+        let Some(board) = parts.get(index) else {
+            continue;
+        };
+        let Some(kind) = parse_kind(&board.kind) else {
+            continue;
+        };
+        if !matches!(kind, PartKind::Breadboard | PartKind::BreadboardFull) {
+            continue;
+        }
+        let holes: Vec<Pos2> = (0..board.pins.len()).map(|pin| board.pin_world(pin)).collect();
+        let radius_sq = SEATED_RADIUS * SEATED_RADIUS;
+        for (other_index, other) in parts.iter().enumerate() {
+            if moving.contains(&other_index) {
+                continue;
+            }
+            let within = |pin: usize| {
+                let at = other.pin_world(pin);
+                holes
+                    .iter()
+                    .any(|hole| hole.distance_sq(at) <= radius_sq)
+            };
+            if (0..other.pins.len()).any(within) {
+                moving.push(other_index);
+            }
+        }
+    }
+    moving
+}
+
+/// Where a dragged pick lands this frame: where the pointer has taken it, plus the
+/// nudge that closes a pin's gap if one is within reach of the raw position.
+///
+/// Nothing here reads the pick's current centre, so the answer depends only on
+/// where the drag started and how far it has gone. That is what makes a snap
+/// something the part can leave again.
+fn drag_placement(
+    parts: &[Part],
+    origin: &[(usize, Pos2)],
+    travel: Vec2,
+    radius: f32,
+) -> Vec<(usize, Pos2)> {
+    let raw: Vec<(usize, Pos2)> = origin
+        .iter()
+        .map(|(index, start)| (*index, *start + travel))
+        .collect();
+    let nudge = snap_nudge_at(parts, &raw, radius).unwrap_or(Vec2::ZERO);
+    raw.into_iter()
+        .map(|(index, at)| (index, at + nudge))
+        .collect()
 }
 
 /// A wire's route in screen space: the pins either end, the bends between them,
@@ -1082,11 +1264,10 @@ fn ensure_textures(
                     .unwrap_or(0.0);
                 scene::servo_svg(&part.svg, angle)
             } else if part.kind == "stepper-motor" {
-                let angle = outputs
-                    .get(&part.id)
-                    .and_then(|out| out.angle)
-                    .unwrap_or(0.0);
-                scene::stepper_svg(&part.svg, angle)
+                // No angle in the art: the rotor is drawn live. Baking it in meant
+                // a full re-rasterisation of the motor for every angle it passed
+                // through, which is what made a turning stepper stall.
+                scene::stepper_base_svg(&part.svg)
             } else if part.kind == "seven-segment" || part.kind == "seven-segment-4" {
                 part.svg.clone()
             } else {
@@ -1108,7 +1289,7 @@ impl Spike {
         self.stop_sim();
         self.parts.clear();
         self.wires.clear();
-        self.sketch.clear();
+        self.sketch = SKETCH_TEMPLATE.to_string();
         self.selection.clear();
         self.wire_start = None;
         self.led_states.clear();
@@ -1136,7 +1317,9 @@ impl Spike {
         self.pending_jump = None;
         self.file_error = None;
         self.path = None;
-        self.textures.clear();
+        // The canvas art belongs to the parts that were just cleared; the palette
+        // thumbnails belong to the catalogue and are still what the panel draws.
+        keep_palette(&mut self.textures);
         self.camera = Camera::default();
     }
 
@@ -2130,43 +2313,28 @@ impl eframe::App for Spike {
                         if ui.button(texts.t("file.save_as")).clicked() {
                             self.save_as();
                         }
-                        // v0.2 keeps the presets behind a disclosure with three
-                        // tabs, in the same menu rather than a stacked one. The
-                        // word rather than a triangle: the bundled font has no
-                        // triangles and egui's fallback draws them as tofu.
-                        let state = if self.presets_open {
-                            texts.t("presets.hide")
-                        } else {
-                            texts.t("presets.show")
-                        };
-                        if ui
-                            .button(format!("{}    {state}", texts.t("presets.heading")))
-                            .clicked()
-                        {
-                            self.presets_open = !self.presets_open;
-                        }
-                        if self.presets_open {
-                            ui.horizontal(|ui| {
-                                for group in scene::PresetGroup::ALL {
-                                    let active = self.preset_group == group;
-                                    if ui.selectable_label(active, group.label()).clicked() {
-                                        self.preset_group = group;
+                        // Nested the way the old app nests them: Presets → a group
+                        // → the circuits in it. The disclosure-with-tabs version
+                        // needed a click to open it and a second to pick a group,
+                        // and could only ever show one group at a time.
+                        let mut choice = None;
+                        ui.menu_button(texts.t("presets.heading"), |ui| {
+                            for group in scene::PresetGroup::ALL {
+                                ui.menu_button(texts.t(group.label_key()), |ui| {
+                                    for preset in self
+                                        .presets
+                                        .iter()
+                                        .filter(|preset| preset.group == group)
+                                    {
+                                        if ui.button(&preset.title).clicked() {
+                                            choice = Some(preset.path.clone());
+                                        }
                                     }
-                                }
-                            });
-                            let mut choice = None;
-                            for preset in self
-                                .presets
-                                .iter()
-                                .filter(|preset| preset.group == self.preset_group)
-                            {
-                                if ui.button(&preset.title).clicked() {
-                                    choice = Some(preset.path.clone());
-                                }
+                                });
                             }
-                            if let Some(path) = choice {
-                                self.open_path(path, &ctx);
-                            }
+                        });
+                        if let Some(path) = choice {
+                            self.open_path(path, &ctx);
                         }
                         ui.separator();
                         if ui.button(texts.t("file.quit")).clicked() {
@@ -2248,7 +2416,7 @@ impl eframe::App for Spike {
                     let texts = self.texts.clone();
                     panel_head(ui, texts.t("panel.components"), |ui| {
                         let mut open = true;
-                        if panel_toggle(ui, &mut open, &texts) && !open {
+                        if panel_toggle(ui, &mut open, &texts, Dock::Right) && !open {
                             self.components_open = false;
                         }
                     });
@@ -2346,7 +2514,7 @@ impl eframe::App for Spike {
                 .exact_size(30.0)
                 .show(root, |ui| {
                     let texts = self.texts.clone();
-                    if icon_button(ui, Icon::Open, texts.t("panel.components.show")) {
+                    if icon_button(ui, Icon::Chevron(Dock::Right.opening()), texts.t("panel.components.show")) {
                         self.components_open = true;
                     }
                 });
@@ -2362,7 +2530,7 @@ impl eframe::App for Spike {
                     let texts = self.texts.clone();
                     panel_head(ui, texts.t("panel.sketch"), |ui| {
                         let mut open = true;
-                        if panel_toggle(ui, &mut open, &texts) && !open {
+                        if panel_toggle(ui, &mut open, &texts, Dock::Left) && !open {
                             self.sketch_open = false;
                         }
                     });
@@ -2409,7 +2577,7 @@ impl eframe::App for Spike {
                 .exact_size(30.0)
                 .show(root, |ui| {
                     let texts = self.texts.clone();
-                    if icon_button(ui, Icon::Open, texts.t("panel.sketch.show")) {
+                    if icon_button(ui, Icon::Chevron(Dock::Left.opening()), texts.t("panel.sketch.show")) {
                         self.sketch_open = true;
                     }
                 });
@@ -2456,6 +2624,11 @@ impl eframe::App for Spike {
                 }
                 if icon_button(ui, Icon::Serial, texts.t("panel.serial.toggle")) {
                     self.serial_open = !self.serial_open;
+                    // Turning it back on shows the log, not a folded head: the
+                    // button is the way in, so it should open all the way.
+                    if self.serial_open {
+                        self.serial_collapsed = false;
+                    }
                 }
             });
             // The properties strip, docked under the circuit bar. Always present,
@@ -2516,8 +2689,9 @@ impl eframe::App for Spike {
                 self.fit_requested = false;
             }
             // The serial monitor is docked under the canvas, inside the circuit
-            // panel, as in v0.2 — not across the whole window.
-            let serial_height = if self.serial_open { 150.0 } else { 0.0 };
+            // panel, as in v0.2 — not across the whole window. Collapsed it keeps
+            // its head, so the chevron that folded it is still there to unfold it.
+            let serial_height = serial_height(self.serial_open, self.serial_collapsed);
             let canvas_height = (ui.available_height() - serial_height).max(80.0);
             let (response, painter) = ui.allocate_painter(
                 Vec2::new(ui.available_width(), canvas_height),
@@ -2527,6 +2701,48 @@ impl eframe::App for Spike {
 
             painter.rect_filled(rect, 0.0, Color32::from_rgb(26, 26, 28));
             draw_grid(&painter, rect, self.camera);
+
+            // The context menu belongs to the right button, which also pans. egui
+            // tells a click from a drag, so a right button that comes up where it
+            // went down opens the menu, and one that travelled pans — the two
+            // never both fire.
+            let menu_texts = self.texts.clone();
+            response.context_menu(|ui| {
+                let some_parts = !self.selection.parts.is_empty();
+                if ui
+                    .add_enabled(some_parts, egui::Button::new(menu_texts.t("edit.copy")))
+                    .clicked()
+                {
+                    self.copy_selection();
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        !self.clipboard.parts.is_empty(),
+                        egui::Button::new(menu_texts.t("edit.paste")),
+                    )
+                    .clicked()
+                {
+                    self.paste();
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        !self.selection.is_empty(),
+                        egui::Button::new(menu_texts.t("edit.delete")),
+                    )
+                    .clicked()
+                {
+                    self.delete_selection();
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button(menu_texts.t("edit.clear_wires")).clicked() {
+                    self.wires.clear();
+                    self.wire_start = None;
+                    ui.close();
+                }
+            });
 
             // A part dragged out of the palette follows the pointer and lands
             // where it is let go.
@@ -2608,7 +2824,6 @@ impl eframe::App for Spike {
                             self.wire_press(pin);
                         } else if self.wire_start.is_some() {
                             // Mid-wire, the click branch below pins a bend.
-                            self.panning = false;
                         } else if let Some(index) = hit_part(&self.parts, world) {
                             // Shift adds to or takes from the selection; a plain
                             // press on something already selected keeps the rest,
@@ -2619,7 +2834,6 @@ impl eframe::App for Spike {
                                 self.selection.select_part(index);
                             }
                             self.press_control(index, world, pos);
-                            self.panning = false;
                         } else if let Some(index) = hit_wire(
                             &self.parts,
                             &self.wires,
@@ -2633,32 +2847,29 @@ impl eframe::App for Spike {
                             } else {
                                 self.selection.select_wire(index);
                             }
-                            self.panning = false;
                         } else {
                             if !shift {
                                 self.selection.clear();
                             }
-                            // Nothing under the pointer: the press is a canvas
-                            // grab, which is how v0.2 pans.
-                            self.panning = true;
+                            // Nothing under the pointer: the left button draws a
+                            // selection box. Panning is the right and middle
+                            // buttons' job, so a left drag never moves the canvas
+                            // out from under what it is selecting.
+                            self.marquee = Some((pos, pos));
                         }
                     }
                 }
             }
-            // Right-drag is the marquee, as in v0.2; the middle button pans.
-            if ctx.input(|input| input.pointer.secondary_pressed()) {
-                if let Some(pos) = ctx.input(|input| input.pointer.interact_pos()) {
-                    if rect.contains(pos) {
-                        self.marquee = Some((pos, pos));
-                    }
-                }
-            }
+            // The selection box follows the pointer while the left button is down
+            // and is applied when it comes up. Panning belongs to the right and
+            // middle buttons — one gesture, one job, so a right drag can no
+            // longer scroll the canvas and select at the same time.
             if let Some((start, _)) = self.marquee {
                 if let Some(now) = pointer {
                     self.marquee = Some((start, now));
                 }
             }
-            if ctx.input(|input| input.pointer.secondary_released()) {
+            if released_now {
                 if let Some((start, end)) = self.marquee.take() {
                     let area = Rect::from_two_pos(
                         self.camera.screen_to_world(rect, start),
@@ -2667,13 +2878,7 @@ impl eframe::App for Spike {
                     self.select_in(area, shift);
                 }
             }
-            if response.dragged_by(PointerButton::Middle) {
-                self.camera.pan += response.drag_delta();
-            }
-            if response.dragged_by(PointerButton::Primary) && self.panning {
-                self.camera.pan += response.drag_delta();
-            }
-            if response.dragged_by(PointerButton::Primary) && !self.panning {
+            if response.dragged_by(PointerButton::Primary) {
                 if let Some((index, from)) = self.press_drag {
                     // Four pixels of travel is a drag; less than that is a click
                     // whose hand wobbled.
@@ -2717,33 +2922,46 @@ impl eframe::App for Spike {
                         self.drag_knob(index, world);
                     }
                 } else if self.dragging.is_some() {
-                    let delta = response.drag_delta() / self.camera.zoom;
-                    let moving = self.selection.parts.clone();
-                    for index in &moving {
-                        if let Some(part) = self.parts.get_mut(*index) {
-                            part.center += delta;
-                        }
+                    // The pick is captured once, on the first frame of the drag:
+                    // it is the set that moves and the set a pin may snap from.
+                    // A breadboard brings what is plugged into it.
+                    if self.drag_origin.is_empty() {
+                        let moving = seated_with(&self.parts, &self.selection.parts);
+                        self.drag_origin = moving
+                            .iter()
+                            .filter_map(|&index| {
+                                self.parts.get(index).map(|part| (index, part.center))
+                            })
+                            .collect();
+                        self.drag_travel = Vec2::ZERO;
                     }
-                    // A pin that has come close to another part's pin finishes
-                    // the journey, so a leg lands in the hole rather than near
-                    // it. The whole pick takes the nudge, not just the part whose
-                    // pin locked.
-                    let nudge = snap_nudge(&self.parts, &moving, SNAP_RADIUS / self.camera.zoom);
-                    if let Some(nudge) = nudge {
-                        for index in &moving {
-                            if let Some(part) = self.parts.get_mut(*index) {
-                                part.center += nudge;
-                            }
+                    self.drag_travel += response.drag_delta() / self.camera.zoom;
+                    // Where the pick goes is a function of where the drag started
+                    // and how far the pointer has travelled — never of where the
+                    // pick already is, which is what let a snap re-apply itself
+                    // every frame and pin the part to the hole.
+                    let placed = drag_placement(
+                        &self.parts,
+                        &self.drag_origin,
+                        self.drag_travel,
+                        SNAP_RADIUS / self.camera.zoom,
+                    );
+                    for (index, at) in placed {
+                        if let Some(part) = self.parts.get_mut(index) {
+                            part.center = at;
                         }
                     }
                 }
             }
             // The canvas is a grab surface: an open hand over empty space, a
-            // closed one while it is being dragged.
+            // closed one while a pan is actually in progress. Panning is the
+            // right and middle buttons now, so the closed hand follows those.
             let over_empty = world_pointer.is_some_and(|p| {
                 self.hovered_pin.is_none() && hit_part(&self.parts, p).is_none()
             });
-            if self.panning {
+            if response.dragged_by(PointerButton::Middle)
+                || response.dragged_by(PointerButton::Secondary)
+            {
                 ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
             } else if over_empty {
                 ctx.set_cursor_icon(egui::CursorIcon::Grab);
@@ -2753,7 +2971,10 @@ impl eframe::App for Spike {
                 self.wire_release(self.hovered_pin);
                 self.dragging = None;
                 self.press_drag = None;
-                self.panning = false;
+                // The next drag captures its own origins; a stale set would place
+                // the next pick where the last one started.
+                self.drag_origin.clear();
+                self.drag_travel = Vec2::ZERO;
                 self.release_input();
             }
 
@@ -2788,14 +3009,17 @@ impl eframe::App for Spike {
                     if ui.button(texts.t("edit.clear")).clicked() {
                         self.serial.clear();
                     }
-                    let mut open = true;
-                    if panel_toggle(ui, &mut open, &texts) && !open {
-                        self.serial_open = false;
+                    let mut expanded = !self.serial_collapsed;
+                    if panel_toggle(ui, &mut expanded, &texts, Dock::Bottom) {
+                        // Fold it down to its head rather than dismissing it. The
+                        // chevron stays on screen, so the same control brings it
+                        // back and there is nothing to hunt for in the View menu.
+                        self.serial_collapsed = !expanded;
                     }
                 });
                 // The compiler's problems, each one clickable: v0.2 puts the
                 // caret on the line a clicked error names, so this does too.
-                if !self.diagnostics.is_empty() {
+                if !self.serial_collapsed && !self.diagnostics.is_empty() {
                     let mut jump = None;
                     egui::ScrollArea::vertical()
                         .id_salt("compile-problems")
@@ -2835,16 +3059,18 @@ impl eframe::App for Spike {
                     }
                     ui.separator();
                 }
-                egui::ScrollArea::vertical()
-                    .id_salt("serial-output")
-                    .auto_shrink([false, false])
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        ui.monospace(&self.serial);
-                        if let Some(error) = &self.run_error {
-                            ui.colored_label(Color32::from_rgb(230, 120, 100), error);
-                        }
-                    });
+                if !self.serial_collapsed {
+                    egui::ScrollArea::vertical()
+                        .id_salt("serial-output")
+                        .auto_shrink([false, false])
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            ui.monospace(&self.serial);
+                            if let Some(error) = &self.run_error {
+                                ui.colored_label(Color32::from_rgb(230, 120, 100), error);
+                            }
+                        });
+                }
             }
 
             // A grab can change a part's art (a knob, a slider). Refresh the
@@ -2901,6 +3127,14 @@ impl eframe::App for Spike {
                 }
                 if part.kind == "slide-potentiometer" {
                     draw_slide_tip(&painter, rect, self.camera, part);
+                }
+                if part.kind == "stepper-motor" {
+                    let degrees = self
+                        .outputs
+                        .get(&part.id)
+                        .and_then(|out| out.angle)
+                        .unwrap_or(0.0) as f32;
+                    draw_stepper_hub(&painter, rect, self.camera, part, degrees);
                 }
                 if let Some((_, button)) = self.remote_hold.filter(|(held, _)| *held == index) {
                     if let Some(centre) = remote::button_centre(part, button) {
@@ -3505,6 +3739,34 @@ fn draw_pot_tick(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Par
             .map(|corner| screen.min + Vec2::new(corner.0, corner.1) * unit)
             .collect(),
         Color32::from_rgb(0x1a, 0x1a, 0x1a),
+        Stroke::NONE,
+    );
+}
+
+/// The stepper's hub, turned to the rotor's angle.
+///
+/// Same reason as the potentiometer's tick: the element rewrites the hub's own
+/// `transform` for every angle, and baking that into the drawing meant rasterising
+/// the whole motor — gradients, filters and all — again on every frame it turned.
+/// The hub is a shape, so it can simply be drawn.
+fn draw_stepper_hub(painter: &egui::Painter, rect: Rect, camera: Camera, part: &Part, degrees: f32) {
+    // The element's viewBox, which is the frame its geometry is stated in.
+    const VIEW: Vec2 = Vec2::new(220.374, 235.494);
+    let bounds = part.rect();
+    let screen = Rect::from_min_max(
+        camera.world_to_screen(rect, bounds.min),
+        camera.world_to_screen(rect, bounds.max),
+    );
+    let scale = Vec2::new(screen.width() / VIEW.x, screen.height() / VIEW.y);
+    let outline = scene::STEPPER_ROTOR
+        .hub_outline(degrees)
+        .into_iter()
+        .map(|(x, y)| screen.min + Vec2::new(x * scale.x, y * scale.y))
+        .collect();
+    // The hub's fill, from the element's own `#4d4d4d`.
+    Turned::new(painter, part, screen.center()).convex_polygon(
+        outline,
+        Color32::from_rgb(0x4d, 0x4d, 0x4d),
         Stroke::NONE,
     );
 }
@@ -4196,6 +4458,62 @@ mod tests {
     }
 
     #[test]
+    fn a_folded_serial_monitor_keeps_its_head_on_screen() {
+        // Off takes no room; open takes its log; folded takes its head and never
+        // nothing — the chevron that unfolds it lives in that head.
+        assert_eq!(serial_height(false, false), 0.0);
+        assert_eq!(serial_height(false, true), 0.0, "off beats folded");
+        assert_eq!(serial_height(true, false), SERIAL_LOG_HEIGHT);
+        assert_eq!(serial_height(true, true), SERIAL_HEAD_HEIGHT);
+        assert!(
+            serial_height(true, true) > 0.0,
+            "a folded monitor still has to show the control that unfolds it"
+        );
+        assert!(
+            serial_height(true, true) < serial_height(true, false),
+            "and folding it has to give the canvas the room back"
+        );
+    }
+
+    #[test]
+    fn a_panels_chevron_points_the_way_it_folds() {
+        // The sketch panel is docked left and folds leftward; the components
+        // panel is docked right; the serial monitor runs along the bottom. Each
+        // one used to draw the same sideways chevron they all shared.
+        assert_eq!(Dock::Left.closing(), Chevron::Left);
+        assert_eq!(Dock::Left.opening(), Chevron::Right);
+        assert_eq!(Dock::Right.closing(), Chevron::Right);
+        assert_eq!(Dock::Right.opening(), Chevron::Left);
+        assert_eq!(Dock::Bottom.closing(), Chevron::Down);
+        assert_eq!(Dock::Bottom.opening(), Chevron::Up);
+    }
+
+    #[test]
+    fn a_chevron_apex_points_the_way_its_name_says() {
+        for (direction, outward) in [
+            (Chevron::Left, Vec2::new(-1.0, 0.0)),
+            (Chevron::Right, Vec2::new(1.0, 0.0)),
+            (Chevron::Up, Vec2::new(0.0, -1.0)),
+            (Chevron::Down, Vec2::new(0.0, 1.0)),
+        ] {
+            let (apex, wings) = chevron_wedge(direction);
+            let tip = Vec2::new(apex.0, apex.1);
+            assert!(
+                tip.dot(outward) > 0.0,
+                "{direction:?}'s apex does not point outward: {tip:?}"
+            );
+            // The wings have to sit behind the apex, or the wedge is not a wedge.
+            for wing in wings {
+                let at = Vec2::new(wing.0, wing.1);
+                assert!(
+                    at.dot(outward) < 0.0,
+                    "{direction:?} has a wing in front of its apex: {at:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_marquee_selects_the_parts_it_covers() {
         let mut spike = Spike::default();
         let led = spike
@@ -4219,11 +4537,11 @@ mod tests {
     }
 
     /// A bare part: a box with a pin at each offset from its centre.
-    fn snapping_part(center: Pos2, pins: &[(f32, f32)]) -> Part {
+    fn part_of_kind(kind: &str, center: Pos2, pins: &[(f32, f32)]) -> Part {
         Part {
-            id: format!("at-{}-{}", center.x, center.y),
-            kind: "led".into(),
-            name_key: "part.led".into(),
+            id: format!("{kind}-at-{}-{}", center.x, center.y),
+            kind: kind.into(),
+            name_key: format!("part.{kind}"),
             center,
             size: Vec2::new(20.0, 20.0),
             rotation: 0.0,
@@ -4238,6 +4556,50 @@ mod tests {
             attrs: std::collections::HashMap::new(),
             svg: String::new(),
         }
+    }
+
+    fn snapping_part(center: Pos2, pins: &[(f32, f32)]) -> Part {
+        part_of_kind("led", center, pins)
+    }
+
+    #[test]
+    fn dragging_a_breadboard_carries_the_parts_seated_in_it() {
+        // A breadboard's holes are its pins. One LED has a leg in a hole; another
+        // is somewhere else on the canvas entirely.
+        let board = part_of_kind(
+            "breadboard",
+            Pos2::new(100.0, 100.0),
+            &[(0.0, 0.0), (20.0, 0.0)],
+        );
+        let seated = part_of_kind("led", Pos2::new(102.0, 100.0), &[(-2.0, 0.0)]);
+        let elsewhere = part_of_kind("led", Pos2::new(300.0, 300.0), &[(0.0, 0.0)]);
+        let parts = vec![board, seated, elsewhere];
+        assert_eq!(
+            seated_with(&parts, &[0]),
+            vec![0, 1],
+            "the board and the leg in it, and nothing else"
+        );
+    }
+
+    #[test]
+    fn a_part_that_is_merely_near_the_board_stays_behind() {
+        let board = part_of_kind("breadboard", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        // Six units away: beside the board, in none of its holes.
+        let nearby = part_of_kind("led", Pos2::new(106.0, 100.0), &[(0.0, 0.0)]);
+        let parts = vec![board, nearby];
+        assert_eq!(seated_with(&parts, &[0]), vec![0]);
+    }
+
+    #[test]
+    fn dragging_only_the_part_leaves_the_board_alone() {
+        let board = part_of_kind("breadboard", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        let seated = part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        let parts = vec![board, seated];
+        assert_eq!(
+            seated_with(&parts, &[1]),
+            vec![1],
+            "a part carried by a board does not drag the board with it"
+        );
     }
 
     #[test]
@@ -4335,6 +4697,187 @@ mod tests {
             "Yakınlaştır",
             "and the whole shell follows, not just the menu name"
         );
+    }
+
+    #[test]
+    fn a_snap_lets_go_once_the_pointer_travels_past_it() {
+        // The still part's pin sits at x = 90; the dragged part's pin is ten to
+        // the left of its centre, so the centre that puts it on 90 is x = 100.
+        let still = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        let moved = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        let parts = vec![still, moved];
+        let origin = vec![(1usize, Pos2::new(100.0, 100.0))];
+
+        // Eight short of the pin: inside the radius, so the gap closes.
+        let locked = drag_placement(&parts, &origin, Vec2::new(-8.0, 0.0), SNAP_RADIUS);
+        assert_eq!(
+            locked[0].1 + Vec2::new(-10.0, 0.0),
+            Pos2::new(90.0, 100.0),
+            "the pin should land exactly on the still one"
+        );
+
+        // Past the radius: the pointer wins and nothing pulls it back.
+        let travelled = SNAP_RADIUS + 5.0;
+        let free = drag_placement(&parts, &origin, Vec2::new(-travelled, 0.0), SNAP_RADIUS);
+        assert_eq!(
+            free[0].1,
+            Pos2::new(100.0 - travelled, 100.0),
+            "a part dragged clear should sit where the pointer put it"
+        );
+    }
+
+    #[test]
+    fn a_snapped_pick_is_not_pulled_back_every_frame() {
+        // Two frames of one drag, both measured from the same origin. The first
+        // snaps; the second has travelled past the radius and must be free.
+        // When the nudge was baked into the part's centre, the second frame was
+        // impossible and the part had to be ripped off the hole.
+        let still = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        let moved = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        let parts = vec![still, moved];
+        let origin = vec![(1usize, Pos2::new(100.0, 100.0))];
+
+        let first = drag_placement(&parts, &origin, Vec2::new(-6.0, 0.0), SNAP_RADIUS);
+        assert_eq!(first[0].1, Pos2::new(100.0, 100.0), "snapped on frame one");
+
+        let second = drag_placement(&parts, &origin, Vec2::new(-30.0, 0.0), SNAP_RADIUS);
+        assert_eq!(
+            second[0].1,
+            Pos2::new(70.0, 100.0),
+            "and let go on frame two, without the snap re-applying"
+        );
+    }
+
+    #[test]
+    fn a_pick_that_is_dragged_keeps_its_own_shape() {
+        // Two parts dragged together hold their relative positions, snapped or
+        // not: the nudge is one vector for the whole pick.
+        let still = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        let a = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        let b = snapping_part(Pos2::new(140.0, 100.0), &[(-10.0, 0.0)]);
+        let parts = vec![still, a, b];
+        let origin = vec![(1usize, Pos2::new(100.0, 100.0)), (2usize, Pos2::new(140.0, 100.0))];
+        let placed = drag_placement(&parts, &origin, Vec2::new(0.0, -40.0), SNAP_RADIUS);
+        assert_eq!(
+            placed[1].1.x - placed[0].1.x,
+            40.0,
+            "the pick's own spacing survives the drag"
+        );
+    }
+
+    #[test]
+    fn a_new_document_keeps_the_palette_art_and_drops_the_canvas_art() {
+        // Generic over the value type so this needs no GPU context: the point is
+        // which keys survive, not what a texture holds.
+        let mut textures: HashMap<String, u32> = HashMap::new();
+        textures.insert(format!("{PALETTE_PREFIX}led"), 1);
+        textures.insert(format!("{PALETTE_PREFIX}resistor"), 2);
+        textures.insert("led-instance-1".into(), 3);
+        textures.insert("uno-instance-2".into(), 4);
+        keep_palette(&mut textures);
+        assert_eq!(textures.len(), 2, "only the palette survives");
+        assert!(textures.contains_key("palette:led"));
+        assert!(
+            !textures.contains_key("led-instance-1"),
+            "a part's canvas art belongs to a part that no longer exists"
+        );
+    }
+
+    #[test]
+    fn a_new_document_starts_from_the_sketch_template() {
+        let mut spike = Spike::default();
+        assert!(!spike.parts.is_empty(), "the preset loaded first");
+        spike.new_document();
+        assert!(spike.parts.is_empty(), "and the document is empty");
+        assert!(
+            spike.sketch.contains("void setup()"),
+            "a new sketch is not a blank page: {:?}",
+            spike.sketch
+        );
+        assert!(spike.sketch.contains("void loop()"));
+        assert!(
+            spike.sketch.contains("// write your setup code here"),
+            "with the comments a learner is meant to read"
+        );
+    }
+
+    #[test]
+    fn the_steppers_hub_outline_stays_on_its_circle() {
+        let rotor = scene::STEPPER_ROTOR;
+        let (cx, cy) = rotor.centre_in_view();
+        let radius = rotor.radius_in_view();
+        for degrees in [0.0, 45.0, 180.0, 270.0] {
+            for (x, y) in rotor.hub_outline(degrees) {
+                let distance = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+                assert!(
+                    (distance - radius).abs() < 0.5,
+                    "at {degrees}° a point sits {distance} from the centre, not {radius}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_hubs_flat_sits_where_the_element_puts_it() {
+        let rotor = scene::STEPPER_ROTOR;
+        let (_, cy) = rotor.centre_in_view();
+        let chord = rotor.chord_in_view();
+        // At rest the cut runs across the top, so nothing rises above it.
+        let highest = rotor
+            .hub_outline(0.0)
+            .into_iter()
+            .map(|(_, y)| y)
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            (highest - (cy + chord)).abs() < 0.5,
+            "the cut should be at {}, not {highest}",
+            cy + chord
+        );
+        // Half a turn puts it at the bottom, which is the point of drawing it live.
+        let lowest = rotor
+            .hub_outline(180.0)
+            .into_iter()
+            .map(|(_, y)| y)
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            (lowest - (cy - chord)).abs() < 0.5,
+            "after half a turn the cut should be at {}, not {lowest}",
+            cy - chord
+        );
+    }
+
+    #[test]
+    fn a_steppers_baked_art_carries_no_rotor() {
+        // The rotor is drawn live now. If it were still in the texture, the
+        // texture would still change with every angle — which was the lag.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/wokwi/stepper-motor.svg");
+        let svg = std::fs::read_to_string(&path).expect("the stepper's art");
+        let base = scene::stepper_base_svg(&svg);
+        assert!(!base.contains("arrow-path"), "the rotor arrow is drawn live");
+        assert!(!base.contains("shaft-path"), "so is the hub");
+        assert!(base.contains("motor body"), "and the body is untouched");
+        assert_eq!(
+            base,
+            scene::stepper_base_svg(&base),
+            "stripping it twice changes nothing"
+        );
+
+        // The rotor's geometry is stated as constants, so they have to match this
+        // file. If the art is ever replaced, this is what says the numbers moved.
+        let rotor = scene::STEPPER_ROTOR;
+        for (name, value) in [
+            ("scale", rotor.scale),
+            ("translate", rotor.translate),
+            ("centre", rotor.centre),
+            ("radius", rotor.radius),
+            ("chord", rotor.chord),
+        ] {
+            assert!(
+                svg.contains(&format!("{value}")),
+                "the art no longer contains the rotor's {name} ({value}), so the constant is stale"
+            );
+        }
     }
 
     #[test]

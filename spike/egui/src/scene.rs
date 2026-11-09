@@ -202,11 +202,12 @@ impl PresetGroup {
     /// In the order the tabs read, which is also the teaching order.
     pub const ALL: [PresetGroup; 3] = [Self::Basics, Self::Sensors, Self::Outputs];
 
-    pub fn label(self) -> &'static str {
+    /// The key this group's name lives under, in the same shape as a part's.
+    pub fn label_key(self) -> &'static str {
         match self {
-            Self::Basics => "Basics",
-            Self::Sensors => "Sensors",
-            Self::Outputs => "Outputs",
+            Self::Basics => "preset.basics",
+            Self::Sensors => "preset.sensors",
+            Self::Outputs => "preset.outputs",
         }
     }
 
@@ -706,6 +707,9 @@ pub fn uno_svg(svg: &str, led13: bool) -> String {
 /// `translate(28.65, 28.65) rotate(0)`. `servo_svg` cannot be used here — its
 /// `rotate(0)` replacement lands inside the first of those and leaves
 /// `rotate(<angle>), 28.65,28.65)`, which is not a transform at all.
+///
+/// Kept for the save/load path and for tests; the canvas does not use it. See
+/// [`stepper_base_svg`] for why.
 pub fn stepper_svg(svg: &str, angle: f64) -> String {
     svg.replacen(
         "rotate(0, 28.65,28.65)",
@@ -717,6 +721,94 @@ pub fn stepper_svg(svg: &str, angle: f64) -> String {
         &format!("rotate({})", tidy(angle)),
         1,
     )
+}
+
+/// The stepper's art with its rotor left out, so the texture does not depend on
+/// the angle.
+///
+/// Baking the turned rotor into the drawing meant rasterising the whole motor —
+/// gradients, filters and all — again for every angle it passed through, which is
+/// what made a turning stepper stall the frame. The hub is drawn live instead, the
+/// same way the potentiometer's tick is, from [`STEPPER_ROTOR`].
+pub fn stepper_base_svg(svg: &str) -> String {
+    let mut out = svg.to_string();
+    for id in ["arrow-path", "shaft-path"] {
+        let needle = format!("<path id=\"{id}\"");
+        let Some(start) = out.find(&needle) else {
+            continue;
+        };
+        // The element closes its paths explicitly; a self-closing one would leave
+        // the whole document after it, so only remove what is really there.
+        let Some(end) = out[start..].find("</path>") else {
+            continue;
+        };
+        out.replace_range(start..start + end + "</path>".len(), "");
+    }
+    out
+}
+
+/// The stepper's rotor, in the element's own content coordinates.
+///
+/// The element wraps its drawing in `translate(1,1)` and `scale(3.78)`, so a
+/// content point `p` lands at `translate + scale * p` in viewBox units. The hub is
+/// a circle at the centre with a flat chord cut across its top; that flat is what
+/// makes a turn visible.
+#[derive(Clone, Copy)]
+pub struct StepperRotor {
+    pub scale: f32,
+    pub translate: f32,
+    /// The hub's centre in content units (it is square, so x and y are the same).
+    pub centre: f32,
+    pub radius: f32,
+    /// The chord's offset from the centre, in content units.
+    pub chord: f32,
+}
+
+pub const STEPPER_ROTOR: StepperRotor = StepperRotor {
+    scale: 3.78,
+    translate: 1.0,
+    centre: 28.65,
+    radius: 6.35,
+    chord: -5.499,
+};
+
+impl StepperRotor {
+    /// The hub's centre in viewBox units.
+    pub fn centre_in_view(self) -> (f32, f32) {
+        let at = self.translate + self.scale * self.centre;
+        (at, at)
+    }
+
+    pub fn radius_in_view(self) -> f32 {
+        self.scale * self.radius
+    }
+
+    pub fn chord_in_view(self) -> f32 {
+        self.scale * self.chord
+    }
+
+    /// The hub's outline in viewBox units, turned by `degrees` about its centre.
+    ///
+    /// A circle with a chord cut off it is still convex, so the painter can fill
+    /// it as one polygon. The arc runs the long way round from one end of the
+    /// chord to the other, which leaves the cut where the element puts it.
+    pub fn hub_outline(self, degrees: f32) -> Vec<(f32, f32)> {
+        const STEPS: usize = 24;
+        let radius = self.radius_in_view();
+        let chord = self.chord_in_view();
+        let (cx, cy) = self.centre_in_view();
+        let half = (radius * radius - chord * chord).max(0.0).sqrt();
+        let start = chord.atan2(half);
+        let end = chord.atan2(-half);
+        let sweep = std::f32::consts::TAU - (start - end);
+        let turn = degrees.to_radians();
+        (0..=STEPS)
+            .map(|step| {
+                let angle = start + sweep * (step as f32 / STEPS as f32) + turn;
+                (cx + radius * angle.cos(), cy + radius * angle.sin())
+            })
+            .collect()
+    }
 }
 
 /// An angle as SVG wants it: short, and never `-0`.
