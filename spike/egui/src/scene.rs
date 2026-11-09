@@ -19,13 +19,13 @@ use croquis_core::netlist::{
 use croquis_core::netlist::LedState;
 use croquis_core::shift_register::ShiftState;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Pin {
     pub name: String,
     pub offset: Vec2,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Part {
     pub id: String,
     pub kind: String,
@@ -103,7 +103,7 @@ use croquis_core::route::{decode_route, Point as CorePoint};
 
 pub type PinRef = (usize, usize);
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Wire {
     pub a: PinRef,
     pub b: PinRef,

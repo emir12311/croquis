@@ -6,6 +6,8 @@
   "edit.copy": "Copy",
   "edit.delete": "Delete",
   "edit.paste": "Paste",
+  "edit.redo": "Redo",
+  "edit.undo": "Undo",
   "editor.jump": "Put the caret on this line",
   "error.load": "Could not load {name}",
   "field.colour": "Colour",

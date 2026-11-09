@@ -591,7 +591,7 @@ impl Camera {
 ///
 /// v0.2 lets a part and a wire be picked together, so this holds two lists
 /// rather than one choice. The properties strip edits the single selected part.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 struct Selection {
     parts: Vec<usize>,
     wires: Vec<usize>,
@@ -662,6 +662,25 @@ struct Clipboard {
     /// and its bends — so a paste is wired to its own copies.
     wires: Vec<(PinRef, PinRef, Vec<Pos2>)>,
 }
+
+/// One state of the circuit, as the undo history remembers it.
+///
+/// The sketch is deliberately not in here: the editor has its own undo, and
+/// folding two histories into one would make Ctrl+Z mean something different
+/// depending on which panel last had the caret.
+#[derive(Clone, Default, PartialEq)]
+struct Snapshot {
+    parts: Vec<Part>,
+    wires: Vec<Wire>,
+    selection: Selection,
+}
+
+/// How many steps back the history holds.
+///
+/// Each step keeps a whole copy of the circuit, art included, so the stack is
+/// bounded. Sixty-four is far more than a session needs and small enough that a
+/// big circuit cannot quietly eat the machine.
+const HISTORY_LIMIT: usize = 64;
 
 struct Spike {
     camera: Camera,
@@ -800,6 +819,11 @@ struct Spike {
     presets: Vec<scene::Preset>,
     auto_run: bool,
     fit_requested: bool,
+
+    /// The circuit as of the last committed step, and the steps either side of it.
+    settled: Snapshot,
+    past: Vec<Snapshot>,
+    future: Vec<Snapshot>,
 }
 
 impl Spike {
@@ -814,6 +838,86 @@ impl Spike {
         spike.texts.set_locale(locale);
         spike
     }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            parts: self.parts.clone(),
+            wires: self.wires.clone(),
+            selection: self.selection.clone(),
+        }
+    }
+
+    /// Commit the circuit to the history if it has moved since the last commit.
+    ///
+    /// Called once a frame rather than from each place that edits the circuit:
+    /// there are dozens of those, and the one that forgot to ask would be the
+    /// edit that cannot be undone. A held pointer defers the commit, which is
+    /// what makes a drag one step instead of one per frame.
+    fn commit_history(&mut self, pointer_down: bool) {
+        if pointer_down {
+            return;
+        }
+        if self.settled.parts == self.parts && self.settled.wires == self.wires {
+            return;
+        }
+        let now = self.snapshot();
+        self.past.push(std::mem::replace(&mut self.settled, now));
+        if self.past.len() > HISTORY_LIMIT {
+            self.past.remove(0);
+        }
+        // A fresh edit is a new branch: whatever was undone is no longer ahead.
+        self.future.clear();
+    }
+
+    fn undo(&mut self) {
+        let Some(previous) = self.past.pop() else {
+            return;
+        };
+        self.future.push(self.settled.clone());
+        self.restore(previous);
+    }
+
+    fn redo(&mut self) {
+        let Some(next) = self.future.pop() else {
+            return;
+        };
+        self.past.push(self.settled.clone());
+        self.restore(next);
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) {
+        self.parts = snapshot.parts.clone();
+        self.wires = snapshot.wires.clone();
+        self.selection = snapshot.selection.clone();
+        self.settled = snapshot;
+        // Whatever gesture was in flight belongs to the state being left behind.
+        self.cancel_gesture();
+        self.reevaluate = true;
+    }
+
+    /// Drop any gesture the pointer had started.
+    ///
+    /// Restoring replaces the parts a drag was holding by index, so a drag that
+    /// outlived an undo would move whatever now sits at those indices.
+    fn cancel_gesture(&mut self) {
+        self.dragging = None;
+        self.press_drag = None;
+        self.drag_origin.clear();
+        self.drag_travel = Vec2::ZERO;
+        self.marquee = None;
+        self.joystick = None;
+        self.knob = None;
+        self.cancel_wire();
+        self.release_input();
+    }
+
+    /// Starting another document starts another history: undo must not walk back
+    /// through the file that was open before it.
+    fn reset_history(&mut self) {
+        self.settled = self.snapshot();
+        self.past.clear();
+        self.future.clear();
+    }
 }
 
 impl Default for Spike {
@@ -827,7 +931,7 @@ impl Default for Spike {
             (parts, wires, scene::blink_sketch(), None)
         };
         let auto_run = std::env::var("CROQUIS_UI_AUTORUN").is_ok();
-        Self {
+        let mut spike = Self {
             camera: Camera::default(),
             parts,
             wires,
@@ -904,7 +1008,14 @@ impl Default for Spike {
             presets: scene::presets(),
             auto_run,
             fit_requested: true,
-        }
+            settled: Snapshot::default(),
+            past: Vec::new(),
+            future: Vec::new(),
+        };
+        // The circuit the app opened with is step zero, not something to undo
+        // back into.
+        spike.reset_history();
+        spike
     }
 }
 
@@ -1372,6 +1483,9 @@ impl Spike {
         // The canvas art belongs to the parts that were just cleared; the palette
         // thumbnails belong to the catalogue and are still what the panel draws.
         keep_palette(&mut self.textures);
+        // A new document is a new history: undo must not resurrect the circuit
+        // that was open before it.
+        self.reset_history();
         self.camera = Camera::default();
     }
 
@@ -1408,6 +1522,8 @@ impl Spike {
         self.diagnostics.clear();
         self.pending_jump = None;
         self.file_error = None;
+        // Another document means another history.
+        self.reset_history();
         self.camera = Camera::default();
         let eval =
             scene::evaluate_scene(
@@ -1866,14 +1982,25 @@ impl Spike {
         if ctx.egui_wants_keyboard_input() {
             return;
         }
-        let (delete, copy, cut, paste) = ctx.input(|input| {
+        let (delete, copy, cut, paste, undo, redo) = ctx.input(|input| {
             (
                 input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace),
                 input.modifiers.command && input.key_pressed(egui::Key::C),
                 input.modifiers.command && input.key_pressed(egui::Key::X),
                 input.modifiers.command && input.key_pressed(egui::Key::V),
+                // Ctrl+Z undoes the circuit; the editor keeps its own, because
+                // this whole function stands down while a text box has the caret.
+                input.modifiers.command && !input.modifiers.shift && input.key_pressed(egui::Key::Z),
+                input.modifiers.command
+                    && (input.key_pressed(egui::Key::Y)
+                        || (input.modifiers.shift && input.key_pressed(egui::Key::Z))),
             )
         });
+        if undo {
+            self.undo();
+        } else if redo {
+            self.redo();
+        }
         // R turns a quarter clockwise, Shift+R half a turn — v0.2's bindings.
         let (turn, half_turn) = ctx.input(|input| {
             (
@@ -2394,6 +2521,27 @@ impl eframe::App for Spike {
                         }
                     });
                     ui.menu_button(texts.t("menu.edit"), |ui| {
+                        // Shown disabled rather than hidden: a greyed Undo still
+                        // tells you the app has one.
+                        if ui
+                            .add_enabled(
+                                !self.past.is_empty(),
+                                egui::Button::new(texts.t("edit.undo")),
+                            )
+                            .clicked()
+                        {
+                            self.undo();
+                        }
+                        if ui
+                            .add_enabled(
+                                !self.future.is_empty(),
+                                egui::Button::new(texts.t("edit.redo")),
+                            )
+                            .clicked()
+                        {
+                            self.redo();
+                        }
+                        ui.separator();
                         if ui.button(texts.t("edit.clear_sketch")).clicked() {
                             self.sketch.clear();
                         }
@@ -3331,6 +3479,9 @@ impl eframe::App for Spike {
                 }
             }
         });
+        // Once a frame, after every panel and the canvas have had their say. A
+        // held pointer defers it, so a drag lands as one step and not sixty.
+        self.commit_history(ctx.input(|input| input.pointer.any_down()));
     }
 }
 
@@ -5023,6 +5174,84 @@ mod tests {
             Pick::Pin((0, 0)),
             "a pin nothing covers is still how a wire gets started"
         );
+    }
+
+    #[test]
+    fn an_edit_can_be_undone_and_redone() {
+        let mut spike = Spike::default();
+        let before = spike.parts.len();
+        spike.selection.select_part(1);
+        spike.delete_selection();
+        assert_eq!(spike.parts.len(), before - 1);
+        spike.commit_history(false);
+        assert_eq!(spike.past.len(), 1, "one delete is one step");
+
+        spike.undo();
+        assert_eq!(spike.parts.len(), before, "undo brings the part back");
+        spike.redo();
+        assert_eq!(spike.parts.len(), before - 1, "and redo takes it away");
+    }
+
+    #[test]
+    fn a_drag_is_one_step_and_not_one_per_frame() {
+        let mut spike = Spike::default();
+        let start = spike.parts[0].center;
+        // While the pointer is down the drag is not finished, so nothing is
+        // committed however many frames it lasts.
+        for step in 1..=5 {
+            spike.parts[0].center = start + Vec2::new(step as f32 * 10.0, 0.0);
+            spike.commit_history(true);
+        }
+        assert!(
+            spike.past.is_empty(),
+            "a held pointer must not commit mid-drag"
+        );
+        // The button comes up and the whole drag lands as one step.
+        spike.commit_history(false);
+        assert_eq!(spike.past.len(), 1, "one drag is one step");
+        spike.undo();
+        assert_eq!(
+            spike.parts[0].center, start,
+            "undo puts it back where the drag began"
+        );
+    }
+
+    #[test]
+    fn editing_after_an_undo_drops_what_was_ahead() {
+        let mut spike = Spike::default();
+        let before = spike.parts.len();
+        spike.selection.select_part(1);
+        spike.delete_selection();
+        spike.commit_history(false);
+        spike.undo();
+        assert_eq!(spike.future.len(), 1, "the delete is redoable");
+
+        // A new edit is a new branch: the old redo is no longer reachable.
+        spike.selection.select_part(0);
+        spike.delete_selection();
+        spike.commit_history(false);
+        assert!(
+            spike.future.is_empty(),
+            "a fresh edit invalidates the redo branch"
+        );
+        assert_eq!(spike.parts.len(), before - 1);
+    }
+
+    #[test]
+    fn another_document_starts_another_history() {
+        let mut spike = Spike::default();
+        spike.selection.select_part(1);
+        spike.delete_selection();
+        spike.commit_history(false);
+        assert!(!spike.past.is_empty());
+
+        spike.new_document();
+        assert!(spike.past.is_empty(), "a new document has nothing behind it");
+        assert!(spike.future.is_empty());
+        // Undo on an empty history is a no-op, not a panic.
+        spike.undo();
+        spike.redo();
+        assert!(spike.parts.is_empty());
     }
 
     #[test]

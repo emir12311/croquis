@@ -6,6 +6,8 @@
   "edit.copy": "Kopyala",
   "edit.delete": "Sil",
   "edit.paste": "Yapıştır",
+  "edit.redo": "Yinele",
+  "edit.undo": "Geri al",
   "editor.jump": "İmleci bu satıra koy",
   "error.load": "{name} yüklenemedi",
   "field.colour": "Renk",
