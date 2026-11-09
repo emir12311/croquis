@@ -916,11 +916,24 @@ fn hit_part(parts: &[Part], world: Pos2) -> Option<usize> {
         .find_map(|(index, part)| part.bounds().contains(world).then_some(index))
 }
 
+/// The pin under the pointer, ignoring any pin that a part is drawn over.
+///
+/// A pin is not a layer of its own: it is drawn with the part that owns it, so a
+/// part lying on top of it has to be what the pointer finds. Testing every pin
+/// regardless let a covered pin be grabbed through the piece covering it.
 fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
     let radius_sq = radius * radius;
     for (part_index, part) in parts.iter().enumerate().rev() {
         for (pin_index, _) in part.pins.iter().enumerate().rev() {
-            if part.pin_world(pin_index).distance_sq(world) <= radius_sq {
+            let at = part.pin_world(pin_index);
+            if at.distance_sq(world) > radius_sq {
+                continue;
+            }
+            // The test is at the pin's own position, not the pointer's: a pin
+            // sticks out past its body, so the pointer can be beside the part
+            // that would hide it.
+            let covering = hit_part(parts, at);
+            if covering.is_none_or(|covering| covering == part_index) {
                 return Some((part_index, pin_index));
             }
         }
@@ -1050,6 +1063,40 @@ fn drag_placement(
     raw.into_iter()
         .map(|(index, at)| (index, at + nudge))
         .collect()
+}
+
+/// What the pointer is on.
+///
+/// The order is the canvas's own: pins are the smallest target and the one a wire
+/// is drawn from, so they are asked first; wires are painted after the parts, so a
+/// wire crossing a piece is what the pointer is on; then the parts themselves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pick {
+    Pin(PinRef),
+    Wire(usize),
+    Part(usize),
+    Nothing,
+}
+
+fn pick_at(
+    parts: &[Part],
+    wires: &[Wire],
+    camera: Camera,
+    rect: Rect,
+    screen: Pos2,
+    pin_radius: f32,
+) -> Pick {
+    let world = camera.screen_to_world(rect, screen);
+    if let Some(pin) = hit_pin(parts, world, pin_radius) {
+        return Pick::Pin(pin);
+    }
+    if let Some(index) = hit_wire(parts, wires, camera, rect, screen, WIRE_HIT_RADIUS) {
+        return Pick::Wire(index);
+    }
+    if let Some(index) = hit_part(parts, world) {
+        return Pick::Part(index);
+    }
+    Pick::Nothing
 }
 
 /// A wire's route in screen space: the pins either end, the bends between them,
@@ -2788,8 +2835,21 @@ impl eframe::App for Spike {
 
             let pointer = response.hover_pos();
             let world_pointer = pointer.map(|p| self.camera.screen_to_world(rect, p));
-            self.hovered_pin = world_pointer
-                .and_then(|p| hit_pin(&self.parts, p, PIN_HIT_RADIUS / self.camera.zoom));
+            // The highlight follows the same order a click does: a pin under a
+            // wire, or under another part, is not what the pointer is on.
+            self.hovered_pin = pointer.and_then(|p| {
+                match pick_at(
+                    &self.parts,
+                    &self.wires,
+                    self.camera,
+                    rect,
+                    p,
+                    PIN_HIT_RADIUS / self.camera.zoom,
+                ) {
+                    Pick::Pin(pin) => Some(pin),
+                    _ => None,
+                }
+            });
 
             if response.dragged_by(PointerButton::Middle)
                 || response.dragged_by(PointerButton::Secondary)
@@ -2820,16 +2880,32 @@ impl eframe::App for Spike {
                 if let Some(pos) = ctx.input(|input| input.pointer.interact_pos()) {
                     if rect.contains(pos) {
                         let world = self.camera.screen_to_world(rect, pos);
-                        if let Some(pin) =
-                            hit_pin(&self.parts, world, PIN_HIT_RADIUS / self.camera.zoom)
-                        {
+                        let pick = pick_at(
+                            &self.parts,
+                            &self.wires,
+                            self.camera,
+                            rect,
+                            pos,
+                            PIN_HIT_RADIUS / self.camera.zoom,
+                        );
+                        if let Pick::Pin(pin) = pick {
                             // Dragging from a pin draws a wire. Before this, the
                             // press grabbed the part and dragged the Arduino out
                             // from under itself.
                             self.wire_press(pin);
                         } else if self.wire_start.is_some() {
                             // Mid-wire, the click branch below pins a bend.
-                        } else if let Some(index) = hit_part(&self.parts, world) {
+                        } else if let Pick::Wire(index) = pick {
+                            // A wire crossing a piece is what the pointer is on:
+                            // wires are painted after the parts. Testing the part
+                            // first made a wire lying over a part impossible to
+                            // pick.
+                            if shift {
+                                self.selection.toggle_wire(index);
+                            } else {
+                                self.selection.select_wire(index);
+                            }
+                        } else if let Pick::Part(index) = pick {
                             // Shift adds to or takes from the selection; a plain
                             // press on something already selected keeps the rest,
                             // so a multi-part drag does not collapse to one part.
@@ -2839,19 +2915,6 @@ impl eframe::App for Spike {
                                 self.selection.select_part(index);
                             }
                             self.press_control(index, world, pos);
-                        } else if let Some(index) = hit_wire(
-                            &self.parts,
-                            &self.wires,
-                            self.camera,
-                            rect,
-                            pos,
-                            WIRE_HIT_RADIUS,
-                        ) {
-                            if shift {
-                                self.selection.toggle_wire(index);
-                            } else {
-                                self.selection.select_wire(index);
-                            }
                         } else {
                             if !shift {
                                 self.selection.clear();
@@ -2989,20 +3052,24 @@ impl eframe::App for Spike {
                         // Mid-wire, a click off a pin pins a bend where it
                         // landed, which is how a wire is routed around things.
                         self.wire_bend(world);
-                    } else if let Some(index) = hit_part(&self.parts, world) {
-                        if !self.selection.has_part(index) {
-                            self.selection.select_part(index);
-                        }
                     } else if let Some(pos) = pointer {
-                        if let Some(index) = hit_wire(
+                        // The same order as the press, so a click and a press can
+                        // never disagree about what is under the pointer.
+                        match pick_at(
                             &self.parts,
                             &self.wires,
                             self.camera,
                             rect,
                             pos,
-                            WIRE_HIT_RADIUS,
+                            PIN_HIT_RADIUS / self.camera.zoom,
                         ) {
-                            self.selection.select_wire(index);
+                            Pick::Wire(index) => self.selection.select_wire(index),
+                            Pick::Part(index) => {
+                                if !self.selection.has_part(index) {
+                                    self.selection.select_part(index);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -4883,6 +4950,79 @@ mod tests {
                 "the art no longer contains the rotor's {name} ({value}), so the constant is stale"
             );
         }
+    }
+
+    #[test]
+    fn a_wire_over_a_part_is_what_the_pointer_finds() {
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        // Two pins to hang a wire between, and a part sitting under its middle.
+        let left = part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        let right = part_of_kind("led", Pos2::new(300.0, 100.0), &[(0.0, 0.0)]);
+        let under = part_of_kind("resistor", Pos2::new(200.0, 100.0), &[]);
+        let parts = vec![left, right, under];
+        let wires = vec![Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: Vec::new(),
+        }];
+        let screen = camera.world_to_screen(rect, Pos2::new(200.0, 100.0));
+        assert_eq!(
+            pick_at(
+                &parts,
+                &wires,
+                camera,
+                rect,
+                screen,
+                PIN_HIT_RADIUS / camera.zoom
+            ),
+            Pick::Wire(0),
+            "the wire is painted over the part, so it is what the pointer is on"
+        );
+    }
+
+    #[test]
+    fn a_pin_under_another_part_cannot_be_grabbed_through_it() {
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        // The board's pin sits at its centre and a resistor is drawn over it.
+        let board = part_of_kind("breadboard", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        let covering = part_of_kind("resistor", Pos2::new(100.0, 100.0), &[]);
+        let parts = vec![board, covering];
+        let screen = camera.world_to_screen(rect, Pos2::new(100.0, 100.0));
+        assert_eq!(
+            pick_at(
+                &parts,
+                &[],
+                camera,
+                rect,
+                screen,
+                PIN_HIT_RADIUS / camera.zoom
+            ),
+            Pick::Part(1),
+            "the piece on top is what the pointer finds, not the pin beneath it"
+        );
+    }
+
+    #[test]
+    fn an_exposed_pin_is_the_first_thing_the_pointer_finds() {
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let board = part_of_kind("breadboard", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        let parts = vec![board];
+        let screen = camera.world_to_screen(rect, Pos2::new(100.0, 100.0));
+        assert_eq!(
+            pick_at(
+                &parts,
+                &[],
+                camera,
+                rect,
+                screen,
+                PIN_HIT_RADIUS / camera.zoom
+            ),
+            Pick::Pin((0, 0)),
+            "a pin nothing covers is still how a wire gets started"
+        );
     }
 
     #[test]
