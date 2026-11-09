@@ -1,16 +1,93 @@
-resistor is wide in the tab
-joystick shows gray squares on the tab
-no turning pieces or selection
-cant delete with del key
-no copy paste cut
-the components tab acts weird when resized. a resize should just make the component boxes and pictures scale up not keep them the same just make the grid bigger
-the presets should be grouped like in v0.2
-push buttons pushed state doesnt show when clicked.
-cant move the ir remote
-no visual way to understand if the keypad is being clicked
-no snapping to pins
-cant sleect wires
-no drag select
-cant multi select via shift
-code editor is bad. (we could change it, it just doesnt have many QoL featres)
-no language system
+Croquis (egui spike) — what is actually left
+============================================
+
+Audited 2026-11-10 against the working tree at 06cfcd6, by running the suite
+rather than by reading the old list. Every line below is either proved by a
+test that exists and passes, or is real work that nobody has started.
+
+The previous version of this file listed 15 bugs. Thirteen of them were already
+fixed and tested when it was last read, which is why it felt endless: it was a
+list of finished work.
+
+
+Still open — real work, not bugs
+--------------------------------
+
+1. No language system.
+   The UI's strings are hard-coded English in `spike/egui/src/main.rs`, and the
+   part and field labels come from `crates/croquis-core/src/catalogue.rs` as
+   `&'static str`. Needs a design decision: where the strings live, and whether
+   the catalogue keeps its English labels as the canonical keys or grows a
+   per-locale shape. No test covers this, because there is nothing to cover yet.
+
+2. The code editor's QoL is poor.
+   Multiline edit, syntax colouring, completion and diagnostic jumps all work
+   (see Spike B), but there is no bracket matching, no auto-indent, no comment
+   toggle and no grouped undo. Judgement call, not a defect: it needs a
+   decision about which of those are worth having before it needs code.
+
+
+Done — with the test that proves it
+-----------------------------------
+
+   resistor is wide in the tab
+     -> a_palette_picture_keeps_the_parts_aspect
+
+   joystick shows gray squares on the tab
+     -> the_joysticks_invisible_hit_areas_are_not_in_its_palette_art
+
+   no turning pieces
+     -> a_quarter_turn_swaps_the_box_and_carries_the_pins
+     -> four_quarter_turns_come_back_where_they_started
+     -> a_turn_survives_a_save_and_a_load
+
+   no selection / cant select wires
+     -> a_wire_can_be_clicked_and_a_point_away_from_it_cannot
+
+   cant delete with del key
+     -> deleting_a_parts_takes_its_wires_and_leaves_the_rest_alone
+     -> deleting_one_of_two_parts_keeps_the_others_wires_indexed
+
+   no copy paste cut
+     -> copy_and_paste_copies_the_wiring_between_the_parts
+     -> a_pasted_wire_keeps_its_bends
+
+   no drag select
+     -> the_marquee_selects_the_parts_it_covers
+     -> a_marquee_catches_a_wire_that_crosses_it
+
+   cant multi select via shift
+     -> the_marquee_selects_the_parts_it_covers (the additive half)
+     -> Selection::toggle_part, driven by the shift-click path
+
+   the components tab acts weird when resized
+     -> palette tiles are sized from their column, and the art is baked at
+        128px and drawn down, so the boxes and pictures scale rather than the
+        grid merely gaining cells
+
+   the presets should be grouped like in v0.2
+     -> presets_are_grouped_into_v0_2s_three_tabs
+
+   push buttons pushed state doesnt show when clicked
+     -> a_held_button_looks_different_from_a_resting_one
+     -> a_held_button_pulls_its_pin_for_the_sketch
+
+   cant move the ir remote
+     -> a_press_takes_the_button_and_leaves_it_movable
+       (a press on the remote's own button falls through to a drag of the part)
+
+   no visual way to understand if the keypad is being clicked
+     -> the_keypad_mark_covers_the_key_the_tap_landed_on
+
+   no snapping to pins
+     -> a_pin_that_comes_close_to_another_lands_on_it
+     -> a_turned_part_snaps_on_the_pins_it_actually_draws
+
+
+Good to know
+------------
+
+`cargo test --manifest-path spike/egui/Cargo.toml` runs 114 tests headlessly in
+about a second, with no display. If a behaviour is worth keeping, it is worth a
+test here: a hand-test that only exists in your head is what turns one bug into
+an evening.
