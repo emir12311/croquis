@@ -41,6 +41,7 @@ impl Default for LcdState {
 
 impl LcdState {
     /// The two rows as text, for tests and for anything that wants to look.
+    #[cfg(test)]
     pub fn text(&self) -> [String; 2] {
         let row = |start: usize| {
             let row = &self.chars[start..start + 16];
@@ -133,6 +134,7 @@ pub fn latch(state: &mut LcdState, rs: bool, data: [bool; 4]) -> bool {
 
 /// Send one whole byte as two enable pulses, for tests and for anything that
 /// already has the byte in hand.
+#[cfg(test)]
 pub fn write_byte(state: &mut LcdState, rs: bool, byte: u8) {
     let nibbles = |value: u8| {
         [

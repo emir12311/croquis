@@ -11,8 +11,12 @@ use croquis_core::catalogue::{parse_kind, part_by_kind, PartKind, CATALOGUE};
 use croquis_core::diagram::{build_diagram, parse_diagram, PlacedPart, RoutedWire};
 use croquis_core::document::PinRef as CorePinRef;
 use croquis_core::netlist::{
-    evaluate_circuit_with_state, CircuitEval, EvalPart, EvalWire, KeyPosition, LedState, PinPoint,
+    evaluate_circuit_with_state, CircuitEval, EvalPart, EvalWire, KeyPosition, PinPoint,
 };
+// Only the test-only shortcuts return LED states; the shell reads them out of a
+// `CircuitEval`.
+#[cfg(test)]
+use croquis_core::netlist::LedState;
 use croquis_core::shift_register::ShiftState;
 
 #[derive(Clone)]
@@ -326,6 +330,10 @@ pub fn save_diagram_file(
 }
 
 /// Evaluate the Blink preset with the AVR's pin 13 high.
+///
+/// Test-only: the shell evaluates whatever circuit is open, so the shortcut is
+/// for the tests that want the bundled preset without loading a file.
+#[cfg(test)]
 pub fn evaluate_blink() -> HashMap<String, LedState> {
     let avr = HashMap::from([("B5".into(), true)]);
     evaluate_blink_with(&avr)
@@ -399,6 +407,7 @@ pub fn evaluate_scene(
 }
 
 /// The LED states from a loaded circuit.
+#[cfg(test)]
 pub fn evaluate_with(
     parts: &[Part],
     wires: &[Wire],
@@ -419,6 +428,7 @@ pub fn evaluate_with(
 }
 
 /// Evaluate Blink from the simulator's current AVR pin levels.
+#[cfg(test)]
 pub fn evaluate_blink_with(avr: &HashMap<String, bool>) -> HashMap<String, LedState> {
     let (parts, wires) = load_blink();
     evaluate_with(&parts, &wires, avr)
@@ -700,29 +710,6 @@ pub fn uno_svg(svg: &str, led13: bool) -> String {
     format!("{}{}{}", &svg[..start], lit, &svg[start + end..])
 }
 
-/// Rotate the stepper's shaft and rotor arrow to an angle.
-///
-/// The element draws both, in its own two forms: the arrow is
-/// `rotate(0, 28.65,28.65)` about the centre, the shaft is
-/// `translate(28.65, 28.65) rotate(0)`. `servo_svg` cannot be used here — its
-/// `rotate(0)` replacement lands inside the first of those and leaves
-/// `rotate(<angle>), 28.65,28.65)`, which is not a transform at all.
-///
-/// Kept for the save/load path and for tests; the canvas does not use it. See
-/// [`stepper_base_svg`] for why.
-pub fn stepper_svg(svg: &str, angle: f64) -> String {
-    svg.replacen(
-        "rotate(0, 28.65,28.65)",
-        &format!("rotate({}, 28.65,28.65)", tidy(angle)),
-        1,
-    )
-    .replacen(
-        "rotate(0)",
-        &format!("rotate({})", tidy(angle)),
-        1,
-    )
-}
-
 /// The stepper's art with its rotor left out, so the texture does not depend on
 /// the angle.
 ///
@@ -811,17 +798,12 @@ impl StepperRotor {
     }
 }
 
-/// An angle as SVG wants it: short, and never `-0`.
-fn tidy(value: f64) -> String {
-    let rounded = (value * 10.0).round() / 10.0;
-    if rounded == 0.0 {
-        "0".into()
-    } else {
-        format!("{rounded}")
-    }
-}
-
 /// Apply the 7-segment element's segment/DP fills.
+///
+/// Test-only for now: the canvas patches a display's art through
+/// `texture_key`'s own path, so this is the standalone version the tests pin the
+/// fill order against.
+#[cfg(test)]
 pub fn seven_segment_svg(svg: &str, values: &[u8], color: &str) -> String {
     let lit = match color {
         "green" => "#9eff3c",

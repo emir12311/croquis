@@ -937,6 +937,11 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
 /// than overlapping. `moving` is the whole selection: a pin on any dragged part
 /// can be the one that locks, and the nudge moves them all, which keeps the pick's
 /// own shape.
+///
+/// The drag itself goes through [`snap_nudge_at`], which measures from positions
+/// the pick does not occupy yet; this form, at the pick's current centres, is what
+/// the tests state their cases in.
+#[cfg(test)]
 fn snap_nudge(parts: &[Part], moving: &[usize], radius: f32) -> Option<Vec2> {
     let centres: Vec<(usize, Pos2)> = moving
         .iter()

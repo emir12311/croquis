@@ -168,8 +168,11 @@ impl Texts {
             .unwrap_or(key)
     }
 
-    /// The keys this language is missing, in key order. For tests and for a
-    /// translator's "what is left" list.
+    /// The keys this language is missing, in key order.
+    ///
+    /// Test-only while there is one translator and two languages: it exists so a
+    /// language that has fallen behind fails a test instead of shipping.
+    #[cfg(test)]
     pub fn missing(&self) -> Vec<&str> {
         self.english
             .keys()
@@ -183,6 +186,7 @@ impl Texts {
     /// A key that only ever resolves by falling back to itself reads as its own
     /// name in the UI, which is a bug; this is how the catalogue coverage test
     /// tells a real entry from that.
+    #[cfg(test)]
     pub fn has(&self, key: &str) -> bool {
         self.english.contains_key(key)
     }

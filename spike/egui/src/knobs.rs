@@ -173,6 +173,10 @@ pub fn slide_value_grabbed(part: &Part, world: Pos2, grab: f32) -> f64 {
 }
 
 /// The value a pointer asks of the slide pot, grabbing it where it is left.
+///
+/// Test-only: the canvas uses [`slide_value_grabbed`] so a grab does not make the
+/// handle jump to the pointer.
+#[cfg(test)]
 pub fn slide_value(part: &Part, world: Pos2) -> f64 {
     slide_value_grabbed(part, world, 0.0)
 }

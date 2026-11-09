@@ -6,6 +6,9 @@
 
 use eframe::egui;
 
+/// A small LED element embedded in the binary, so the rasteriser has something to
+/// draw without a file on disk. Test-only: the canvas uses the extracted art.
+#[cfg(test)]
 pub const SPIKE_LED_SVG: &str = r##"
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="128" viewBox="0 0 24 32">
   <path d="M8 18v11M16 18v11" stroke="#bfc7c9" stroke-width="1.4" fill="none"/>
