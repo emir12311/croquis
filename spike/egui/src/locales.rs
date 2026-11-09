@@ -71,6 +71,51 @@ pub fn load(locale: Locale) -> Catalogue {
     serde_json::from_str(&text).unwrap_or_default()
 }
 
+/// Where the chosen language is remembered between runs.
+///
+/// Not in the diagram and not in eframe's own storage: the language belongs to
+/// the reader, not to the circuit they happen to have open, so one file for the
+/// app is right. XDG first, because that is where a Linux desktop expects a
+/// config file, with `~/.config` as the fallback.
+fn config_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    Some(base.join("croquis").join("locale"))
+}
+
+/// The language the last run chose, or English.
+///
+/// An unreadable file, a tag for a language we no longer ship, or a hand-edited
+/// value all mean the same thing: start in English rather than refuse to start.
+pub fn read_locale(path: &Path) -> Locale {
+    let Ok(tag) = std::fs::read_to_string(path) else {
+        return Locale::English;
+    };
+    Locale::from_tag(tag.trim()).unwrap_or(Locale::English)
+}
+
+/// Remember the chosen language. Failure is not worth a dialog: the app keeps
+/// running in the language the reader picked, it just forgets it next time.
+pub fn write_locale(path: &Path, locale: Locale) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, format!("{}\n", locale.tag()))
+}
+
+/// The language this run should start in.
+pub fn saved_locale() -> Locale {
+    config_path().map(|path| read_locale(&path)).unwrap_or(Locale::English)
+}
+
+/// Remember `locale` for the next run.
+pub fn save_locale(locale: Locale) {
+    if let Some(path) = config_path() {
+        let _ = write_locale(&path, locale);
+    }
+}
+
 /// The text the interface draws, in the chosen language.
 ///
 /// English is kept alongside whatever is chosen because it is the contract: every
@@ -327,6 +372,37 @@ mod tests {
             "{} catalogue key(s) have no text in en.json: {missing:?}",
             missing.len()
         );
+    }
+
+    #[test]
+    fn the_chosen_language_survives_a_round_trip() {
+        // A nested path, so writing also has to create the directory it lives in.
+        let dir = std::env::temp_dir().join(format!("croquis-locale-{}", std::process::id()));
+        let path = dir.join("croquis").join("locale");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            read_locale(&path),
+            Locale::English,
+            "a file nobody wrote yet is English"
+        );
+        write_locale(&path, Locale::Turkish).expect("write");
+        assert_eq!(read_locale(&path), Locale::Turkish);
+        write_locale(&path, Locale::English).expect("write");
+        assert_eq!(read_locale(&path), Locale::English, "and it can go back");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_saved_tag_no_language_claims_starts_in_english() {
+        // What a hand-edited or downgraded config can hold. Refusing to start in
+        // a language we do not have would be worse than starting in English.
+        let path = std::env::temp_dir().join(format!(
+            "croquis-locale-bad-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, "klingon\n").expect("write");
+        assert_eq!(read_locale(&path), Locale::English);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

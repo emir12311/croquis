@@ -446,8 +446,9 @@ fn configure_style(ctx: &egui::Context) {
 
 fn main() -> eframe::Result {
     // The window title is set before the app exists, so it reads the catalogue
-    // itself. Phase 4 hands the same language to the app once it starts.
-    let texts = locales::Texts::load(locales::Locale::English);
+    // itself — in the language the last run saved, which is what the app will
+    // start in a moment later.
+    let texts = locales::Texts::load(locales::saved_locale());
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
@@ -460,7 +461,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             configure_style(&cc.egui_ctx);
-            Ok(Box::new(Spike::default()))
+            Ok(Box::new(Spike::starting_in(locales::saved_locale())))
         }),
     )
 }
@@ -699,6 +700,20 @@ struct Spike {
     fit_requested: bool,
 }
 
+impl Spike {
+    /// The app as a reader starts it: the English shell, in the language their
+    /// last run saved.
+    ///
+    /// Separate from `Default` on purpose. `Default` is what the tests build, and
+    /// a test that read this machine's config file would pass or fail depending
+    /// on who ran it.
+    fn starting_in(locale: locales::Locale) -> Self {
+        let mut spike = Self::default();
+        spike.texts.set_locale(locale);
+        spike
+    }
+}
+
 impl Default for Spike {
     fn default() -> Self {
         let preset = std::env::var("CROQUIS_UI_PRESET").ok().map(PathBuf::from);
@@ -761,6 +776,9 @@ impl Default for Spike {
             components_open: true,
             serial_open: false,
             palette_drag: None,
+            // English, always: `Default` is the shell the tests build, and it
+            // must not depend on whatever language this machine saved last. The
+            // app starts through `starting_in`, which applies the saved one.
             texts: locales::Texts::load(locales::Locale::English),
             part_warnings: HashMap::new(),
             segment_memory: HashMap::new(),
@@ -2172,6 +2190,18 @@ impl eframe::App for Spike {
                         ui.checkbox(&mut self.sketch_open, texts.t("panel.sketch"));
                         ui.checkbox(&mut self.components_open, texts.t("panel.components"));
                         ui.checkbox(&mut self.serial_open, texts.t("panel.serial"));
+                        ui.separator();
+                        // Each language names itself: someone who cannot read the
+                        // current one still has to be able to find their way out.
+                        ui.menu_button(texts.t("menu.language"), |ui| {
+                            for locale in locales::Locale::ALL {
+                                let active = self.texts.locale() == locale;
+                                if ui.selectable_label(active, locale.name()).clicked() {
+                                    self.texts.set_locale(locale);
+                                    locales::save_locale(locale);
+                                }
+                            }
+                        });
                     });
                     ui.menu_button(texts.t("menu.run"), |ui| {
                         if self.running {
@@ -4287,6 +4317,23 @@ mod tests {
         assert!(
             (nudge.y + 8.0).abs() < 0.001,
             "expected the turned pin's gap on y, got {nudge:?}"
+        );
+    }
+
+    #[test]
+    fn the_app_starts_in_the_language_it_is_given() {
+        // `Default` must stay English so no test depends on this machine's saved
+        // config; starting_in is the one that honours a choice.
+        let english = Spike::default();
+        assert_eq!(english.texts.locale(), locales::Locale::English);
+        assert_eq!(english.texts.t("menu.file"), "File");
+        let turkish = Spike::starting_in(locales::Locale::Turkish);
+        assert_eq!(turkish.texts.locale(), locales::Locale::Turkish);
+        assert_eq!(turkish.texts.t("menu.file"), "Dosya");
+        assert_eq!(
+            turkish.texts.t("view.zoom_in"),
+            "Yakınlaştır",
+            "and the whole shell follows, not just the menu name"
         );
     }
 
