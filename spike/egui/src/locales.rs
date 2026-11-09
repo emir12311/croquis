@@ -13,6 +13,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// A language the app ships.
 ///
@@ -75,18 +76,24 @@ pub fn load(locale: Locale) -> Catalogue {
 /// English is kept alongside whatever is chosen because it is the contract: every
 /// key is supposed to exist there, and a translation that has drifted shows the
 /// English rather than nothing.
+///
+/// The catalogues sit behind `Arc` so a `Texts` is cheap to clone, which is what
+/// lets a widget-heavy closure take its own copy: `t` borrows the `Texts` it was
+/// called on, and holding that borrow across a closure that wants `&mut self`
+/// would not compile.
+#[derive(Clone)]
 pub struct Texts {
     locale: Locale,
-    chosen: Catalogue,
-    english: Catalogue,
+    chosen: Arc<Catalogue>,
+    english: Arc<Catalogue>,
 }
 
 impl Texts {
     pub fn load(locale: Locale) -> Self {
         Self {
             locale,
-            chosen: load(locale),
-            english: load(Locale::English),
+            chosen: Arc::new(load(locale)),
+            english: Arc::new(load(Locale::English)),
         }
     }
 
@@ -99,7 +106,7 @@ impl Texts {
     pub fn set_locale(&mut self, locale: Locale) {
         if locale != self.locale {
             self.locale = locale;
-            self.chosen = load(locale);
+            self.chosen = Arc::new(load(locale));
         }
     }
 
@@ -133,6 +140,20 @@ impl Texts {
     /// tells a real entry from that.
     pub fn has(&self, key: &str) -> bool {
         self.english.contains_key(key)
+    }
+
+    /// The text for `key` with `{name}`-style placeholders filled in.
+    ///
+    /// A translation has to be able to put the value anywhere in the sentence —
+    /// Turkish and English do not agree on where "Could not load {name}" puts the
+    /// name — so the sentence comes from the file whole and the value is
+    /// substituted into it, never glued on the end.
+    pub fn tf(&self, key: &str, pairs: &[(&str, &str)]) -> String {
+        let mut out = self.t(key).to_string();
+        for (name, value) in pairs {
+            out = out.replace(&format!("{{{name}}}"), value);
+        }
+        out
     }
 }
 
@@ -231,7 +252,9 @@ mod tests {
             .find(|key| texts.chosen.contains_key(*key))
             .cloned()
             .expect("the catalogues share keys");
-        texts.chosen.remove(&english_key);
+        let mut chosen = (*texts.chosen).clone();
+        chosen.remove(&english_key);
+        texts.chosen = Arc::new(chosen);
         assert_eq!(
             texts.t(&english_key),
             texts.english[&english_key],
@@ -303,6 +326,36 @@ mod tests {
             missing.is_empty(),
             "{} catalogue key(s) have no text in en.json: {missing:?}",
             missing.len()
+        );
+    }
+
+    #[test]
+    fn every_key_the_shell_asks_for_has_a_translation() {
+        // The shell names its keys as string literals, so a typo there cannot be
+        // a compile error — it would just show a key on a button. Reading them
+        // back out of the source turns that into a failing test.
+        let source = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
+        )
+        .expect("the shell's own source");
+        let texts = Texts::load(Locale::English);
+        let mut missing = Vec::new();
+        for marker in [".t(\"", ".tf(\""] {
+            let mut rest = source.as_str();
+            while let Some(at) = rest.find(marker) {
+                rest = &rest[at + marker.len()..];
+                let Some(end) = rest.find('"') else { break };
+                let key = &rest[..end];
+                if !texts.has(key) {
+                    missing.push(key.to_string());
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "the shell asks for keys no catalogue carries: {missing:?}"
         );
     }
 

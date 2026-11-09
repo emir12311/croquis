@@ -42,6 +42,7 @@ mod sensors;
 mod stepper;
 mod scene;
 
+use locales::Texts;
 use scene::{Part, PinRef, Wire};
 
 const GRID: f32 = 24.0;
@@ -275,11 +276,11 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> bool {
 }
 
 /// The chevron that closes a panel, as v0.2's `.icon-btn` in a head.
-fn panel_toggle(ui: &mut egui::Ui, open: &mut bool) -> bool {
+fn panel_toggle(ui: &mut egui::Ui, open: &mut bool, texts: &Texts) -> bool {
     let (icon, hover) = if *open {
-        (Icon::Close, "Collapse")
+        (Icon::Close, texts.t("panel.collapse"))
     } else {
-        (Icon::Open, "Expand")
+        (Icon::Open, texts.t("panel.expand"))
     };
     if icon_button(ui, icon, hover) {
         *open = !*open;
@@ -444,11 +445,14 @@ fn configure_style(ctx: &egui::Context) {
 }
 
 fn main() -> eframe::Result {
+    // The window title is set before the app exists, so it reads the catalogue
+    // itself. Phase 4 hands the same language to the app once it starts.
+    let texts = locales::Texts::load(locales::Locale::English);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
             .with_min_inner_size([800.0, 500.0])
-            .with_title("Croquis"),
+            .with_title(texts.t("app.name")),
         ..Default::default()
     };
     eframe::run_native(
@@ -1122,7 +1126,10 @@ impl Spike {
         self.stop_sim();
         let (parts, wires, sketch) = scene::load_diagram_file(&path);
         if parts.is_empty() {
-            self.file_error = Some(format!("Could not load {}", path.display()));
+            self.file_error = Some(
+                self.texts
+                    .tf("error.load", &[("name", &path.display().to_string())]),
+            );
             return;
         }
         // Rasterise the new scene before swapping it in. Otherwise the canvas
@@ -1165,8 +1172,11 @@ impl Spike {
     }
 
     fn open_dialog(&mut self, ctx: &egui::Context) {
+        // Owned before the dialog opens: the picker's result is used inside a
+        // body that borrows `self` mutably.
+        let filter = self.texts.t("file.document_filter").to_string();
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Croquis diagram", &["json"])
+            .add_filter(&filter, &["json"])
             .pick_file()
         {
             self.open_path(path, &ctx);
@@ -1192,8 +1202,9 @@ impl Spike {
     }
 
     fn save_as(&mut self) {
+        let filter = self.texts.t("file.document_filter").to_string();
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Croquis diagram", &["json"])
+            .add_filter(&filter, &["json"])
             .set_file_name("diagram.json")
             .save_file()
         {
@@ -2077,33 +2088,43 @@ impl eframe::App for Spike {
                     bar.max.y,
                     egui::Stroke::new(1.0, BORDER),
                 );
+                // One copy of the text for the whole bar: `t` borrows the
+                // `Texts` it reads from, and the menus below want `self` mutably.
+                let texts = self.texts.clone();
                 ui.horizontal_centered(|ui| {
                     ui.add_space(2.0);
                     ui.label(
-                        egui::RichText::new("Croquis")
+                        egui::RichText::new(texts.t("app.name"))
                             .size(14.0)
                             .family(egui::FontFamily::Name("semibold".into())),
                     );
                     ui.add_space(10.0);
-                    ui.menu_button("File", |ui| {
-                        if ui.button("New").clicked() {
+                    ui.menu_button(texts.t("menu.file"), |ui| {
+                        if ui.button(texts.t("file.new")).clicked() {
                             self.new_document();
                         }
-                        if ui.button("Open…").clicked() {
+                        if ui.button(texts.t("file.open")).clicked() {
                             self.open_dialog(&ctx);
                         }
-                        if ui.button("Save").clicked() {
+                        if ui.button(texts.t("file.save")).clicked() {
                             self.save();
                         }
-                        if ui.button("Save as…").clicked() {
+                        if ui.button(texts.t("file.save_as")).clicked() {
                             self.save_as();
                         }
                         // v0.2 keeps the presets behind a disclosure with three
                         // tabs, in the same menu rather than a stacked one. The
                         // word rather than a triangle: the bundled font has no
                         // triangles and egui's fallback draws them as tofu.
-                        let state = if self.presets_open { "Hide" } else { "Open" };
-                        if ui.button(format!("Presets    {state}")).clicked() {
+                        let state = if self.presets_open {
+                            texts.t("presets.hide")
+                        } else {
+                            texts.t("presets.show")
+                        };
+                        if ui
+                            .button(format!("{}    {state}", texts.t("presets.heading")))
+                            .clicked()
+                        {
                             self.presets_open = !self.presets_open;
                         }
                         if self.presets_open {
@@ -2130,39 +2151,43 @@ impl eframe::App for Spike {
                             }
                         }
                         ui.separator();
-                        if ui.button("Quit").clicked() {
+                        if ui.button(texts.t("file.quit")).clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
-                    ui.menu_button("Edit", |ui| {
-                        if ui.button("Clear sketch").clicked() {
+                    ui.menu_button(texts.t("menu.edit"), |ui| {
+                        if ui.button(texts.t("edit.clear_sketch")).clicked() {
                             self.sketch.clear();
                         }
                     });
-                    ui.menu_button("View", |ui| {
-                        if ui.button("Reset view").clicked() {
+                    ui.menu_button(texts.t("menu.view"), |ui| {
+                        if ui.button(texts.t("view.reset")).clicked() {
                             self.camera = Camera::default();
                         }
-                        if ui.button("Clear wires").clicked() {
+                        if ui.button(texts.t("edit.clear_wires")).clicked() {
                             self.wires.clear();
                             self.wire_start = None;
                         }
                         ui.separator();
-                        ui.checkbox(&mut self.sketch_open, "Sketch panel");
-                        ui.checkbox(&mut self.components_open, "Components panel");
-                        ui.checkbox(&mut self.serial_open, "Serial monitor");
+                        ui.checkbox(&mut self.sketch_open, texts.t("panel.sketch"));
+                        ui.checkbox(&mut self.components_open, texts.t("panel.components"));
+                        ui.checkbox(&mut self.serial_open, texts.t("panel.serial"));
                     });
-                    ui.menu_button("Run", |ui| {
+                    ui.menu_button(texts.t("menu.run"), |ui| {
                         if self.running {
-                            if ui.button("Stop").clicked() {
+                            if ui.button(texts.t("run.stop")).clicked() {
                                 self.stop_sim();
                             }
-                        } else if ui.button("Run").clicked() {
+                        } else if ui.button(texts.t("run.start")).clicked() {
                             self.start_sim(&ctx);
                         }
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(if self.running { "Running" } else { "Stopped" });
+                        ui.label(if self.running {
+                            texts.t("run.running")
+                        } else {
+                            texts.t("run.stopped")
+                        });
                         if let Some(error) = &self.file_error {
                             ui.colored_label(Color32::from_rgb(0xe5, 0x48, 0x4d), error);
                         }
@@ -2176,7 +2201,7 @@ impl eframe::App for Spike {
                                 )),
                                 None => ui.label(error.lines().next().unwrap_or("")),
                             };
-                            ui.colored_label(ERROR_TEXT, "Compile/run failed");
+                            ui.colored_label(ERROR_TEXT, texts.t("run.failed"));
                         }
                     });
                 });
@@ -2190,9 +2215,10 @@ impl eframe::App for Spike {
                 .min_size(200.0)
                 .max_size(560.0)
                 .show(root, |ui| {
-                    panel_head(ui, "Components", |ui| {
+                    let texts = self.texts.clone();
+                    panel_head(ui, texts.t("panel.components"), |ui| {
                         let mut open = true;
-                        if panel_toggle(ui, &mut open) && !open {
+                        if panel_toggle(ui, &mut open, &texts) && !open {
                             self.components_open = false;
                         }
                     });
@@ -2289,7 +2315,8 @@ impl eframe::App for Spike {
             egui::Panel::right("components-rail")
                 .exact_size(30.0)
                 .show(root, |ui| {
-                    if icon_button(ui, Icon::Open, "Show the components") {
+                    let texts = self.texts.clone();
+                    if icon_button(ui, Icon::Open, texts.t("panel.components.show")) {
                         self.components_open = true;
                     }
                 });
@@ -2302,9 +2329,10 @@ impl eframe::App for Spike {
                 .min_size(200.0)
                 .max_size(560.0)
                 .show(root, |ui| {
-                    panel_head(ui, "Sketch", |ui| {
+                    let texts = self.texts.clone();
+                    panel_head(ui, texts.t("panel.sketch"), |ui| {
                         let mut open = true;
-                        if panel_toggle(ui, &mut open) && !open {
+                        if panel_toggle(ui, &mut open, &texts) && !open {
                             self.sketch_open = false;
                         }
                     });
@@ -2350,23 +2378,26 @@ impl eframe::App for Spike {
             egui::Panel::left("editor-rail")
                 .exact_size(30.0)
                 .show(root, |ui| {
-                    if icon_button(ui, Icon::Open, "Show the sketch") {
+                    let texts = self.texts.clone();
+                    if icon_button(ui, Icon::Open, texts.t("panel.sketch.show")) {
                         self.sketch_open = true;
                     }
                 });
         }
 
         egui::CentralPanel::default().show(root, |ui| {
-            panel_head(ui, "Circuit", |ui| {
+            let texts = self.texts.clone();
+            panel_head(ui, texts.t("panel.circuit"), |ui| {
                 // Right to left, as v0.2's circuit bar reads: the run button at
                 // the far edge, then zoom, then the view controls.
                 if self.running {
-                    if ui.button("Stop").clicked() {
+                    if ui.button(texts.t("run.stop")).clicked() {
                         self.stop_sim();
                     }
                 } else {
                     let run = egui::Button::new(
-                        egui::RichText::new("Run").color(Color32::from_rgb(0x1a, 0x1a, 0x1c)),
+                        egui::RichText::new(texts.t("run.start"))
+                            .color(Color32::from_rgb(0x1a, 0x1a, 0x1c)),
                     )
                     .fill(Color32::from_rgb(0xd9, 0xa4, 0x41));
                     if ui.add(run).clicked() {
@@ -2376,7 +2407,7 @@ impl eframe::App for Spike {
                 ui.add_space(6.0);
                 if ui
                     .add(egui::Button::new("+").frame(false))
-                    .on_hover_text("Zoom in")
+                    .on_hover_text(texts.t("view.zoom_in"))
                     .clicked()
                 {
                     self.camera.zoom = (self.camera.zoom * 1.2).min(8.0);
@@ -2384,16 +2415,16 @@ impl eframe::App for Spike {
                 ui.label(format!("{:.0}%", self.camera.zoom * 100.0));
                 if ui
                     .add(egui::Button::new("-").frame(false))
-                    .on_hover_text("Zoom out")
+                    .on_hover_text(texts.t("view.zoom_out"))
                     .clicked()
                 {
                     self.camera.zoom = (self.camera.zoom / 1.2).max(0.1);
                 }
                 ui.add_space(6.0);
-                if icon_button(ui, Icon::Fit, "Fit the circuit") {
+                if icon_button(ui, Icon::Fit, texts.t("view.fit")) {
                     self.fit_requested = true;
                 }
-                if icon_button(ui, Icon::Serial, "Toggle the serial monitor") {
+                if icon_button(ui, Icon::Serial, texts.t("panel.serial.toggle")) {
                     self.serial_open = !self.serial_open;
                 }
             });
@@ -2434,7 +2465,7 @@ impl eframe::App for Spike {
                                     changed
                                 }
                                 _ => {
-                                    ui.weak("Select a part to edit it.");
+                                    ui.weak(texts.t("properties.empty"));
                                     false
                                 }
                             })
@@ -2722,12 +2753,13 @@ impl eframe::App for Spike {
             }
 
             if self.serial_open {
-                panel_head(ui, "Serial Monitor", |ui| {
-                    if ui.button("Clear").clicked() {
+                let texts = self.texts.clone();
+                panel_head(ui, texts.t("panel.serial"), |ui| {
+                    if ui.button(texts.t("edit.clear")).clicked() {
                         self.serial.clear();
                     }
                     let mut open = true;
-                    if panel_toggle(ui, &mut open) && !open {
+                    if panel_toggle(ui, &mut open, &texts) && !open {
                         self.serial_open = false;
                     }
                 });
@@ -2754,7 +2786,7 @@ impl eframe::App for Spike {
                                 if problem.in_sketch() {
                                     let clicked = ui
                                         .add(egui::Label::new(row).sense(Sense::click()))
-                                        .on_hover_text("Put the caret on this line")
+                                        .on_hover_text(texts.t("editor.jump"))
                                         .clicked();
                                     if clicked {
                                         jump = Some((problem.line, problem.column));
