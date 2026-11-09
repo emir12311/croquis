@@ -48,6 +48,10 @@ const PIN_HIT_RADIUS: f32 = 9.0;
 /// How close a click has to be to a wire, in screen pixels, to select it. A
 /// wire is two and a half pixels wide, so this is the tolerance a hand needs.
 const WIRE_HIT_RADIUS: f32 = 6.0;
+/// How close a dragged pin has to come to a still pin, in screen pixels, before
+/// it locks onto it. A little larger than the hit radius: the pull should start
+/// just before the hand has to be exact.
+const SNAP_RADIUS: f32 = 10.0;
 
 /// The shell's own chrome, from v0.2's tokens (`--surface`, `--border`,
 /// `--text-muted`, `--accent`).
@@ -792,6 +796,45 @@ fn hit_pin(parts: &[Part], world: Pos2, radius: f32) -> Option<PinRef> {
         }
     }
     None
+}
+
+/// The nudge that makes a dragged pick's pin land exactly on a still pin.
+///
+/// v0.2 snapped while you moved: a pin that came within a few pixels of another
+/// part's pin jumped the rest of the way, which is how a leg ends up sitting in a
+/// breadboard hole instead of beside it. The closest such pair wins, and the
+/// nudge is the whole gap between them, so the part stops a hair short rather
+/// than overlapping. `moving` is the whole selection: a pin on any dragged part
+/// can be the one that locks, and the nudge moves them all, which keeps the pick's
+/// own shape.
+fn snap_nudge(parts: &[Part], moving: &[usize], radius: f32) -> Option<Vec2> {
+    let mut best: Option<(f32, Vec2)> = None;
+    for index in moving {
+        let Some(part) = parts.get(*index) else {
+            continue;
+        };
+        for pin in 0..part.pins.len() {
+            let from = part.pin_world(pin);
+            for (other_index, other) in parts.iter().enumerate() {
+                // A pick cannot snap to itself, or a wire's two ends would pull
+                // the part back to where it already is.
+                if moving.contains(&other_index) {
+                    continue;
+                }
+                for other_pin in 0..other.pins.len() {
+                    let offset = other.pin_world(other_pin) - from;
+                    let distance = offset.length();
+                    if distance > radius || distance <= f32::EPSILON {
+                        continue;
+                    }
+                    if best.is_none_or(|(closest, _)| distance < closest) {
+                        best = Some((distance, offset));
+                    }
+                }
+            }
+        }
+    }
+    best.map(|(_, offset)| offset)
 }
 
 /// A wire's route in screen space: the pins either end, the bends between them,
@@ -2608,9 +2651,22 @@ impl eframe::App for Spike {
                     }
                 } else if self.dragging.is_some() {
                     let delta = response.drag_delta() / self.camera.zoom;
-                    for index in self.selection.parts.clone() {
-                        if let Some(part) = self.parts.get_mut(index) {
+                    let moving = self.selection.parts.clone();
+                    for index in &moving {
+                        if let Some(part) = self.parts.get_mut(*index) {
                             part.center += delta;
+                        }
+                    }
+                    // A pin that has come close to another part's pin finishes
+                    // the journey, so a leg lands in the hole rather than near
+                    // it. The whole pick takes the nudge, not just the part whose
+                    // pin locked.
+                    let nudge = snap_nudge(&self.parts, &moving, SNAP_RADIUS / self.camera.zoom);
+                    if let Some(nudge) = nudge {
+                        for index in &moving {
+                            if let Some(part) = self.parts.get_mut(*index) {
+                                part.center += nudge;
+                            }
                         }
                     }
                 }
@@ -4092,6 +4148,108 @@ mod tests {
             .expect("blink has an Uno");
         spike.select_in(spike.parts[uno].bounds(), true);
         assert!(spike.selection.has_part(led) && spike.selection.has_part(uno));
+    }
+
+    /// A bare part: a box with a pin at each offset from its centre.
+    fn snapping_part(center: Pos2, pins: &[(f32, f32)]) -> Part {
+        Part {
+            id: format!("at-{}-{}", center.x, center.y),
+            kind: "led".into(),
+            name: "LED".into(),
+            center,
+            size: Vec2::new(20.0, 20.0),
+            rotation: 0.0,
+            color: Color32::BLACK,
+            pins: pins
+                .iter()
+                .map(|(x, y)| scene::Pin {
+                    name: "p".into(),
+                    offset: Vec2::new(*x, *y),
+                })
+                .collect(),
+            attrs: std::collections::HashMap::new(),
+            svg: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_pin_that_comes_close_to_another_lands_on_it() {
+        let still = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        let moved = snapping_part(Pos2::new(92.0, 100.0), &[(-10.0, 0.0)]);
+        // The pins are eight apart — inside the radius, so the eight pixels are
+        // what the nudge has to cover, exactly and in one step.
+        let nudge = snap_nudge(&[still, moved], &[1], SNAP_RADIUS).expect("a snap");
+        assert!(
+            (nudge.x - 8.0).abs() < 0.001 && nudge.y.abs() < 0.001,
+            "expected the whole gap, got {nudge:?}"
+        );
+    }
+
+    #[test]
+    fn a_pin_outside_the_snap_radius_is_left_alone() {
+        let still = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        let moved = snapping_part(Pos2::new(90.0 - SNAP_RADIUS - 1.0, 100.0), &[(-10.0, 0.0)]);
+        assert!(
+            snap_nudge(&[still, moved], &[1], SNAP_RADIUS).is_none(),
+            "a pin must not jump from outside the radius"
+        );
+    }
+
+    #[test]
+    fn a_pick_does_not_snap_to_itself() {
+        let a = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        let b = snapping_part(Pos2::new(104.0, 100.0), &[(-10.0, 0.0)]);
+        assert!(
+            snap_nudge(&[a, b], &[0, 1], SNAP_RADIUS).is_none(),
+            "two pins being dragged together are already where the hand put them"
+        );
+    }
+
+    #[test]
+    fn a_snapped_pin_does_not_creep_past_its_target() {
+        let still = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        // The dragged part's pin is at x = 90 too, from the other side, so the
+        // two pins already coincide and the nudge has nothing left to close.
+        let moved = snapping_part(Pos2::new(80.0, 100.0), &[(10.0, 0.0)]);
+        assert_eq!(moved.pin_world(0), still.pin_world(0), "the pins coincide");
+        assert!(
+            snap_nudge(&[still, moved], &[1], SNAP_RADIUS).is_none(),
+            "a pin sitting on its target has no gap left to close"
+        );
+    }
+
+    #[test]
+    fn the_closest_pin_pair_wins_in_a_pick_of_several() {
+        let still = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0), (10.0, 0.0)]);
+        // The still part's pins sit at x = 90 and x = 110. The first dragged part
+        // is eight short of 90, the second three short of 110: the nearer pair is
+        // the one the pick locks onto, and the nudge is that pair's gap.
+        let far = snapping_part(Pos2::new(92.0, 100.0), &[(-10.0, 0.0)]);
+        let near = snapping_part(Pos2::new(123.0, 100.0), &[(-10.0, 0.0)]);
+        let nudge = snap_nudge(&[still, far, near], &[1, 2], SNAP_RADIUS).expect("a snap");
+        assert!(
+            (nudge.x + 3.0).abs() < 0.001,
+            "expected the nearer pair's gap, got {nudge:?}"
+        );
+    }
+
+    #[test]
+    fn a_turned_part_snaps_on_the_pins_it_actually_draws() {
+        let mut still = snapping_part(Pos2::new(100.0, 100.0), &[(-10.0, 0.0)]);
+        still.rotation = 90.0;
+        // A quarter turn puts the pin below the centre, not to its left, so a
+        // part dragged in from the left must be out of reach.
+        let beside = snapping_part(Pos2::new(92.0, 100.0), &[(-10.0, 0.0)]);
+        assert!(
+            snap_nudge(&[still.clone(), beside], &[1], SNAP_RADIUS).is_none(),
+            "the pin turned away; nothing is within reach on that side"
+        );
+        let below = snapping_part(Pos2::new(110.0, 98.0), &[(-10.0, 0.0)]);
+        let nudge = snap_nudge(&[still, below], &[1], SNAP_RADIUS).expect("a snap");
+        assert!(
+            (nudge.y + 8.0).abs() < 0.001,
+            "expected the turned pin's gap on y, got {nudge:?}"
+        );
     }
 
     #[test]
