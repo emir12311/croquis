@@ -16,3 +16,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rfd = "0.17"
 rodio = { version = "0.23", default-features = false, features = ["playback"] }
+
+# A warning here is a defect that has not bitten yet — an unused fixture, a
+# variable nobody reads. `deny` makes the build stop instead of scrolling past.
+#
+# The table is package-scoped, so it applies to this crate and not to its
+# dependencies: a third party's warnings cannot break our build.
+[lints.rust]
+warnings = "deny"
