@@ -10,6 +10,7 @@
 use eframe::egui::{self, ComboBox, DragValue, Slider};
 use croquis_core::catalogue::{parse_kind, part_by_kind, FieldControl, PartField};
 
+use crate::locales::Texts;
 use crate::scene::Part;
 
 
@@ -94,7 +95,7 @@ pub fn field_commit(part: &mut Part, field: &PartField, value: EditorValue) -> b
 ///
 /// One row, always present, so the canvas does not jump when the selection
 /// changes. Fields sit inline: v0.2's `.props` is a single flex row.
-pub fn row(ui: &mut egui::Ui, part: &mut Part) -> bool {
+pub fn row(ui: &mut egui::Ui, part: &mut Part, texts: &Texts) -> bool {
     let fields: Vec<PartField> = parse_kind(&part.kind)
         .map(|kind| part_by_kind(kind).fields.clone())
         .unwrap_or_default();
@@ -104,22 +105,22 @@ pub fn row(ui: &mut egui::Ui, part: &mut Part) -> bool {
     // The name reads as text, not as muted chrome: labels inherit the
     // non-interactive foreground, which here is the muted colour.
     ui.label(
-        egui::RichText::new(&part.name)
+        egui::RichText::new(texts.t(&part.name_key))
             .color(egui::Color32::from_rgb(0xe6, 0xe4, 0xe0))
             .strong(),
     );
     for field in &fields {
         ui.separator();
-        changed |= edit(ui, part, field);
+        changed |= edit(ui, part, field, texts);
     }
     changed
 }
 
-fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
+fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField, texts: &Texts) -> bool {
     match field.control.clone() {
         FieldControl::Toggle => {
             let mut on = field_editor(part, field) == EditorValue::Toggle(true);
-            if ui.checkbox(&mut on, field.label).changed() {
+            if ui.checkbox(&mut on, texts.t(field.label_key)).changed() {
                 return field_commit(part, field, EditorValue::Toggle(on));
             }
             false
@@ -128,7 +129,7 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
             let EditorValue::Number(mut number) = field_editor(part, field) else {
                 return false;
             };
-            ui.label(field.label);
+            ui.label(texts.t(field.label_key));
             let slider = Slider::new(&mut number, min..=max)
                 .step_by(step.max(f64::EPSILON))
                 .max_decimals(0);
@@ -141,7 +142,7 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
             let EditorValue::Number(mut number) = field_editor(part, field) else {
                 return false;
             };
-            ui.label(field.label);
+            ui.label(texts.t(field.label_key));
             // A resistance spans twelve decades, so a slider is useless: type it,
             // and let the drag speed grow with the value.
             let speed = number.max(1.0) / 50.0;
@@ -161,16 +162,20 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField) -> bool {
             let label = options
                 .iter()
                 .find(|option| option.value == current)
-                .map(|option| option.label.clone())
+                .map(|option| texts.t(&option.label_key).to_string())
                 .unwrap_or_else(|| current.clone());
-            ui.label(field.label);
+            ui.label(texts.t(field.label_key));
             let mut chosen = current.clone();
             ComboBox::from_id_salt(format!("field-{}-{}", part.id, field.name))
                 .width(140.0)
                 .selected_text(label)
                 .show_ui(ui, |ui| {
                     for option in &options {
-                        ui.selectable_value(&mut chosen, option.value.clone(), &option.label);
+                        ui.selectable_value(
+                            &mut chosen,
+                            option.value.clone(),
+                            texts.t(&option.label_key),
+                        );
                     }
                 });
             if chosen != current {

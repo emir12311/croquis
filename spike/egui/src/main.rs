@@ -35,6 +35,7 @@ mod generated;
 mod lcd;
 mod lcd_font;
 mod knobs;
+mod locales;
 mod properties;
 mod remote;
 mod sensors;
@@ -654,6 +655,10 @@ struct Spike {
     /// a part by dragging it onto the canvas, not by clicking a list.
     palette_drag: Option<croquis_core::catalogue::PartKind>,
 
+    /// The interface's text, in the language the reader chose. Everything the
+    /// catalogue and the shell display goes through this.
+    texts: locales::Texts,
+
     /// What the netlist has to say about a part — an unpowered chip, an
     /// untied MR pin. v0.2 shows these in the properties strip.
     part_warnings: HashMap<String, String>,
@@ -752,6 +757,7 @@ impl Default for Spike {
             components_open: true,
             serial_open: false,
             palette_drag: None,
+            texts: locales::Texts::load(locales::Locale::English),
             part_warnings: HashMap::new(),
             segment_memory: HashMap::new(),
             seven_changed_at: HashMap::new(),
@@ -2219,7 +2225,7 @@ impl eframe::App for Spike {
                                             ui,
                                             &self.textures,
                                             &key,
-                                            def.label,
+                                            self.texts.t(&def.label_key),
                                             !self.running,
                                             tile_size,
                                         );
@@ -2417,7 +2423,7 @@ impl eframe::App for Spike {
                                     let id = self.parts[index].id.clone();
                                     let warning = self.part_warnings.get(&id).cloned();
                                     let part = &mut self.parts[index];
-                                    let changed = properties::row(ui, part);
+                                    let changed = properties::row(ui, part, &self.texts);
                                     if let Some(warning) = warning {
                                         ui.separator();
                                         ui.colored_label(
@@ -4155,7 +4161,7 @@ mod tests {
         Part {
             id: format!("at-{}-{}", center.x, center.y),
             kind: "led".into(),
-            name: "LED".into(),
+            name_key: "part.led".into(),
             center,
             size: Vec2::new(20.0, 20.0),
             rotation: 0.0,

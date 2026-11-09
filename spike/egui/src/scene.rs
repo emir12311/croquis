@@ -25,7 +25,10 @@ pub struct Pin {
 pub struct Part {
     pub id: String,
     pub kind: String,
-    pub name: String,
+    /// The key this part's display name lives under, not the name itself: the
+    /// language can change while a circuit is open, and a stored name would be
+    /// stuck in whichever one was current when the file loaded.
+    pub name_key: String,
     pub center: Pos2,
     /// The part's unrotated size. `rotated_size` is what it occupies on screen.
     pub size: Vec2,
@@ -147,7 +150,7 @@ pub fn load_diagram_file(path: &Path) -> (Vec<Part>, Vec<Wire>, String) {
         parts.push(Part {
             id: source.id.clone(),
             kind: source.kind.clone(),
-            name: part_by_kind(kind).label.to_string(),
+            name_key: part_by_kind(kind).label_key.clone(),
             center: Pos2::new(source.x as f32 + width / 2.0, source.y as f32 + height / 2.0),
             size: Vec2::new(width, height),
             rotation: source.rotate as f32,
@@ -549,7 +552,7 @@ pub fn part_from_kind(kind: PartKind, center: Pos2, id: String) -> Option<Part> 
     Some(Part {
         id,
         kind: kind.as_str().to_string(),
-        name: meta.label.to_string(),
+        name_key: meta.label_key.clone(),
         center,
         size: Vec2::new(width, height),
         rotation: 0.0,
