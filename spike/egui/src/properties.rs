@@ -95,7 +95,13 @@ pub fn field_commit(part: &mut Part, field: &PartField, value: EditorValue) -> b
 ///
 /// One row, always present, so the canvas does not jump when the selection
 /// changes. Fields sit inline: v0.2's `.props` is a single flex row.
-pub fn row(ui: &mut egui::Ui, part: &mut Part, texts: &Texts) -> bool {
+pub fn row(ui: &mut egui::Ui, part: &mut Part, texts: &Texts, editable: bool) -> bool {
+    if !editable {
+        // While the circuit runs the strip still names the part and shows what it
+        // is set to, but a change here would edit the circuit underneath the
+        // simulator. Greying them out says so; hiding the strip would not.
+        ui.disable();
+    }
     let fields: Vec<PartField> = parse_kind(&part.kind)
         .map(|kind| part_by_kind(kind).fields.clone())
         .unwrap_or_default();

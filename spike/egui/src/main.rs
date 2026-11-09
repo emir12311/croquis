@@ -705,6 +705,8 @@ struct Spike {
     /// had to be ripped off the hole instead of simply dragged away.
     drag_origin: Vec<(usize, Pos2)>,
     drag_travel: Vec2,
+    /// The bend being dragged: which wire, and which of its bends.
+    bend_drag: Option<(usize, usize)>,
     hovered_pin: Option<PinRef>,
     textures: HashMap<String, egui::TextureHandle>,
     led_states: HashMap<String, LedState>,
@@ -902,6 +904,7 @@ impl Spike {
     fn cancel_gesture(&mut self) {
         self.dragging = None;
         self.press_drag = None;
+        self.bend_drag = None;
         self.drag_origin.clear();
         self.drag_travel = Vec2::ZERO;
         self.marquee = None;
@@ -943,6 +946,7 @@ impl Default for Spike {
             dragging: None,
             drag_origin: Vec::new(),
             drag_travel: Vec2::ZERO,
+            bend_drag: None,
             hovered_pin: None,
             textures: HashMap::new(),
             led_states: HashMap::new(),
@@ -1178,26 +1182,39 @@ fn drag_placement(
 
 /// What the pointer is on.
 ///
-/// The order is the canvas's own: pins are the smallest target and the one a wire
-/// is drawn from, so they are asked first; wires are painted after the parts, so a
+/// The order is the canvas's own: a bend handle is the smallest target there is
+/// and only a selected wire shows one, so it comes first; then pins, which are
+/// how a wire is started; then wires, which are painted after the parts, so a
 /// wire crossing a piece is what the pointer is on; then the parts themselves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pick {
+    Bend(usize, usize),
     Pin(PinRef),
     Wire(usize),
     Part(usize),
     Nothing,
 }
 
+/// How close a click has to be to a bend, in screen pixels, to grab it. Larger
+/// than the wire tolerance: a bend is a point on the wire, so the two compete for
+/// the same pixels and the handle has to win.
+const BEND_HANDLE_RADIUS: f32 = 7.0;
+
 fn pick_at(
     parts: &[Part],
     wires: &[Wire],
+    bend_handles: &[usize],
     camera: Camera,
     rect: Rect,
     screen: Pos2,
     pin_radius: f32,
 ) -> Pick {
     let world = camera.screen_to_world(rect, screen);
+    if let Some((wire, point)) =
+        hit_bend(wires, bend_handles, camera, rect, screen, BEND_HANDLE_RADIUS)
+    {
+        return Pick::Bend(wire, point);
+    }
     if let Some(pin) = hit_pin(parts, world, pin_radius) {
         return Pick::Pin(pin);
     }
@@ -1208,6 +1225,31 @@ fn pick_at(
         return Pick::Part(index);
     }
     Pick::Nothing
+}
+
+/// A bend handle under the pointer, on one of the wires that is showing handles.
+///
+/// Only a selected wire shows them, so an unselected wire's bends cannot be
+/// grabbed by accident while reaching for the wire itself.
+fn hit_bend(
+    wires: &[Wire],
+    live: &[usize],
+    camera: Camera,
+    rect: Rect,
+    screen: Pos2,
+    tolerance: f32,
+) -> Option<(usize, usize)> {
+    for &index in live.iter().rev() {
+        let Some(wire) = wires.get(index) else {
+            continue;
+        };
+        for (point, at) in wire.waypoints.iter().enumerate().rev() {
+            if camera.world_to_screen(rect, *at).distance(screen) <= tolerance {
+                return Some((index, point));
+            }
+        }
+    }
+    None
 }
 
 /// A wire's route in screen space: the pins either end, the bends between them,
@@ -1948,6 +1990,14 @@ impl Spike {
                 }
             }
             _ => self.dragging = Some(index),
+        }
+        // A running circuit is not being edited: its controls still respond —
+        // that is the point of running it — but nothing on the canvas moves.
+        // Clearing the two grab flags here rather than at each arm above means a
+        // control added later cannot forget.
+        if self.running {
+            self.dragging = None;
+            self.press_drag = None;
         }
     }
 
@@ -2857,7 +2907,7 @@ impl eframe::App for Spike {
                                     let id = self.parts[index].id.clone();
                                     let warning = self.part_warnings.get(&id).cloned();
                                     let part = &mut self.parts[index];
-                                    let changed = properties::row(ui, part, &self.texts);
+                                    let changed = properties::row(ui, part, &self.texts, !self.running);
                                     if let Some(warning) = warning {
                                         ui.separator();
                                         ui.colored_label(
@@ -2989,6 +3039,7 @@ impl eframe::App for Spike {
                 match pick_at(
                     &self.parts,
                     &self.wires,
+                    &self.selection.wires,
                     self.camera,
                     rect,
                     p,
@@ -3031,16 +3082,28 @@ impl eframe::App for Spike {
                         let pick = pick_at(
                             &self.parts,
                             &self.wires,
+                            &self.selection.wires,
                             self.camera,
                             rect,
                             pos,
                             PIN_HIT_RADIUS / self.camera.zoom,
                         );
-                        if let Pick::Pin(pin) = pick {
+                        if let Pick::Bend(wire, point) = pick {
+                            // A bend handle is only showing because its wire is
+                            // selected, so a press on one is reaching for the bend
+                            // and not the wire. Not mid-route and not while
+                            // running: both are edits.
+                            if self.wire_start.is_none() && !self.running {
+                                self.bend_drag = Some((wire, point));
+                            }
+                        } else if let Pick::Pin(pin) = pick {
                             // Dragging from a pin draws a wire. Before this, the
                             // press grabbed the part and dragged the Arduino out
-                            // from under itself.
-                            self.wire_press(pin);
+                            // from under itself. Not while the circuit runs: a new
+                            // wire is an edit.
+                            if !self.running {
+                                self.wire_press(pin);
+                            }
                         } else if self.wire_start.is_some() {
                             // Mid-wire, the click branch below pins a bend.
                         } else if let Pick::Wire(index) = pick {
@@ -3137,6 +3200,21 @@ impl eframe::App for Spike {
                     if let Some(world) = world_pointer {
                         self.drag_knob(index, world);
                     }
+                } else if let Some((wire, point)) = self.bend_drag {
+                    // The bend goes where the pointer is, not by a delta: it is a
+                    // corner of a routed wire, so it follows the hand directly.
+                    if let Some(world) = world_pointer {
+                        if let Some(bend) = self
+                            .wires
+                            .get_mut(wire)
+                            .and_then(|wire| wire.waypoints.get_mut(point))
+                        {
+                            if *bend != world {
+                                *bend = world;
+                                self.reevaluate = true;
+                            }
+                        }
+                    }
                 } else if self.dragging.is_some() {
                     // The pick is captured once, on the first frame of the drag:
                     // it is the set that moves and the set a pin may snap from.
@@ -3187,6 +3265,7 @@ impl eframe::App for Spike {
                 self.wire_release(self.hovered_pin);
                 self.dragging = None;
                 self.press_drag = None;
+                self.bend_drag = None;
                 // The next drag captures its own origins; a stale set would place
                 // the next pick where the last one started.
                 self.drag_origin.clear();
@@ -3206,6 +3285,7 @@ impl eframe::App for Spike {
                         match pick_at(
                             &self.parts,
                             &self.wires,
+                            &self.selection.wires,
                             self.camera,
                             rect,
                             pos,
@@ -3434,6 +3514,22 @@ impl eframe::App for Spike {
                         ],
                         Stroke::new(thickness, colour),
                     );
+                }
+                // A selected wire shows its bends, which is how they are found and
+                // moved. Only a selected wire shows them — the hit-test says the
+                // same thing, so what is drawn and what can be grabbed agree.
+                if selected {
+                    for point in &wire.waypoints {
+                        let at = self.camera.world_to_screen(rect, *point);
+                        let handle = Rect::from_center_size(at, Vec2::splat(7.0));
+                        painter.rect_filled(handle, 0.0, colour);
+                        painter.rect_stroke(
+                            handle,
+                            0.0,
+                            Stroke::new(1.0, Color32::from_rgb(26, 26, 28)),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
                 }
             }
 
@@ -5122,6 +5218,7 @@ mod tests {
             pick_at(
                 &parts,
                 &wires,
+                &[],
                 camera,
                 rect,
                 screen,
@@ -5145,6 +5242,7 @@ mod tests {
             pick_at(
                 &parts,
                 &[],
+                &[],
                 camera,
                 rect,
                 screen,
@@ -5165,6 +5263,7 @@ mod tests {
         assert_eq!(
             pick_at(
                 &parts,
+                &[],
                 &[],
                 camera,
                 rect,
@@ -5252,6 +5351,97 @@ mod tests {
         spike.undo();
         spike.redo();
         assert!(spike.parts.is_empty());
+    }
+
+    #[test]
+    fn a_selected_wires_bend_can_be_grabbed() {
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let a = part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        let b = part_of_kind("led", Pos2::new(300.0, 300.0), &[(0.0, 0.0)]);
+        let parts = vec![a, b];
+        let bend = Pos2::new(200.0, 100.0);
+        let wires = vec![Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: vec![bend],
+        }];
+        let screen = camera.world_to_screen(rect, bend);
+        assert_eq!(
+            pick_at(
+                &parts,
+                &wires,
+                &[0],
+                camera,
+                rect,
+                screen,
+                PIN_HIT_RADIUS / camera.zoom
+            ),
+            Pick::Bend(0, 0),
+            "a selected wire's bend is what the pointer grabs"
+        );
+    }
+
+    #[test]
+    fn an_unselected_wires_bend_is_just_the_wire() {
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let a = part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        let b = part_of_kind("led", Pos2::new(300.0, 300.0), &[(0.0, 0.0)]);
+        let parts = vec![a, b];
+        let bend = Pos2::new(200.0, 100.0);
+        let wires = vec![Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: vec![bend],
+        }];
+        let screen = camera.world_to_screen(rect, bend);
+        assert_eq!(
+            pick_at(
+                &parts,
+                &wires,
+                &[],
+                camera,
+                rect,
+                screen,
+                PIN_HIT_RADIUS / camera.zoom
+            ),
+            Pick::Wire(0),
+            "with no handle showing, the same pixel is the wire itself"
+        );
+    }
+
+    #[test]
+    fn nothing_moves_while_the_circuit_runs() {
+        let mut spike = Spike::default();
+        spike.running = true;
+        // A plain part cannot be picked up.
+        let centre = spike.parts[0].center;
+        spike.press_control(0, centre, Pos2::new(10.0, 10.0));
+        assert!(
+            spike.dragging.is_none(),
+            "a running circuit is not being edited"
+        );
+        assert!(spike.press_drag.is_none());
+
+        // A button still answers, which is the whole point of running it.
+        let button = scene::part_from_kind(PartKind::Pushbutton, Pos2::new(400.0, 400.0), "b-1".into())
+            .expect("a pushbutton");
+        let id = button.id.clone();
+        spike.parts.push(button);
+        let index = spike.parts.len() - 1;
+        let centre = spike.parts[index].center;
+        spike.press_control(index, centre, Pos2::new(50.0, 50.0));
+        assert_eq!(
+            spike.pressed.get(&id),
+            Some(&true),
+            "the control still responds"
+        );
+        assert!(spike.dragging.is_none(), "but it does not move");
+        assert!(
+            spike.press_drag.is_none(),
+            "and a wobble cannot promote it to a drag"
+        );
     }
 
     #[test]
