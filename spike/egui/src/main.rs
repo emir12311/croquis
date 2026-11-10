@@ -705,8 +705,8 @@ struct Spike {
     /// had to be ripped off the hole instead of simply dragged away.
     drag_origin: Vec<(usize, Pos2)>,
     drag_travel: Vec2,
-    /// The bend being dragged: which wire, and which of its bends.
-    bend_drag: Option<(usize, usize)>,
+    /// The corner being dragged: which wire, and which corner of its drawn route.
+    corner_drag: Option<(usize, usize)>,
     hovered_pin: Option<PinRef>,
     textures: HashMap<String, egui::TextureHandle>,
     led_states: HashMap<String, LedState>,
@@ -904,7 +904,7 @@ impl Spike {
     fn cancel_gesture(&mut self) {
         self.dragging = None;
         self.press_drag = None;
-        self.bend_drag = None;
+        self.corner_drag = None;
         self.drag_origin.clear();
         self.drag_travel = Vec2::ZERO;
         self.marquee = None;
@@ -946,7 +946,7 @@ impl Default for Spike {
             dragging: None,
             drag_origin: Vec::new(),
             drag_travel: Vec2::ZERO,
-            bend_drag: None,
+            corner_drag: None,
             hovered_pin: None,
             textures: HashMap::new(),
             led_states: HashMap::new(),
@@ -1188,17 +1188,17 @@ fn drag_placement(
 /// wire crossing a piece is what the pointer is on; then the parts themselves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pick {
-    Bend(usize, usize),
+    Corner(usize, usize),
     Pin(PinRef),
     Wire(usize),
     Part(usize),
     Nothing,
 }
 
-/// How close a click has to be to a bend, in screen pixels, to grab it. Larger
-/// than the wire tolerance: a bend is a point on the wire, so the two compete for
-/// the same pixels and the handle has to win.
-const BEND_HANDLE_RADIUS: f32 = 7.0;
+/// How close a click has to be to a corner, in screen pixels, to grab it. Larger
+/// than the wire tolerance: a corner is a point on the wire, so the two compete
+/// for the same pixels and the handle has to win.
+const CORNER_HANDLE_RADIUS: f32 = 7.0;
 
 fn pick_at(
     parts: &[Part],
@@ -1210,10 +1210,16 @@ fn pick_at(
     pin_radius: f32,
 ) -> Pick {
     let world = camera.screen_to_world(rect, screen);
-    if let Some((wire, point)) =
-        hit_bend(wires, bend_handles, camera, rect, screen, BEND_HANDLE_RADIUS)
-    {
-        return Pick::Bend(wire, point);
+    if let Some((wire, corner)) = hit_corner(
+        parts,
+        wires,
+        bend_handles,
+        camera,
+        rect,
+        screen,
+        CORNER_HANDLE_RADIUS,
+    ) {
+        return Pick::Corner(wire, corner);
     }
     if let Some(pin) = hit_pin(parts, world, pin_radius) {
         return Pick::Pin(pin);
@@ -1227,11 +1233,17 @@ fn pick_at(
     Pick::Nothing
 }
 
-/// A bend handle under the pointer, on one of the wires that is showing handles.
+/// A corner handle under the pointer, on one of the wires that is showing them.
 ///
-/// Only a selected wire shows them, so an unselected wire's bends cannot be
+/// The corners come from the wire *as drawn* — the router's elbows included, and
+/// any the circuit has grown since a part last moved — not from the corners the
+/// wire happens to have stored. That is the difference between grabbing what you
+/// can see and grabbing what the file remembers.
+///
+/// Only a selected wire shows handles, so an unselected wire's corners cannot be
 /// grabbed by accident while reaching for the wire itself.
-fn hit_bend(
+fn hit_corner(
+    parts: &[Part],
     wires: &[Wire],
     live: &[usize],
     camera: Camera,
@@ -1243,29 +1255,114 @@ fn hit_bend(
         let Some(wire) = wires.get(index) else {
             continue;
         };
-        for (point, at) in wire.waypoints.iter().enumerate().rev() {
-            if camera.world_to_screen(rect, *at).distance(screen) <= tolerance {
-                return Some((index, point));
+        let route = wire_route(parts, wire);
+        // The first and last points are the pins themselves; the corners beside
+        // them are the ends of the wire and are handles like any other.
+        for corner in 1..route.len().saturating_sub(1) {
+            if camera.world_to_screen(rect, route[corner]).distance(screen) <= tolerance {
+                return Some((index, corner));
             }
         }
     }
     None
 }
 
-/// A wire's route in screen space: the pins either end, the bends between them,
-/// and the orthogonal corners the router adds — the polyline the painter draws.
-fn wire_screen_path(part_list: &[Part], wire: &Wire, camera: Camera, rect: Rect) -> Vec<Pos2> {
-    let a = camera.world_to_screen(rect, part_list[wire.a.0].pin_world(wire.a.1));
-    let b = camera.world_to_screen(rect, part_list[wire.b.0].pin_world(wire.b.1));
-    let mut route = vec![CorePoint::new(a.x as f64, a.y as f64)];
-    route.extend(wire.waypoints.iter().map(|point| {
-        let at = camera.world_to_screen(rect, *point);
-        CorePoint::new(at.x as f64, at.y as f64)
-    }));
-    route.push(CorePoint::new(b.x as f64, b.y as f64));
-    expand_path(&route)
+/// A wire's drawn route in world space: the two pins, the corners stored with it,
+/// and the elbows the router inserts to keep every leg at a right angle.
+fn wire_route(parts: &[Part], wire: &Wire) -> Vec<Pos2> {
+    let a = parts[wire.a.0].pin_world(wire.a.1);
+    let b = parts[wire.b.0].pin_world(wire.b.1);
+    let mut points = vec![CorePoint::new(a.x as f64, a.y as f64)];
+    points.extend(
+        wire.waypoints
+            .iter()
+            .map(|point| CorePoint::new(point.x as f64, point.y as f64)),
+    );
+    points.push(CorePoint::new(b.x as f64, b.y as f64));
+    expand_path(&points)
         .into_iter()
         .map(|point| Pos2::new(point.x as f32, point.y as f32))
+        .collect()
+}
+
+/// Drop corners that do not turn.
+///
+/// The router adds an elbow wherever two corners share no axis, so a route can
+/// carry points that are merely on a straight leg. Those are not corners and must
+/// not become handles, or the wire fills with grips that do nothing.
+fn simplify_corners(corners: &mut Vec<Pos2>) {
+    corners.dedup_by(|a, b| (*a - *b).length_sq() < 0.01);
+    let mut index = 1;
+    while index + 1 < corners.len() {
+        let (before, here, after) = (corners[index - 1], corners[index], corners[index + 1]);
+        let straight = (before.x == here.x && here.x == after.x)
+            || (before.y == here.y && here.y == after.y);
+        if straight {
+            corners.remove(index);
+        } else {
+            index += 1;
+        }
+    }
+}
+
+/// Move one of a wire's corners, keeping the whole route at right angles.
+///
+/// A corner is where two legs meet, so moving it has to move both legs: the corner
+/// either side slides along its own axis. The two corners beside a pin are the
+/// exception — a pin cannot move, so they may only slide along the other axis,
+/// which is exactly how the stub at a pin is made longer or shorter.
+///
+/// A route of nothing but two pins and one elbow therefore has no free corner:
+/// both its legs end at pins, and the elbow is fixed wherever the router put it.
+/// Giving it room means giving it another corner first.
+fn move_corner(parts: &[Part], wire: &mut Wire, index: usize, to: Pos2) {
+    let mut route = wire_route(parts, wire);
+    if index == 0 || index + 1 >= route.len() {
+        return;
+    }
+    let old = route[index];
+    let mut to = to;
+    let last = route.len() - 1;
+    if index == 1 {
+        // Beside the first pin: the leg leaves it along one axis and must go on
+        // leaving it along that axis.
+        if route[0].x == old.x {
+            to.x = route[0].x;
+        } else {
+            to.y = route[0].y;
+        }
+    }
+    if index == last - 1 {
+        if route[last].y == old.y {
+            to.y = route[last].y;
+        } else {
+            to.x = route[last].x;
+        }
+    }
+    route[index] = to;
+    if index > 1 {
+        // The leg into this corner ran along one axis; carry its far end with it.
+        if route[index - 1].y == old.y {
+            route[index - 1].y = to.y;
+        } else {
+            route[index - 1].x = to.x;
+        }
+    }
+    if index + 2 < route.len() {
+        if route[index + 1].x == old.x {
+            route[index + 1].x = to.x;
+        } else {
+            route[index + 1].y = to.y;
+        }
+    }
+    wire.waypoints = route[1..route.len() - 1].to_vec();
+}
+
+/// The polyline the painter draws, in screen space.
+fn wire_screen_path(part_list: &[Part], wire: &Wire, camera: Camera, rect: Rect) -> Vec<Pos2> {
+    wire_route(part_list, wire)
+        .into_iter()
+        .map(|point| camera.world_to_screen(rect, point))
         .collect()
 }
 
@@ -3088,13 +3185,13 @@ impl eframe::App for Spike {
                             pos,
                             PIN_HIT_RADIUS / self.camera.zoom,
                         );
-                        if let Pick::Bend(wire, point) = pick {
-                            // A bend handle is only showing because its wire is
-                            // selected, so a press on one is reaching for the bend
-                            // and not the wire. Not mid-route and not while
+                        if let Pick::Corner(wire, corner) = pick {
+                            // A corner handle is only showing because its wire is
+                            // selected, so a press on one is reaching for the
+                            // corner and not the wire. Not mid-route and not while
                             // running: both are edits.
                             if self.wire_start.is_none() && !self.running {
-                                self.bend_drag = Some((wire, point));
+                                self.corner_drag = Some((wire, corner));
                             }
                         } else if let Pick::Pin(pin) = pick {
                             // Dragging from a pin draws a wire. Before this, the
@@ -3200,19 +3297,15 @@ impl eframe::App for Spike {
                     if let Some(world) = world_pointer {
                         self.drag_knob(index, world);
                     }
-                } else if let Some((wire, point)) = self.bend_drag {
-                    // The bend goes where the pointer is, not by a delta: it is a
-                    // corner of a routed wire, so it follows the hand directly.
+                } else if let Some((wire, corner)) = self.corner_drag {
+                    // The corner goes where the pointer is, and the two legs that
+                    // meet there come with it. A pin cannot move, so a corner
+                    // beside one slides along the other axis instead — which is
+                    // how the stub at a pin is lengthened.
                     if let Some(world) = world_pointer {
-                        if let Some(bend) = self
-                            .wires
-                            .get_mut(wire)
-                            .and_then(|wire| wire.waypoints.get_mut(point))
-                        {
-                            if *bend != world {
-                                *bend = world;
-                                self.reevaluate = true;
-                            }
+                        if let Some(wire) = self.wires.get_mut(wire) {
+                            move_corner(&self.parts, wire, corner, world);
+                            self.reevaluate = true;
                         }
                     }
                 } else if self.dragging.is_some() {
@@ -3263,9 +3356,16 @@ impl eframe::App for Spike {
 
             if released_now || response.drag_stopped() {
                 self.wire_release(self.hovered_pin);
+                // A corner drag leaves the route with corners it no longer needs,
+                // so drop the ones that do not turn and keep the file clean.
+                if let Some((index, _)) = self.corner_drag {
+                    if let Some(wire) = self.wires.get_mut(index) {
+                        simplify_corners(&mut wire.waypoints);
+                    }
+                }
                 self.dragging = None;
                 self.press_drag = None;
-                self.bend_drag = None;
+                self.corner_drag = None;
                 // The next drag captures its own origins; a stale set would place
                 // the next pick where the last one started.
                 self.drag_origin.clear();
@@ -3519,8 +3619,12 @@ impl eframe::App for Spike {
                 // moved. Only a selected wire shows them — the hit-test says the
                 // same thing, so what is drawn and what can be grabbed agree.
                 if selected {
-                    for point in &wire.waypoints {
-                        let at = self.camera.world_to_screen(rect, *point);
+                    // Every corner of the wire as drawn, the two beside the pins
+                    // included: those are the ends, and they are what decides how
+                    // far the wire runs before it turns.
+                    let route = wire_route(&self.parts, wire);
+                    for corner in 1..route.len().saturating_sub(1) {
+                        let at = self.camera.world_to_screen(rect, route[corner]);
                         let handle = Rect::from_center_size(at, Vec2::splat(7.0));
                         painter.rect_filled(handle, 0.0, colour);
                         painter.rect_stroke(
@@ -5354,19 +5458,19 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_wires_bend_can_be_grabbed() {
+    fn a_selected_wires_corner_can_be_grabbed() {
         let camera = Camera::default();
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
         let a = part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
         let b = part_of_kind("led", Pos2::new(300.0, 300.0), &[(0.0, 0.0)]);
         let parts = vec![a, b];
-        let bend = Pos2::new(200.0, 100.0);
+        let corner = Pos2::new(200.0, 100.0);
         let wires = vec![Wire {
             a: (0, 0),
             b: (1, 0),
-            waypoints: vec![bend],
+            waypoints: vec![corner],
         }];
-        let screen = camera.world_to_screen(rect, bend);
+        let screen = camera.world_to_screen(rect, corner);
         assert_eq!(
             pick_at(
                 &parts,
@@ -5377,13 +5481,177 @@ mod tests {
                 screen,
                 PIN_HIT_RADIUS / camera.zoom
             ),
-            Pick::Bend(0, 0),
-            "a selected wire's bend is what the pointer grabs"
+            Pick::Corner(0, 1),
+            "a selected wire's corner is what the pointer grabs"
         );
     }
 
     #[test]
-    fn an_unselected_wires_bend_is_just_the_wire() {
+    fn a_corner_the_router_added_is_a_handle_too() {
+        // The wire stores one corner, but the route between the pins needs an
+        // elbow as well. That elbow is drawn, so it has to be grabbable — this is
+        // the corner that could not be touched when handles came from waypoints.
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let a = part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        let b = part_of_kind("led", Pos2::new(300.0, 300.0), &[(0.0, 0.0)]);
+        let parts = vec![a, b];
+        let wires = vec![Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: vec![Pos2::new(200.0, 100.0)],
+        }];
+        let route = wire_route(&parts, &wires[0]);
+        // Pins, the stored corner, and the elbow the router inserted.
+        assert_eq!(route, vec![
+            Pos2::new(100.0, 100.0),
+            Pos2::new(200.0, 100.0),
+            Pos2::new(300.0, 100.0),
+            Pos2::new(300.0, 300.0),
+        ]);
+        let elbow = route[2];
+        assert_eq!(
+            pick_at(
+                &parts,
+                &wires,
+                &[0],
+                camera,
+                rect,
+                camera.world_to_screen(rect, elbow),
+                PIN_HIT_RADIUS / camera.zoom
+            ),
+            Pick::Corner(0, 2),
+            "a corner the router drew is a handle like any other"
+        );
+    }
+
+    #[test]
+    fn the_corners_beside_the_pins_are_handles() {
+        // Two pins, no stored corners: the route is one elbow, and that elbow is
+        // the end of the wire — the corner that decides how far it runs before it
+        // turns. It used to be unreachable.
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let a = part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        let b = part_of_kind("led", Pos2::new(300.0, 300.0), &[(0.0, 0.0)]);
+        let parts = vec![a, b];
+        let wires = vec![Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: Vec::new(),
+        }];
+        let route = wire_route(&parts, &wires[0]);
+        assert_eq!(route.len(), 3, "pins and one elbow");
+        let beside_pin = route[1];
+        assert_eq!(
+            pick_at(
+                &parts,
+                &wires,
+                &[0],
+                camera,
+                rect,
+                camera.world_to_screen(rect, beside_pin),
+                PIN_HIT_RADIUS / camera.zoom
+            ),
+            Pick::Corner(0, 1),
+            "the corner at the end of the wire is a handle"
+        );
+    }
+
+    #[test]
+    fn moving_a_corner_keeps_the_route_at_right_angles() {
+        let parts = vec![
+            part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]),
+            part_of_kind("led", Pos2::new(300.0, 300.0), &[(0.0, 0.0)]),
+        ];
+        let mut wire = Wire {
+            a: (0, 0),
+            b: (1, 0),
+            // One stored corner gives the route a corner with room to move. A
+            // route of only pins and one elbow has none: both its legs land on
+            // pins, so the elbow is fixed wherever the router put it.
+            waypoints: vec![Pos2::new(100.0, 200.0)],
+        };
+        move_corner(&parts, &mut wire, 1, Pos2::new(100.0, 250.0));
+        let route = wire_route(&parts, &wire);
+        for pair in route.windows(2) {
+            assert!(
+                pair[0].x == pair[1].x || pair[0].y == pair[1].y,
+                "a leg went diagonal: {pair:?}"
+            );
+        }
+        assert!(
+            route.contains(&Pos2::new(100.0, 250.0)),
+            "and the corner is where it was dragged: {route:?}"
+        );
+    }
+
+    #[test]
+    fn a_corner_beside_a_pin_cannot_be_dragged_across_it() {
+        let parts = vec![
+            part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]),
+            part_of_kind("led", Pos2::new(300.0, 300.0), &[(0.0, 0.0)]),
+        ];
+        let mut wire = Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: Vec::new(),
+        };
+        // The leg leaves pin A downward, so the corner's x cannot change: a pin
+        // does not move, and a leg that leaves it has to go on leaving it the same
+        // way.
+        move_corner(&parts, &mut wire, 1, Pos2::new(220.0, 300.0));
+        let route = wire_route(&parts, &wire);
+        assert_eq!(
+            route[1].x, 100.0,
+            "the corner is still squarely below its pin: {route:?}"
+        );
+    }
+
+    #[test]
+    fn a_corner_the_circuit_grows_when_a_part_moves_is_a_handle() {
+        // A straight wire has no corners to grab. Move one end and the router has
+        // to add an elbow — and that new elbow has to be grabbable too, or the
+        // wire can only be edited until the first time you move a part.
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let mut parts = vec![
+            part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]),
+            part_of_kind("led", Pos2::new(300.0, 100.0), &[(0.0, 0.0)]),
+        ];
+        let wires = vec![Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: Vec::new(),
+        }];
+        assert_eq!(
+            wire_route(&parts, &wires[0]).len(),
+            2,
+            "a straight wire has no corners"
+        );
+
+        // The second part moves off the line.
+        parts[1].center = Pos2::new(300.0, 300.0);
+        let route = wire_route(&parts, &wires[0]);
+        assert_eq!(route.len(), 3, "the router added an elbow");
+        let grown = route[1];
+        assert_eq!(
+            pick_at(
+                &parts,
+                &wires,
+                &[0],
+                camera,
+                rect,
+                camera.world_to_screen(rect, grown),
+                PIN_HIT_RADIUS / camera.zoom
+            ),
+            Pick::Corner(0, 1),
+            "a corner the circuit grew is a handle like any other"
+        );
+    }
+
+    #[test]
+    fn an_unselected_wires_corner_is_just_the_wire() {
         let camera = Camera::default();
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
         let a = part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
