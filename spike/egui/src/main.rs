@@ -707,6 +707,8 @@ struct Spike {
     drag_travel: Vec2,
     /// The corner being dragged: which wire, and which corner of its drawn route.
     corner_drag: Option<(usize, usize)>,
+    /// The end being re-plugged: which wire, and which of its two ends.
+    end_drag: Option<(usize, End)>,
     hovered_pin: Option<PinRef>,
     textures: HashMap<String, egui::TextureHandle>,
     led_states: HashMap<String, LedState>,
@@ -905,6 +907,7 @@ impl Spike {
         self.dragging = None;
         self.press_drag = None;
         self.corner_drag = None;
+        self.end_drag = None;
         self.drag_origin.clear();
         self.drag_travel = Vec2::ZERO;
         self.marquee = None;
@@ -947,6 +950,7 @@ impl Default for Spike {
             drag_origin: Vec::new(),
             drag_travel: Vec2::ZERO,
             corner_drag: None,
+            end_drag: None,
             hovered_pin: None,
             textures: HashMap::new(),
             led_states: HashMap::new(),
@@ -1188,6 +1192,7 @@ fn drag_placement(
 /// wire crossing a piece is what the pointer is on; then the parts themselves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pick {
+    End(usize, End),
     Corner(usize, usize),
     Pin(PinRef),
     Wire(usize),
@@ -1210,16 +1215,8 @@ fn pick_at(
     pin_radius: f32,
 ) -> Pick {
     let world = camera.screen_to_world(rect, screen);
-    if let Some((wire, corner)) = hit_corner(
-        parts,
-        wires,
-        bend_handles,
-        camera,
-        rect,
-        screen,
-        CORNER_HANDLE_RADIUS,
-    ) {
-        return Pick::Corner(wire, corner);
+    if let Some(handle) = hit_wire_handle(parts, wires, bend_handles, camera, rect, screen) {
+        return handle;
     }
     if let Some(pin) = hit_pin(parts, world, pin_radius) {
         return Pick::Pin(pin);
@@ -1233,45 +1230,80 @@ fn pick_at(
     Pick::Nothing
 }
 
-/// A corner handle under the pointer, on one of the wires that is showing them.
+/// A handle under the pointer, on one of the wires that is showing them.
 ///
-/// The corners come from the wire *as drawn* — the router's elbows included, and
-/// any the circuit has grown since a part last moved — not from the corners the
-/// wire happens to have stored. That is the difference between grabbing what you
-/// can see and grabbing what the file remembers.
+/// The points come from the wire *as drawn* — the two ends where it meets its
+/// pins, the router's elbows, and any corner the circuit has grown since a part
+/// last moved — not from the corners the wire happens to have stored. That is the
+/// difference between grabbing what you can see and grabbing what the file
+/// remembers.
 ///
-/// Only a selected wire shows handles, so an unselected wire's corners cannot be
+/// The ends are asked for first: they sit exactly on their pins, and re-plugging a
+/// wire has to start from the pin the wire already ends at.
+///
+/// Only a selected wire shows handles, so an unselected wire's points cannot be
 /// grabbed by accident while reaching for the wire itself.
-fn hit_corner(
+fn hit_wire_handle(
     parts: &[Part],
     wires: &[Wire],
     live: &[usize],
     camera: Camera,
     rect: Rect,
     screen: Pos2,
-    tolerance: f32,
-) -> Option<(usize, usize)> {
+) -> Option<Pick> {
     for &index in live.iter().rev() {
         let Some(wire) = wires.get(index) else {
             continue;
         };
         let route = wire_route(parts, wire);
-        // The first and last points are the pins themselves; the corners beside
-        // them are the ends of the wire and are handles like any other.
+        let near = |at: Pos2| {
+            camera.world_to_screen(rect, at).distance(screen) <= CORNER_HANDLE_RADIUS
+        };
+        if let Some(at) = route.first() {
+            if near(*at) {
+                return Some(Pick::End(index, End::A));
+            }
+        }
+        if let Some(at) = route.last() {
+            if near(*at) {
+                return Some(Pick::End(index, End::B));
+            }
+        }
         for corner in 1..route.len().saturating_sub(1) {
-            if camera.world_to_screen(rect, route[corner]).distance(screen) <= tolerance {
-                return Some((index, corner));
+            if near(route[corner]) {
+                return Some(Pick::Corner(index, corner));
             }
         }
     }
     None
 }
 
+/// Which end of a wire a handle belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum End {
+    A,
+    B,
+}
+
 /// A wire's drawn route in world space: the two pins, the corners stored with it,
 /// and the elbows the router inserts to keep every leg at a right angle.
 fn wire_route(parts: &[Part], wire: &Wire) -> Vec<Pos2> {
-    let a = parts[wire.a.0].pin_world(wire.a.1);
-    let b = parts[wire.b.0].pin_world(wire.b.1);
+    wire_route_ending(parts, wire, None)
+}
+
+/// The same route, with one end placed somewhere other than its pin.
+///
+/// An end being dragged has to be drawn toward the pointer while it is not
+/// attached to anything yet — that is what makes re-plugging a wire visible.
+fn wire_route_ending(parts: &[Part], wire: &Wire, over: Option<(End, Pos2)>) -> Vec<Pos2> {
+    let mut a = parts[wire.a.0].pin_world(wire.a.1);
+    let mut b = parts[wire.b.0].pin_world(wire.b.1);
+    if let Some((end, at)) = over {
+        match end {
+            End::A => a = at,
+            End::B => b = at,
+        }
+    }
     let mut points = vec![CorePoint::new(a.x as f64, a.y as f64)];
     points.extend(
         wire.waypoints
@@ -1303,6 +1335,32 @@ fn simplify_corners(corners: &mut Vec<Pos2>) {
             index += 1;
         }
     }
+}
+
+/// Move one end of a wire onto another pin.
+///
+/// An end dropped on nothing, or on the pin its own other end already uses, stays
+/// where it was: a wire cannot hang off nothing, and a wire cannot join a pin to
+/// itself. Returns whether anything changed.
+fn replug(wires: &mut [Wire], index: usize, end: End, target: Option<PinRef>) -> bool {
+    let Some(target) = target else {
+        return false;
+    };
+    let Some(wire) = wires.get_mut(index) else {
+        return false;
+    };
+    let other = match end {
+        End::A => wire.b,
+        End::B => wire.a,
+    };
+    if target == other {
+        return false;
+    }
+    match end {
+        End::A => wire.a = target,
+        End::B => wire.b = target,
+    }
+    true
 }
 
 /// Move one of a wire's corners, keeping the whole route at right angles.
@@ -3185,7 +3243,13 @@ impl eframe::App for Spike {
                             pos,
                             PIN_HIT_RADIUS / self.camera.zoom,
                         );
-                        if let Pick::Corner(wire, corner) = pick {
+                        if let Pick::End(wire, end) = pick {
+                            // An end handle sits on the pin the wire is attached
+                            // to; dragging it re-plugs the wire to another pin.
+                            if self.wire_start.is_none() && !self.running {
+                                self.end_drag = Some((wire, end));
+                            }
+                        } else if let Pick::Corner(wire, corner) = pick {
                             // A corner handle is only showing because its wire is
                             // selected, so a press on one is reaching for the
                             // corner and not the wire. Not mid-route and not while
@@ -3363,6 +3427,18 @@ impl eframe::App for Spike {
                         simplify_corners(&mut wire.waypoints);
                     }
                 }
+                // Dropping an end on a pin plugs the wire there. Anywhere else it
+                // stays where it was: a wire cannot be left hanging off nothing,
+                // and an end cannot be dropped onto the pin its other end already
+                // uses — that would be the same pin twice.
+                if let Some((index, end)) = self.end_drag {
+                    let target = world_pointer
+                        .and_then(|at| hit_pin(&self.parts, at, PIN_HIT_RADIUS / self.camera.zoom));
+                    if replug(&mut self.wires, index, end, target) {
+                        self.reevaluate = true;
+                    }
+                }
+                self.end_drag = None;
                 self.dragging = None;
                 self.press_drag = None;
                 self.corner_drag = None;
@@ -3583,21 +3659,13 @@ impl eframe::App for Spike {
             }
 
             for (index, wire) in self.wires.iter().enumerate() {
-                let a = self
-                    .camera
-                    .world_to_screen(rect, self.parts[wire.a.0].pin_world(wire.a.1));
-                let b = self
-                    .camera
-                    .world_to_screen(rect, self.parts[wire.b.0].pin_world(wire.b.1));
-                let mut route = vec![CorePoint::new(a.x as f64, a.y as f64)];
-                route.extend(wire.waypoints.iter().map(|point| {
-                    // Waypoints are world coordinates, like the pins either side of
-                    // them. Drawing them raw put the wire near the top-left corner
-                    // — a wire with a bend in it appeared to shoot off the canvas.
-                    let at = self.camera.world_to_screen(rect, *point);
-                    CorePoint::new(at.x as f64, at.y as f64)
-                }));
-                route.push(CorePoint::new(b.x as f64, b.y as f64));
+                // An end being dragged is drawn toward the pointer rather than left
+                // on its pin, so a re-plug is visible before it happens.
+                let over = self
+                    .end_drag
+                    .filter(|(dragged, _)| *dragged == index)
+                    .and_then(|(_, end)| world_pointer.map(|at| (end, at)));
+                let route = wire_route_ending(&self.parts, wire, over);
                 let selected = self.selection.has_wire(index);
                 let colour = if selected {
                     Color32::from_rgb(217, 164, 65)
@@ -3605,34 +3673,31 @@ impl eframe::App for Spike {
                     Color32::from_rgb(108, 203, 123)
                 };
                 let thickness = if selected { 3.5 } else { 2.5 };
-                let line = expand_path(&route);
-                for pair in line.windows(2) {
+                for pair in route.windows(2) {
                     painter.line_segment(
                         [
-                            Pos2::new(pair[0].x as f32, pair[0].y as f32),
-                            Pos2::new(pair[1].x as f32, pair[1].y as f32),
+                            self.camera.world_to_screen(rect, pair[0]),
+                            self.camera.world_to_screen(rect, pair[1]),
                         ],
                         Stroke::new(thickness, colour),
                     );
                 }
-                // A selected wire shows its bends, which is how they are found and
-                // moved. Only a selected wire shows them — the hit-test says the
-                // same thing, so what is drawn and what can be grabbed agree.
+                // A selected wire shows its handles: round at the two ends, square
+                // at the corners. Only a selected wire shows them — the hit-test
+                // says the same thing, so what is drawn and what can be grabbed
+                // agree.
                 if selected {
-                    // Every corner of the wire as drawn, the two beside the pins
-                    // included: those are the ends, and they are what decides how
-                    // far the wire runs before it turns.
-                    let route = wire_route(&self.parts, wire);
+                    let outline = Stroke::new(1.0, Color32::from_rgb(26, 26, 28));
+                    for at in [route.first(), route.last()].into_iter().flatten() {
+                        let centre = self.camera.world_to_screen(rect, *at);
+                        painter.circle_filled(centre, 5.0, colour);
+                        painter.circle_stroke(centre, 5.0, outline);
+                    }
                     for corner in 1..route.len().saturating_sub(1) {
                         let at = self.camera.world_to_screen(rect, route[corner]);
                         let handle = Rect::from_center_size(at, Vec2::splat(7.0));
                         painter.rect_filled(handle, 0.0, colour);
-                        painter.rect_stroke(
-                            handle,
-                            0.0,
-                            Stroke::new(1.0, Color32::from_rgb(26, 26, 28)),
-                            egui::StrokeKind::Inside,
-                        );
+                        painter.rect_stroke(handle, 0.0, outline, egui::StrokeKind::Inside);
                     }
                 }
             }
@@ -5648,6 +5713,74 @@ mod tests {
             Pick::Corner(0, 1),
             "a corner the circuit grew is a handle like any other"
         );
+    }
+
+    #[test]
+    fn a_wires_ends_are_handles() {
+        // The ends are the points on the pins. They come first, because they sit
+        // exactly where a new wire would be started from.
+        let camera = Camera::default();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let a = part_of_kind("led", Pos2::new(100.0, 100.0), &[(0.0, 0.0)]);
+        let b = part_of_kind("led", Pos2::new(300.0, 300.0), &[(0.0, 0.0)]);
+        let parts = vec![a, b];
+        let wires = vec![Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: Vec::new(),
+        }];
+        let route = wire_route(&parts, &wires[0]);
+        for (at, end) in [(route[0], End::A), (route[route.len() - 1], End::B)] {
+            assert_eq!(
+                pick_at(
+                    &parts,
+                    &wires,
+                    &[0],
+                    camera,
+                    rect,
+                    camera.world_to_screen(rect, at),
+                    PIN_HIT_RADIUS / camera.zoom
+                ),
+                Pick::End(0, end),
+                "each end of a selected wire is a handle"
+            );
+        }
+    }
+
+    #[test]
+    fn an_end_dropped_on_another_pin_replugs_the_wire() {
+        let mut wires = vec![Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: Vec::new(),
+        }];
+        assert!(replug(&mut wires, 0, End::A, Some((2, 3))));
+        assert_eq!(wires[0].a, (2, 3), "the end moved to the pin it was dropped on");
+        assert_eq!(wires[0].b, (1, 0), "and the other end did not move");
+    }
+
+    #[test]
+    fn an_end_dropped_on_nothing_stays_put() {
+        // A wire cannot be left hanging off the canvas.
+        let mut wires = vec![Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: Vec::new(),
+        }];
+        assert!(!replug(&mut wires, 0, End::A, None));
+        assert_eq!(wires[0].a, (0, 0));
+    }
+
+    #[test]
+    fn an_end_cannot_be_dropped_on_the_pin_its_other_end_uses() {
+        // That would be the same pin twice, which is not a wire.
+        let mut wires = vec![Wire {
+            a: (0, 0),
+            b: (1, 0),
+            waypoints: Vec::new(),
+        }];
+        assert!(!replug(&mut wires, 0, End::A, Some((1, 0))));
+        assert_eq!(wires[0].a, (0, 0), "the wire kept both its ends where they were");
     }
 
     #[test]
