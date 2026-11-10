@@ -8,7 +8,7 @@ default-run = "croquis-egui-spike"
 [dependencies]
 # Glow keeps the spike small and matches the kind of backend a native Linux app
 # would use; wgpu is deliberately not pulled in until Spike C measures it.
-eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "clipboard"] }
 resvg = "0.48"
 croquis-sim = { path = "../../crates/croquis-sim" }
 croquis-core = { path = "../../crates/croquis-core" }

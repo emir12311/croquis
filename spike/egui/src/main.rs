@@ -2271,11 +2271,22 @@ impl Spike {
         } else if turn {
             self.rotate_selection(90.0);
         }
-        if copy {
+        if copy || cut {
             self.copy_selection();
+            // egui only reports Ctrl+V at all when the clipboard holds text: with
+            // an empty clipboard it pushes nothing and swallows the key. A circuit
+            // copy therefore leaves a short description there too, so the paste
+            // that follows always has something to trigger on. The paste itself
+            // uses the circuit clipboard and ignores the text.
+            if !self.clipboard.parts.is_empty() {
+                ctx.copy_text(format!(
+                    "Croquis: {} parts, {} wires",
+                    self.clipboard.parts.len(),
+                    self.clipboard.wires.len()
+                ));
+            }
         }
         if cut {
-            self.copy_selection();
             self.delete_selection();
         }
         if delete {
@@ -5044,7 +5055,7 @@ mod tests {
     ///
     /// eframe delivers clipboard shortcuts as events rather than keys, so a test
     /// that faked a `Key::C` press would be testing something the app never sees.
-    fn shortcuts_with(spike: &mut Spike, events: Vec<egui::Event>) {
+    fn shortcuts_with(spike: &mut Spike, events: Vec<egui::Event>) -> egui::PlatformOutput {
         let ctx = egui::Context::default();
         ctx.begin_pass(egui::RawInput {
             events,
@@ -5054,6 +5065,7 @@ mod tests {
         let mut output = ctx.end_pass();
         // Nothing is drawing here; the frame's texture deltas are dropped.
         output.textures_delta.clear();
+        output.platform_output
     }
 
     #[test]
@@ -5063,10 +5075,19 @@ mod tests {
         // — which is why Delete and R worked and these three never did.
         let mut spike = Spike::default();
         spike.selection.select_part(1);
-        shortcuts_with(&mut spike, vec![egui::Event::Copy]);
+        let output = shortcuts_with(&mut spike, vec![egui::Event::Copy]);
         assert!(
             !spike.clipboard.parts.is_empty(),
             "the copy event fills the circuit clipboard"
+        );
+        // And it puts text on the platform clipboard, because egui only reports
+        // Ctrl+V when there is some — an empty one delivers no paste event at all.
+        assert!(
+            output
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::OutputCommand::CopyText(_))),
+            "a copy has to leave text behind for the paste to be seen"
         );
     }
 
