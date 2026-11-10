@@ -119,6 +119,47 @@ const FUNCTIONS: &[&str] = &[
     "OUTPUT",
 ];
 
+/// The syntax `egui_code_editor` needs, assembled from the word lists this file
+/// already uses to colour a sketch.
+///
+/// The crate ships Rust and Python presets and no C/C++, so an Arduino one is
+/// built here — in the same place that decides what the highlighter treats as a
+/// keyword, so the two cannot disagree about what a sketch looks like.
+#[cfg(feature = "code-editor")]
+pub fn arduino_syntax() -> egui_code_editor::Syntax {
+    use std::collections::BTreeSet;
+
+    let keywords: BTreeSet<&'static str> = KEYWORDS
+        .iter()
+        .copied()
+        .chain([
+            "do", "switch", "case", "break", "continue", "static", "volatile", "HIGH", "LOW",
+            "INPUT", "OUTPUT", "INPUT_PULLUP", "LED_BUILTIN",
+        ])
+        .collect();
+    let types: BTreeSet<&'static str> = [
+        "void", "int", "byte", "long", "float", "double", "char", "boolean", "bool", "unsigned",
+        "word", "String", "size_t",
+    ]
+    .into_iter()
+    .collect();
+    let functions: BTreeSet<&'static str> = FUNCTIONS.iter().copied().collect();
+
+    egui_code_editor::Syntax::new("C++")
+        .with_case_sensitive(true)
+        .with_comment("//")
+        .with_comment_multiline(["/*", "*/"])
+        .with_quotes(['"', '\''].into_iter().collect::<BTreeSet<char>>())
+        .with_keywords(keywords)
+        .with_types(types)
+        .with_special(functions)
+}
+
+/// The layouter the hand-rolled editor paints with.
+///
+/// Unused when the `code-editor` feature is on, which swaps in a ready-made
+/// widget that does its own highlighting.
+#[cfg_attr(feature = "code-editor", allow(dead_code))]
 pub fn highlight(text: &str) -> LayoutJob {
     let mono = FontId::monospace(13.0);
     let mut job = LayoutJob::default();
@@ -193,6 +234,27 @@ fn flush_word(job: &mut LayoutJob, word: &str, mono: &FontId) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "code-editor")]
+    #[test]
+    fn the_arduino_syntax_knows_the_words_a_sketch_uses() {
+        let syntax = arduino_syntax();
+        assert_eq!(syntax.language(), "C++");
+        assert_eq!(syntax.comment(), "//", "a sketch comments with //");
+        for word in ["void", "int", "byte"] {
+            assert!(syntax.is_type(word), "{word} should read as a type");
+        }
+        for word in ["if", "else", "while", "return"] {
+            assert!(syntax.is_keyword(word), "{word} should be a keyword");
+        }
+        for word in ["pinMode", "digitalWrite", "delay"] {
+            assert!(syntax.is_special(word), "{word} is part of the Arduino API");
+        }
+        assert!(
+            !syntax.is_keyword("notAThing"),
+            "and a word nobody listed is not a keyword"
+        );
+    }
 
     #[test]
     fn highlighting_preserves_the_sketch() {

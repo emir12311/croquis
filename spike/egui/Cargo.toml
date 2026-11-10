@@ -16,6 +16,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rfd = "0.17"
 rodio = { version = "0.23", default-features = false, features = ["playback"] }
+# Optional: a ready-made egui editor widget, behind the `code-editor` feature so
+# trying it costs nothing — turning the feature off restores the TextEdit exactly.
+egui_code_editor = { version = "0.5", optional = true }
+
+[features]
+default = []
+code-editor = ["dep:egui_code_editor"]
 
 [dev-dependencies]
 # The preset corpus is checked against docs/v0.3-baseline.json, whose sketch

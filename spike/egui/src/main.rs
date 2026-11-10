@@ -147,6 +147,10 @@ fn sketch_editor_id() -> egui::Id {
 
 /// Put the caret where a diagnostic points. `false` means the editor has not
 /// written its state yet (it has not been shown), so there is nothing to move.
+///
+/// Unused when the `code-editor` feature is on: that widget has no `TextEditState`
+/// to write, so jumping to a line is not something it can do.
+#[cfg_attr(feature = "code-editor", allow(dead_code))]
 fn place_caret(ctx: &egui::Context, sketch: &str, line: usize, column: usize) -> bool {
     let index = editor::line_col_to_char_index(sketch, line, column);
     let Some(mut state) = egui::text_edit::TextEditState::load(ctx, sketch_editor_id()) else {
@@ -3069,6 +3073,9 @@ impl eframe::App for Spike {
                             self.sketch_open = false;
                         }
                     });
+                    // The hand-rolled editor: a TextEdit with our own layouter. Kept
+                    // for the `code-editor` feature being off, which is the default.
+                    #[cfg(not(feature = "code-editor"))]
                     let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
                         let mut job = editor::highlight(text.as_str());
                         job.wrap.max_width = wrap_width;
@@ -3084,25 +3091,41 @@ impl eframe::App for Spike {
                         .id_salt("sketch-editor")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            let editor = ui.add_sized(
-                                ui.available_size(),
-                                egui::TextEdit::multiline(&mut self.sketch)
-                                    .id(sketch_editor_id())
-                                    .code_editor()
-                                    .desired_width(f32::INFINITY)
-                                    .layouter(&mut layouter),
-                            );
-                            // A click on a problem in the serial panel asks for
-                            // the caret here. The state is written after the
-                            // widget has run, so the next frame both shows the
-                            // caret and scrolls it into view.
-                            if let Some((line, column)) = self.pending_jump.take() {
-                                // Written after the widget has run, so the next
-                                // frame shows the caret and scrolls it into view:
-                                // TextEdit scrolls when the range changes.
-                                if place_caret(&ctx, &self.sketch, line, column) {
-                                    editor.request_focus();
-                                    ctx.request_repaint();
+                            #[cfg(feature = "code-editor")]
+                            {
+                                // Trying a ready-made widget: numbered lines, keyword
+                                // highlighting and auto-indent come from the crate.
+                                let syntax = editor::arduino_syntax();
+                                egui_code_editor::CodeEditor::default()
+                                    .id_source("croquis-sketch-editor")
+                                    .with_ui_fontsize(ui)
+                                    .with_numlines(true)
+                                    .show(ui, &mut self.sketch, &syntax);
+                                // Jump-to-line works by writing a TextEditState, so it
+                                // means nothing for this widget. Drop the request
+                                // instead of leaving it pending forever.
+                                self.pending_jump = None;
+                            }
+                            #[cfg(not(feature = "code-editor"))]
+                            {
+                                let editor = ui.add_sized(
+                                    ui.available_size(),
+                                    egui::TextEdit::multiline(&mut self.sketch)
+                                        .id(sketch_editor_id())
+                                        .code_editor()
+                                        .desired_width(f32::INFINITY)
+                                        .layouter(&mut layouter),
+                                );
+                                // A click on a problem in the serial panel asks for
+                                // the caret here. The state is written after the
+                                // widget has run, so the next frame both shows the
+                                // caret and scrolls it into view.
+                                if let Some((line, column)) = self.pending_jump.take() {
+                                    // TextEdit scrolls when the range changes.
+                                    if place_caret(&ctx, &self.sketch, line, column) {
+                                        editor.request_focus();
+                                        ctx.request_repaint();
+                                    }
                                 }
                             }
                         });
