@@ -92,12 +92,16 @@
   "value.blue": "Blue",
   "value.green": "Green",
   "value.orange": "Orange",
+  "value.pink": "Pink",
   "value.purple": "Purple",
   "value.red": "Red",
+  "value.teal": "Teal",
   "value.white": "White",
   "value.yellow": "Yellow",
   "view.fit": "Fit the circuit",
   "view.reset": "Reset view",
   "view.zoom_in": "Zoom in",
-  "view.zoom_out": "Zoom out"
+  "view.zoom_out": "Zoom out",
+  "wire.colour": "Wire colour",
+  "wire.colour.default": "Default"
 }

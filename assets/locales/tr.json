@@ -92,12 +92,16 @@
   "value.blue": "Mavi",
   "value.green": "Yeşil",
   "value.orange": "Turuncu",
+  "value.pink": "Pembe",
   "value.purple": "Mor",
   "value.red": "Kırmızı",
+  "value.teal": "Turkuaz",
   "value.white": "Beyaz",
   "value.yellow": "Sarı",
   "view.fit": "Devreyi sığdır",
   "view.reset": "Görünümü sıfırla",
   "view.zoom_in": "Yakınlaştır",
-  "view.zoom_out": "Uzaklaştır"
+  "view.zoom_out": "Uzaklaştır",
+  "wire.colour": "Kablo rengi",
+  "wire.colour.default": "Varsayılan"
 }

@@ -54,6 +54,34 @@ const WIRE_HIT_RADIUS: f32 = 6.0;
 /// it locks onto it. A little larger than the hit radius: the pull should start
 /// just before the hand has to be exact.
 const SNAP_RADIUS: f32 = 10.0;
+/// Wokwi's named wire colours, as v0.2 offers them (`src/lib/wire-colours.ts`).
+///
+/// The middle field is the catalogue key for the name, so the swatches read in the
+/// reader's language like everything else.
+const WIRE_COLOURS: [(&str, &str, u32); 8] = [
+    ("green", "value.green", 0x3f_a3_4d),
+    ("red", "value.red", 0xd6_45_45),
+    ("blue", "value.blue", 0x3b_7d_d8),
+    ("yellow", "value.yellow", 0xd9_b2_3a),
+    ("orange", "value.orange", 0xdd_8a_3c),
+    ("purple", "value.purple", 0x9b_6d_d6),
+    ("teal", "value.teal", 0x2f_9e_8f),
+    ("pink", "value.pink", 0xd9_6a_9c),
+];
+
+/// The colour a wire draws in when it has not been given one.
+const WIRE_DEFAULT: Color32 = Color32::from_rgb(108, 203, 123);
+
+fn wire_colour(name: Option<&str>) -> Option<Color32> {
+    let name = name?;
+    WIRE_COLOURS
+        .iter()
+        .find(|(called, _, _)| *called == name)
+        .map(|(_, _, hex)| {
+            Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, *hex as u8)
+        })
+}
+
 /// The height a docked panel's head occupies. A collapsed serial monitor keeps
 /// exactly this much of itself, so it can be unfolded again.
 const SERIAL_HEAD_HEIGHT: f32 = 32.0;
@@ -659,8 +687,9 @@ impl Selection {
 struct Clipboard {
     parts: Vec<Part>,
     /// A wire as the indices of the copied parts it joins, the pins at each end,
-    /// and its bends — so a paste is wired to its own copies.
-    wires: Vec<(PinRef, PinRef, Vec<Pos2>)>,
+    /// its bends, and its colour — so a paste is wired to its own copies and looks
+    /// like what was copied.
+    wires: Vec<(PinRef, PinRef, Vec<Pos2>, Option<String>)>,
 }
 
 /// One state of the circuit, as the undo history remembers it.
@@ -2076,6 +2105,8 @@ impl Spike {
             a: start,
             b: target,
             waypoints: std::mem::take(&mut self.wire_waypoints),
+            // A freshly drawn wire takes the theme's colour.
+            colour: None,
         });
         self.wire_start = None;
         self.reevaluate = true;
@@ -2184,7 +2215,11 @@ impl Spike {
     /// keyboard, so Ctrl+C in the editor copies text and Delete deletes a
     /// character rather than a part.
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() {
+        // Stand down only for a text box, not for any focused widget. This used to
+        // ask whether *anything* had focus, so clicking a slider or the Run button
+        // left focus on it and every canvas shortcut — copy, cut, paste, delete,
+        // rotate — stopped working until you clicked empty canvas again.
+        if ctx.text_edit_focused() {
             return;
         }
         let (delete, copy, cut, paste, undo, redo) = ctx.input(|input| {
@@ -2248,6 +2283,16 @@ impl Spike {
     }
 
     /// Copy the selected parts and the wires among them.
+    /// Give every selected wire a colour, or the theme's default for `None`.
+    fn set_wire_colour(&mut self, name: Option<&str>) {
+        for index in self.selection.wires.clone() {
+            if let Some(wire) = self.wires.get_mut(index) {
+                wire.colour = name.map(str::to_string);
+            }
+        }
+        self.reevaluate = true;
+    }
+
     fn copy_selection(&mut self) {
         if self.selection.parts.is_empty() {
             return;
@@ -2263,7 +2308,12 @@ impl Spike {
             let a = picked.iter().position(|index| *index == wire.a.0);
             let b = picked.iter().position(|index| *index == wire.b.0);
             if let (Some(a), Some(b)) = (a, b) {
-                clipboard_wires.push(((a, wire.a.1), (b, wire.b.1), wire.waypoints.clone()));
+                clipboard_wires.push((
+                    (a, wire.a.1),
+                    (b, wire.b.1),
+                    wire.waypoints.clone(),
+                    wire.colour.clone(),
+                ));
             }
         }
         self.clipboard = Clipboard {
@@ -2288,12 +2338,13 @@ impl Spike {
             self.selection.parts.push(base + index);
         }
         self.next_id += self.clipboard.parts.len();
-        for (a, b, waypoints) in &self.clipboard.wires {
+        for (a, b, waypoints, colour) in &self.clipboard.wires {
             self.wires.push(Wire {
                 a: (base + a.0, a.1),
                 b: (base + b.0, b.1),
                 // The bends come along, so a routed wire pastes routed.
                 waypoints: waypoints.iter().map(|point| *point + offset).collect(),
+                colour: colour.clone(),
             });
         }
         self.reevaluate = true;
@@ -3073,7 +3124,52 @@ impl eframe::App for Spike {
                                     changed
                                 }
                                 _ => {
-                                    ui.weak(texts.t("properties.empty"));
+                                    // With a wire selected the strip offers the same
+                                    // palette v0.2 offers, in the same place.
+                                    if !self.selection.wires.is_empty() {
+                                        ui.add_enabled_ui(!self.running, |ui| {
+                                            ui.label(texts.t("wire.colour"));
+                                            ui.separator();
+                                            let current = self
+                                                .selection
+                                                .wires
+                                                .first()
+                                                .and_then(|index| self.wires.get(*index))
+                                                .and_then(|wire| wire.colour.clone());
+                                            let mut pick = None;
+                                            for (name, key, hex) in WIRE_COLOURS {
+                                                let swatch = Color32::from_rgb(
+                                                    (hex >> 16) as u8,
+                                                    (hex >> 8) as u8,
+                                                    hex as u8,
+                                                );
+                                                let mut button =
+                                                    egui::Button::new(" ").fill(swatch);
+                                                if current.as_deref() == Some(name) {
+                                                    button = button
+                                                        .stroke(egui::Stroke::new(2.0, Color32::WHITE));
+                                                }
+                                                if ui
+                                                    .add(button)
+                                                    .on_hover_text(texts.t(key))
+                                                    .clicked()
+                                                {
+                                                    pick = Some(Some(name));
+                                                }
+                                            }
+                                            if ui
+                                                .button(texts.t("wire.colour.default"))
+                                                .clicked()
+                                            {
+                                                pick = Some(None);
+                                            }
+                                            if let Some(choice) = pick {
+                                                self.set_wire_colour(choice);
+                                            }
+                                        });
+                                    } else {
+                                        ui.weak(texts.t("properties.empty"));
+                                    }
                                     false
                                 }
                             })
@@ -3141,6 +3237,24 @@ impl eframe::App for Spike {
                     self.delete_selection();
                     ui.close();
                 }
+                ui.separator();
+                // v0.2 offers the wire palette in the properties strip. The menu is
+                // the other place you reach for it, without leaving the canvas.
+                let some_wires = !self.selection.wires.is_empty();
+                ui.add_enabled_ui(some_wires, |ui| {
+                    ui.menu_button(menu_texts.t("wire.colour"), |ui| {
+                        if ui.button(menu_texts.t("wire.colour.default")).clicked() {
+                            self.set_wire_colour(None);
+                            ui.close();
+                        }
+                        for (name, key, _) in WIRE_COLOURS {
+                            if ui.button(menu_texts.t(key)).clicked() {
+                                self.set_wire_colour(Some(name));
+                                ui.close();
+                            }
+                        }
+                    });
+                });
                 ui.separator();
                 if ui.button(menu_texts.t("edit.clear_wires")).clicked() {
                     self.wires.clear();
@@ -3667,36 +3781,40 @@ impl eframe::App for Spike {
                     .and_then(|(_, end)| world_pointer.map(|at| (end, at)));
                 let route = wire_route_ending(&self.parts, wire, over);
                 let selected = self.selection.has_wire(index);
-                let colour = if selected {
-                    Color32::from_rgb(217, 164, 65)
-                } else {
-                    Color32::from_rgb(108, 203, 123)
-                };
-                let thickness = if selected { 3.5 } else { 2.5 };
-                for pair in route.windows(2) {
-                    painter.line_segment(
-                        [
-                            self.camera.world_to_screen(rect, pair[0]),
-                            self.camera.world_to_screen(rect, pair[1]),
-                        ],
-                        Stroke::new(thickness, colour),
-                    );
+                // A wire draws in its own colour, so the colour you pick is the
+                // colour you see. Selection is a halo underneath rather than a
+                // repaint, or choosing a colour would hide the thing you chose.
+                let colour = wire_colour(wire.colour.as_deref()).unwrap_or(WIRE_DEFAULT);
+                let points: Vec<Pos2> = route
+                    .iter()
+                    .map(|at| self.camera.world_to_screen(rect, *at))
+                    .collect();
+                if selected {
+                    let halo =
+                        Stroke::new(7.0, Color32::from_rgba_unmultiplied(217, 164, 65, 90));
+                    for pair in points.windows(2) {
+                        painter.line_segment([pair[0], pair[1]], halo);
+                    }
+                }
+                for pair in points.windows(2) {
+                    painter.line_segment([pair[0], pair[1]], Stroke::new(2.5, colour));
                 }
                 // A selected wire shows its handles: round at the two ends, square
                 // at the corners. Only a selected wire shows them — the hit-test
                 // says the same thing, so what is drawn and what can be grabbed
                 // agree.
                 if selected {
+                    // The handles keep the selection colour, so they read against
+                    // whatever colour the wire itself is.
+                    let ink = Color32::from_rgb(217, 164, 65);
                     let outline = Stroke::new(1.0, Color32::from_rgb(26, 26, 28));
-                    for at in [route.first(), route.last()].into_iter().flatten() {
-                        let centre = self.camera.world_to_screen(rect, *at);
-                        painter.circle_filled(centre, 5.0, colour);
-                        painter.circle_stroke(centre, 5.0, outline);
+                    for at in [points.first(), points.last()].into_iter().flatten() {
+                        painter.circle_filled(*at, 5.0, ink);
+                        painter.circle_stroke(*at, 5.0, outline);
                     }
-                    for corner in 1..route.len().saturating_sub(1) {
-                        let at = self.camera.world_to_screen(rect, route[corner]);
-                        let handle = Rect::from_center_size(at, Vec2::splat(7.0));
-                        painter.rect_filled(handle, 0.0, colour);
+                    for corner in 1..points.len().saturating_sub(1) {
+                        let handle = Rect::from_center_size(points[corner], Vec2::splat(7.0));
+                        painter.rect_filled(handle, 0.0, ink);
                         painter.rect_stroke(handle, 0.0, outline, egui::StrokeKind::Inside);
                     }
                 }
@@ -4885,6 +5003,7 @@ mod tests {
         spike.wires.push(Wire {
             a: (3, 1),
             b: (4, 0),
+            colour: None,
             waypoints: Vec::new(),
         });
 
@@ -5380,6 +5499,7 @@ mod tests {
         let wires = vec![Wire {
             a: (0, 0),
             b: (1, 0),
+            colour: None,
             waypoints: Vec::new(),
         }];
         let screen = camera.world_to_screen(rect, Pos2::new(200.0, 100.0));
@@ -5533,6 +5653,7 @@ mod tests {
         let wires = vec![Wire {
             a: (0, 0),
             b: (1, 0),
+            colour: None,
             waypoints: vec![corner],
         }];
         let screen = camera.world_to_screen(rect, corner);
@@ -5565,6 +5686,7 @@ mod tests {
             a: (0, 0),
             b: (1, 0),
             waypoints: vec![Pos2::new(200.0, 100.0)],
+            colour: None,
         }];
         let route = wire_route(&parts, &wires[0]);
         // Pins, the stored corner, and the elbow the router inserted.
@@ -5604,6 +5726,7 @@ mod tests {
             a: (0, 0),
             b: (1, 0),
             waypoints: Vec::new(),
+            colour: None,
         }];
         let route = wire_route(&parts, &wires[0]);
         assert_eq!(route.len(), 3, "pins and one elbow");
@@ -5632,6 +5755,7 @@ mod tests {
         let mut wire = Wire {
             a: (0, 0),
             b: (1, 0),
+            colour: None,
             // One stored corner gives the route a corner with room to move. A
             // route of only pins and one elbow has none: both its legs land on
             // pins, so the elbow is fixed wherever the router put it.
@@ -5661,6 +5785,7 @@ mod tests {
             a: (0, 0),
             b: (1, 0),
             waypoints: Vec::new(),
+            colour: None,
         };
         // The leg leaves pin A downward, so the corner's x cannot change: a pin
         // does not move, and a leg that leaves it has to go on leaving it the same
@@ -5688,6 +5813,7 @@ mod tests {
             a: (0, 0),
             b: (1, 0),
             waypoints: Vec::new(),
+            colour: None,
         }];
         assert_eq!(
             wire_route(&parts, &wires[0]).len(),
@@ -5728,6 +5854,7 @@ mod tests {
             a: (0, 0),
             b: (1, 0),
             waypoints: Vec::new(),
+            colour: None,
         }];
         let route = wire_route(&parts, &wires[0]);
         for (at, end) in [(route[0], End::A), (route[route.len() - 1], End::B)] {
@@ -5752,6 +5879,7 @@ mod tests {
         let mut wires = vec![Wire {
             a: (0, 0),
             b: (1, 0),
+            colour: None,
             waypoints: Vec::new(),
         }];
         assert!(replug(&mut wires, 0, End::A, Some((2, 3))));
@@ -5766,6 +5894,7 @@ mod tests {
             a: (0, 0),
             b: (1, 0),
             waypoints: Vec::new(),
+            colour: None,
         }];
         assert!(!replug(&mut wires, 0, End::A, None));
         assert_eq!(wires[0].a, (0, 0));
@@ -5778,6 +5907,7 @@ mod tests {
             a: (0, 0),
             b: (1, 0),
             waypoints: Vec::new(),
+            colour: None,
         }];
         assert!(!replug(&mut wires, 0, End::A, Some((1, 0))));
         assert_eq!(wires[0].a, (0, 0), "the wire kept both its ends where they were");
@@ -5795,6 +5925,7 @@ mod tests {
             a: (0, 0),
             b: (1, 0),
             waypoints: vec![bend],
+            colour: None,
         }];
         let screen = camera.world_to_screen(rect, bend);
         assert_eq!(
@@ -5960,6 +6091,52 @@ mod tests {
         assert_eq!(reloaded_wires.len(), wires.len());
         assert_eq!(reloaded_sketch, sketch);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_wire_colour_survives_a_save_and_a_load() {
+        // v0.2's diagram format has always carried a wire's colour; the spike used
+        // to drop it on load and write `None` straight back on save.
+        let path = std::env::temp_dir().join("croquis-colour-roundtrip.json");
+        let (parts, mut wires, sketch) = scene::load_diagram_file(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/blink.json"),
+        );
+        assert!(!wires.is_empty(), "blink has wires");
+        wires[0].colour = Some("red".into());
+        scene::save_diagram_file(&path, &parts, &wires, &sketch).expect("save");
+        let (_, reloaded, _) = scene::load_diagram_file(&path);
+        assert_eq!(reloaded[0].colour.as_deref(), Some("red"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn the_wire_palette_is_the_one_v0_2_offers() {
+        // The same eight names and hexes as src/lib/wire-colours.ts.
+        for (name, _, hex) in WIRE_COLOURS {
+            let colour = wire_colour(Some(name)).expect("a known colour");
+            assert_eq!(colour.r() as u32, (hex >> 16) & 0xff, "{name} red");
+            assert_eq!(colour.g() as u32, (hex >> 8) & 0xff, "{name} green");
+            assert_eq!(colour.b() as u32, hex & 0xff, "{name} blue");
+        }
+        assert_eq!(wire_colour(None), None, "no name means the theme's colour");
+        assert_eq!(
+            wire_colour(Some("chartreuse")),
+            None,
+            "and so does a name nobody ships"
+        );
+    }
+
+    #[test]
+    fn a_chosen_colour_reaches_every_selected_wire() {
+        let mut spike = Spike::default();
+        spike.selection.wires = vec![0];
+        spike.set_wire_colour(Some("blue"));
+        assert_eq!(spike.wires[0].colour.as_deref(), Some("blue"));
+        spike.set_wire_colour(None);
+        assert_eq!(
+            spike.wires[0].colour, None,
+            "and it can go back to the default"
+        );
     }
 
     #[test]
@@ -6556,6 +6733,7 @@ mod tests {
                 a: from,
                 b: to,
                 waypoints: Vec::new(),
+                colour: None,
             }
         };
         let wires = vec![
@@ -6626,6 +6804,7 @@ mod tests {
                 a: at(a.0, a.1),
                 b: at(b.0, b.1),
                 waypoints: Vec::new(),
+                colour: None,
             };
             let wires = vec![
                 wire(("uno", "13"), ("bb", upper)),

@@ -108,6 +108,11 @@ pub struct Wire {
     pub a: PinRef,
     pub b: PinRef,
     pub waypoints: Vec<Pos2>,
+    /// Wokwi's named colour for this wire, or `None` for the themed default.
+    ///
+    /// The diagram format has always carried this; the spike simply dropped it on
+    /// load and wrote `None` on save.
+    pub colour: Option<String>,
 }
 
 fn root() -> PathBuf {
@@ -188,6 +193,7 @@ pub fn load_diagram_file(path: &Path) -> (Vec<Part>, Vec<Wire>, String) {
             a: (a, pin_a),
             b: (b, pin_b),
             waypoints,
+            colour: wire.colour.clone(),
         });
     }
     (parts, wires, parsed.sketch.unwrap_or_default())
@@ -309,7 +315,7 @@ pub fn save_diagram_file(
                     instance_id: b.id.clone(),
                     pin: b.pins[wire.b.1].name.clone(),
                 },
-                colour: None,
+                colour: wire.colour.clone(),
                 waypoints: wire
                     .waypoints
                     .iter()
