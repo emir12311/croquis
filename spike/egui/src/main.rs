@@ -721,6 +721,9 @@ struct Spike {
     /// does the same, and the model already carries `waypoints` per wire.
     wire_waypoints: Vec<Pos2>,
     selection: Selection,
+    /// What the last right-click landed on, so the context menu can offer what
+    /// v0.2 offers for that kind of thing and nothing else.
+    menu_target: Option<Pick>,
     /// The rubber band a right-drag is drawing, in screen coordinates.
     marquee: Option<(Pos2, Pos2)>,
     clipboard: Clipboard,
@@ -973,6 +976,7 @@ impl Default for Spike {
             wire_start: None,
             wire_waypoints: Vec::new(),
             selection: Selection::default(),
+            menu_target: None,
             marquee: None,
             clipboard: Clipboard::default(),
             dragging: None,
@@ -2312,6 +2316,52 @@ impl Spike {
     }
 
     /// Copy the selected parts and the wires among them.
+    /// Copy the selection and paste it back where it lands.
+    ///
+    /// The clipboard is borrowed and put back: duplicating something should not
+    /// throw away what the reader had copied.
+    fn duplicate_selection(&mut self) {
+        let saved = self.clipboard.clone();
+        self.copy_selection();
+        if !self.clipboard.parts.is_empty() {
+            self.paste();
+        }
+        self.clipboard = saved;
+    }
+
+    /// Whether every selected part is a microcontroller.
+    ///
+    /// v0.2 offers "Edit code" only when nothing in the selection would be left
+    /// out by it, so the item never lies about what it will do.
+    fn selection_is_mcu(&self) -> bool {
+        !self.selection.parts.is_empty()
+            && self
+                .selection
+                .parts
+                .iter()
+                .all(|index| self.parts.get(*index).is_some_and(|part| part.kind == "uno"))
+    }
+
+    /// Raise the sketch panel and put the caret in it.
+    fn edit_code(&mut self, ctx: &egui::Context) {
+        self.sketch_open = true;
+        ctx.memory_mut(|memory| memory.request_focus(sketch_editor_id()));
+    }
+
+    /// The palette as menu rows: the default, then every named colour.
+    fn wire_colour_menu(&mut self, ui: &mut egui::Ui, texts: &Texts) {
+        if ui.button(texts.t("wire.colour.default")).clicked() {
+            self.set_wire_colour(None);
+            ui.close();
+        }
+        for (name, key, _) in WIRE_COLOURS {
+            if ui.button(texts.t(key)).clicked() {
+                self.set_wire_colour(Some(name));
+                ui.close();
+            }
+        }
+    }
+
     /// Give every selected wire a colour, or the theme's default for `None`.
     fn set_wire_colour(&mut self, name: Option<&str>) {
         for index in self.selection.wires.clone() {
@@ -3238,57 +3288,85 @@ impl eframe::App for Spike {
             // never both fire.
             let menu_texts = self.texts.clone();
             response.context_menu(|ui| {
-                let some_parts = !self.selection.parts.is_empty();
-                if ui
-                    .add_enabled(some_parts, egui::Button::new(menu_texts.t("edit.copy")))
-                    .clicked()
-                {
-                    self.copy_selection();
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(
-                        !self.clipboard.parts.is_empty(),
-                        egui::Button::new(menu_texts.t("edit.paste")),
-                    )
-                    .clicked()
-                {
-                    self.paste();
-                    ui.close();
-                }
-                if ui
-                    .add_enabled(
-                        !self.selection.is_empty(),
-                        egui::Button::new(menu_texts.t("edit.delete")),
-                    )
-                    .clicked()
-                {
-                    self.delete_selection();
-                    ui.close();
-                }
-                ui.separator();
-                // v0.2 offers the wire palette in the properties strip. The menu is
-                // the other place you reach for it, without leaving the canvas.
-                let some_wires = !self.selection.wires.is_empty();
-                ui.add_enabled_ui(some_wires, |ui| {
-                    ui.menu_button(menu_texts.t("wire.colour"), |ui| {
-                        if ui.button(menu_texts.t("wire.colour.default")).clicked() {
-                            self.set_wire_colour(None);
-                            ui.close();
-                        }
-                        for (name, key, _) in WIRE_COLOURS {
-                            if ui.button(menu_texts.t(key)).clicked() {
-                                self.set_wire_colour(Some(name));
+                // The menu offers what the thing that was clicked can do, and
+                // nothing else — v0.2 has one menu for a part and another for a
+                // wire. Running freezes the circuit, so the edits grey out rather
+                // than vanish, which is what v0.2 says and where it says it.
+                match self.menu_target {
+                    Some(Pick::Part(_)) => {
+                        ui.add_enabled_ui(!self.running, |ui| {
+                            if ui.button(menu_texts.t("edit.copy")).clicked() {
+                                self.copy_selection();
                                 ui.close();
                             }
+                            if ui.button(menu_texts.t("edit.cut")).clicked() {
+                                self.copy_selection();
+                                self.delete_selection();
+                                ui.close();
+                            }
+                            if ui.button(menu_texts.t("edit.duplicate")).clicked() {
+                                self.duplicate_selection();
+                                ui.close();
+                            }
+                            if ui.button(menu_texts.t("edit.rotate_90")).clicked() {
+                                self.rotate_selection(90.0);
+                                ui.close();
+                            }
+                            if ui.button(menu_texts.t("edit.rotate_180")).clicked() {
+                                self.rotate_selection(180.0);
+                                ui.close();
+                            }
+                            if self.selection_is_mcu() {
+                                ui.separator();
+                                if ui.button(menu_texts.t("edit.edit_code")).clicked() {
+                                    self.edit_code(&ctx);
+                                    ui.close();
+                                }
+                            }
+                            ui.separator();
+                            if ui.button(menu_texts.t("edit.delete")).clicked() {
+                                self.delete_selection();
+                                ui.close();
+                            }
+                        });
+                    }
+                    Some(Pick::Wire(_)) => {
+                        ui.add_enabled_ui(!self.running, |ui| {
+                            ui.menu_button(menu_texts.t("wire.colour"), |ui| {
+                                self.wire_colour_menu(ui, &menu_texts);
+                            });
+                            ui.separator();
+                            if ui.button(menu_texts.t("edit.delete_wire")).clicked() {
+                                self.delete_selection();
+                                ui.close();
+                            }
+                        });
+                    }
+                    _ => {
+                        // The canvas itself: nothing to edit, so the menu is about
+                        // bringing something back and clearing what is left over.
+                        if ui
+                            .add_enabled(
+                                !self.clipboard.parts.is_empty() && !self.running,
+                                egui::Button::new(menu_texts.t("edit.paste")),
+                            )
+                            .clicked()
+                        {
+                            self.paste();
+                            ui.close();
                         }
-                    });
-                });
-                ui.separator();
-                if ui.button(menu_texts.t("edit.clear_wires")).clicked() {
-                    self.wires.clear();
-                    self.wire_start = None;
-                    ui.close();
+                        ui.add_enabled_ui(!self.running, |ui| {
+                            if ui.button(menu_texts.t("edit.clear_wires")).clicked() {
+                                self.wires.clear();
+                                self.wire_start = None;
+                                ui.close();
+                            }
+                        });
+                    }
+                }
+                if self.running {
+                    ui.separator();
+                    ui.weak(menu_texts.t("edit.frozen"));
                 }
             });
 
@@ -3590,6 +3668,46 @@ impl eframe::App for Spike {
                 self.drag_origin.clear();
                 self.drag_travel = Vec2::ZERO;
                 self.release_input();
+            }
+
+            // A right-click opens the menu, and the menu offers what the thing
+            // under the pointer can do — so the click has to say what that was, and
+            // make the selection agree. v0.2 selects a part that was not already
+            // selected, and a wire clears the parts: otherwise the menu would act
+            // on things you cannot see it acting on.
+            if response.secondary_clicked() {
+                if let Some(pos) = ctx.input(|input| input.pointer.interact_pos()) {
+                    if rect.contains(pos) {
+                        let pick = pick_at(
+                            &self.parts,
+                            &self.wires,
+                            &self.selection.wires,
+                            self.camera,
+                            rect,
+                            pos,
+                            PIN_HIT_RADIUS / self.camera.zoom,
+                        );
+                        // A corner or an end is part of a wire, and the menu has
+                        // wire things to say about it.
+                        let target = match pick {
+                            Pick::End(wire, _) | Pick::Corner(wire, _) => Pick::Wire(wire),
+                            other => other,
+                        };
+                        match target {
+                            Pick::Part(index) => {
+                                if !self.selection.has_part(index) {
+                                    self.selection.select_part(index);
+                                }
+                            }
+                            Pick::Wire(index) => {
+                                self.selection.clear();
+                                self.selection.select_wire(index);
+                            }
+                            _ => {}
+                        }
+                        self.menu_target = Some(target);
+                    }
+                }
             }
 
             if response.clicked_by(PointerButton::Primary) && self.hovered_pin.is_none() {
@@ -5137,6 +5255,49 @@ mod tests {
             }],
         );
         assert_eq!(spike.parts.len(), before - 1);
+    }
+
+    #[test]
+    fn duplicating_leaves_what_was_copied_alone() {
+        let mut spike = Spike::default();
+        // Something the reader copied earlier, which duplicating must not eat.
+        spike.selection.select_part(1);
+        spike.copy_selection();
+        let copied = spike.clipboard.parts.len();
+        let before = spike.parts.len();
+
+        spike.duplicate_selection();
+        assert_eq!(spike.parts.len(), before + copied, "the copy landed");
+        assert_eq!(
+            spike.clipboard.parts.len(),
+            copied,
+            "and the clipboard still holds what it held"
+        );
+    }
+
+    #[test]
+    fn edit_code_is_offered_only_for_microcontrollers() {
+        let mut spike = Spike::default();
+        let uno = spike
+            .parts
+            .iter()
+            .position(|part| part.kind == "uno")
+            .expect("blink has an Uno");
+        let led = spike
+            .parts
+            .iter()
+            .position(|part| part.kind == "led")
+            .expect("blink has an LED");
+        assert!(!spike.selection_is_mcu(), "nothing is selected");
+        spike.selection.select_part(uno);
+        assert!(spike.selection_is_mcu(), "an Uno can edit code");
+        spike.selection.select_part(led);
+        assert!(!spike.selection_is_mcu(), "an LED cannot");
+        spike.selection.parts = vec![uno, led];
+        assert!(
+            !spike.selection_is_mcu(),
+            "and a mixed selection is not offered it"
+        );
     }
 
     #[test]
