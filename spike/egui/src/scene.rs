@@ -99,7 +99,7 @@ struct ManifestPin {
     y: f32,
 }
 
-use croquis_core::route::{decode_route, Point as CorePoint};
+use croquis_core::route::{decode_route, expand_path, Point as CorePoint};
 
 pub type PinRef = (usize, usize);
 
@@ -123,6 +123,30 @@ pub fn load_blink() -> (Vec<Part>, Vec<Wire>) {
     let path = root().join("presets/blink.json");
     let (parts, wires, _) = load_diagram_file(&path);
     (parts, wires)
+}
+
+/// A whisker of slack when deciding whether two points share an axis.
+///
+/// Pin positions are `f32` and route arithmetic is `f64`, so a decoded corner can
+/// sit a few millionths off the axis its neighbour is on (`89.0 + 116.6` is not
+/// quite the `f32` value of `205.6`). The router compares axes exactly, so that
+/// whisker makes it invent an elbow — which the next save writes out as a bend the
+/// wire never had.
+const AXIS_EPSILON: f64 = 1e-3;
+
+/// Nudge points that are a whisker off sharing an axis onto it.
+fn snap_to_axes(points: &mut [CorePoint]) {
+    for index in 1..points.len() {
+        let previous = points[index - 1];
+        let here = points[index];
+        let off_x = (here.x - previous.x).abs();
+        let off_y = (here.y - previous.y).abs();
+        if off_x < AXIS_EPSILON && off_y >= AXIS_EPSILON {
+            points[index].x = previous.x;
+        } else if off_y < AXIS_EPSILON && off_x >= AXIS_EPSILON {
+            points[index].y = previous.y;
+        }
+    }
 }
 
 /// Load a diagram file, returning the parts, wires and sketch.
@@ -185,8 +209,25 @@ pub fn load_diagram_file(path: &Path) -> (Vec<Part>, Vec<Wire>, String) {
             continue;
         };
         let from = parts[a].pin_world(pin_a);
-        let waypoints = decode_route(CorePoint::new(from.x as f64, from.y as f64), &wire.route)
-            .into_iter()
+        let to = parts[b].pin_world(pin_b);
+        // Store the corners the wire actually draws, not only the ones the file
+        // named. The router adds an elbow wherever two corners share no axis, and
+        // both the canvas and the save path go through it — so a wire saved with a
+        // diagonal leg writes out an elbow that the next load would read back as an
+        // extra bend. Expanding here keeps stored and drawn the same thing, and
+        // makes the round trip idempotent.
+        let mut points = vec![CorePoint::new(from.x as f64, from.y as f64)];
+        points.extend(decode_route(
+            CorePoint::new(from.x as f64, from.y as f64),
+            &wire.route,
+        ));
+        points.push(CorePoint::new(to.x as f64, to.y as f64));
+        // Before the router sees it: a corner a whisker off its neighbour's axis
+        // would otherwise be handed an elbow it does not need.
+        snap_to_axes(&mut points);
+        let route = expand_path(&points);
+        let waypoints = route[1..route.len().saturating_sub(1)]
+            .iter()
             .map(|point| Pos2::new(point.x as f32, point.y as f32))
             .collect();
         wires.push(Wire {

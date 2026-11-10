@@ -99,8 +99,16 @@ pub fn parse_ref(reference: &str) -> Option<PinRef> {
     })
 }
 
+/// The precision a part's position is written at.
+///
+/// This used to be whole units — `.round()` — which moved every part by up to half
+/// a unit on save and pulled its pins off the wires that met them, so a wire grew a
+/// bend every time the file was written. Four decimals keeps the file readable
+/// without moving anything a screen could show.
+const POSITION_SCALE: f64 = 10_000.0;
+
 fn round(value: f64) -> f64 {
-    value.round()
+    (value * POSITION_SCALE).round() / POSITION_SCALE
 }
 
 /// Turn the app's circuit into the file format.

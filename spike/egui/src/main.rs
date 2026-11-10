@@ -6357,6 +6357,172 @@ mod tests {
         assert!(!sketch.is_empty());
     }
 
+    /// One preset as `docs/v0.3-baseline.json` froze it: what v0.2 had.
+    #[derive(serde::Deserialize)]
+    struct BaselinePreset {
+        id: String,
+        parts: Vec<String>,
+        connections: usize,
+        #[serde(rename = "sketchHash")]
+        sketch_hash: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Baseline {
+        presets: Vec<BaselinePreset>,
+    }
+
+    fn baseline() -> Baseline {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/v0.3-baseline.json");
+        let text = std::fs::read_to_string(&path).expect("the frozen v0.2 baseline");
+        serde_json::from_str(&text).expect("the baseline parses")
+    }
+
+    #[test]
+    fn every_preset_still_says_what_v0_2_said() {
+        // The corpus is the only real test of "same circuits": 24 presets, of which
+        // two were ever opened by a test before this one. The baseline was frozen
+        // from v0.2 so it does not have to be run again to compare against.
+        use croquis_core::catalogue::part_by_kind;
+        use sha2::{Digest, Sha256};
+
+        let baseline = baseline();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut problems = Vec::new();
+        for expected in &baseline.presets {
+            let path = root.join("presets").join(format!("{}.json", expected.id));
+            if !path.exists() {
+                problems.push(format!("{}: no preset file", expected.id));
+                continue;
+            }
+            let (parts, wires, sketch) = scene::load_diagram_file(&path);
+            if parts.is_empty() {
+                problems.push(format!("{}: loaded no parts at all", expected.id));
+                continue;
+            }
+
+            // The tags v0.2 recorded, as a set: file order is not the contract.
+            let mut tags: Vec<String> = parts
+                .iter()
+                .filter_map(|part| {
+                    parse_kind(&part.kind).map(|kind| part_by_kind(kind).tag.to_string())
+                })
+                .collect();
+            tags.sort();
+            let mut wanted = expected.parts.clone();
+            wanted.sort();
+            if tags != wanted {
+                problems.push(format!("{}: parts {tags:?}, baseline {wanted:?}", expected.id));
+            }
+
+            if wires.len() != expected.connections {
+                problems.push(format!(
+                    "{}: {} wires, baseline {}",
+                    expected.id,
+                    wires.len(),
+                    expected.connections
+                ));
+            }
+
+            // v0.2's sketch, byte for byte: a load that mangles the code shows up
+            // here and nowhere else.
+            let digest = Sha256::digest(sketch.as_bytes());
+            let hash: String = digest.iter().take(6).map(|byte| format!("{byte:02x}")).collect();
+            if hash != expected.sketch_hash {
+                problems.push(format!(
+                    "{}: sketch hash {hash}, baseline {}",
+                    expected.id, expected.sketch_hash
+                ));
+            }
+        }
+        assert!(
+            problems.is_empty(),
+            "the corpus disagrees with v0.2 in {} place(s):\n  {}",
+            problems.len(),
+            problems.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn every_preset_survives_a_save_and_a_reload() {
+        let dir = std::env::temp_dir().join("croquis-corpus-roundtrip");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir for the corpus");
+
+        let mut problems = Vec::new();
+        for preset in scene::presets() {
+            let (parts, wires, sketch) = scene::load_diagram_file(&preset.path);
+            if parts.is_empty() {
+                problems.push(format!("{}: loaded no parts at all", preset.id));
+                continue;
+            }
+            let out = dir.join(format!("{}.json", preset.id));
+            if let Err(error) = scene::save_diagram_file(&out, &parts, &wires, &sketch) {
+                problems.push(format!("{}: save failed: {error}", preset.id));
+                continue;
+            }
+            let (again_parts, again_wires, again_sketch) = scene::load_diagram_file(&out);
+            if again_parts.len() != parts.len() || again_wires.len() != wires.len() {
+                problems.push(format!(
+                    "{}: {} parts and {} wires became {} and {}",
+                    preset.id,
+                    parts.len(),
+                    wires.len(),
+                    again_parts.len(),
+                    again_wires.len()
+                ));
+            }
+            if again_sketch != sketch {
+                problems.push(format!("{}: the sketch came back changed", preset.id));
+            }
+            for (before, after) in parts.iter().zip(again_parts.iter()) {
+                if before.id != after.id {
+                    problems.push(format!("{}: part {} became {}", preset.id, before.id, after.id));
+                    continue;
+                }
+                // Saved as a corner and read back as a centre, so allow the rounding
+                // rather than demanding the same float.
+                if (before.center - after.center).length() > 0.01 {
+                    problems.push(format!("{}: part {} moved on save", preset.id, before.id));
+                }
+                if (before.rotation - after.rotation).abs() > 0.01 {
+                    problems.push(format!("{}: part {} turned on save", preset.id, before.id));
+                }
+                if before.attrs != after.attrs {
+                    problems.push(format!(
+                        "{}: part {} attributes changed on save",
+                        preset.id, before.id
+                    ));
+                }
+            }
+            for (before, after) in wires.iter().zip(again_wires.iter()) {
+                if before.a != after.a || before.b != after.b {
+                    problems.push(format!("{}: a wire found different pins", preset.id));
+                }
+                if before.waypoints.len() != after.waypoints.len() {
+                    problems.push(format!(
+                        "{}: a wire went from {} bends to {} ({:?} -> {:?})",
+                        preset.id,
+                        before.waypoints.len(),
+                        after.waypoints.len(),
+                        before.waypoints,
+                        after.waypoints
+                    ));
+                }
+                if before.colour != after.colour {
+                    problems.push(format!("{}: a wire lost its colour", preset.id));
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            problems.is_empty(),
+            "{} preset(s) do not survive a round trip:\n  {}",
+            problems.len(),
+            problems.join("\n  ")
+        );
+    }
+
     #[test]
     fn a_loaded_diagram_saves_and_reloads() {
         let path = std::env::temp_dir().join("croquis-roundtrip.json");

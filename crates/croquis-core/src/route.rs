@@ -82,8 +82,17 @@ pub fn route_path(pts: &[Point]) -> String {
     out
 }
 
-fn round_tenth(n: f64) -> f64 {
-    (n * 10.0).round() / 10.0
+/// How precisely a route move is written.
+///
+/// A tenth used to be enough to look like Wokwi's own files, but a move rounded to
+/// a tenth does not land on the pin it is aiming at: `v116.64999` became `v116.6`,
+/// half a tenth short, and the router then added a bend to get back to the pin — a
+/// bend the wire never had. Four decimals keeps the file readable and the route
+/// true. The format allows any decimal, so this costs nothing but characters.
+const MOVE_SCALE: f64 = 10_000.0;
+
+fn round_move(n: f64) -> f64 {
+    (n * MOVE_SCALE).round() / MOVE_SCALE
 }
 
 /// Wokwi's route mini-language: relative moves from a pin.
@@ -101,9 +110,9 @@ pub fn encode_route(a: Point, b: Point, waypoints: &[Point]) -> Vec<String> {
             continue;
         }
         if dx == 0.0 {
-            out.push(format!("v{}", round_tenth(dy)));
+            out.push(format!("v{}", round_move(dy)));
         } else if dy == 0.0 {
-            out.push(format!("h{}", round_tenth(dx)));
+            out.push(format!("h{}", round_move(dx)));
         }
     }
     out
