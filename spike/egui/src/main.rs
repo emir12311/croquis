@@ -2222,14 +2222,32 @@ impl Spike {
         if ctx.text_edit_focused() {
             return;
         }
-        let (delete, copy, cut, paste, undo, redo) = ctx.input(|input| {
+        // eframe translates Cmd/Ctrl+X/C/V into semantic clipboard events rather
+        // than delivering them as key presses (`NativeOptions::clipboard_shortcuts`,
+        // on by default), so the canvas has to listen for those. Turning that option
+        // off would let us read the keys, but the code editor's own Ctrl+C is the
+        // same mechanism and would stop working — so we use the events and stand
+        // down entirely while a text box has the caret.
+        let (copy, cut, paste) = ctx.input(|input| {
+            let mut copy = false;
+            let mut cut = false;
+            let mut paste = false;
+            for event in &input.events {
+                match event {
+                    egui::Event::Copy => copy = true,
+                    egui::Event::Cut => cut = true,
+                    // The text is the system clipboard's, which is not what a
+                    // circuit paste wants: ours is the one we filled.
+                    egui::Event::Paste(_) => paste = true,
+                    _ => {}
+                }
+            }
+            (copy, cut, paste)
+        });
+        let (delete, undo, redo) = ctx.input(|input| {
             (
                 input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace),
-                input.modifiers.command && input.key_pressed(egui::Key::C),
-                input.modifiers.command && input.key_pressed(egui::Key::X),
-                input.modifiers.command && input.key_pressed(egui::Key::V),
-                // Ctrl+Z undoes the circuit; the editor keeps its own, because
-                // this whole function stands down while a text box has the caret.
+                // Ctrl+Z is not a clipboard shortcut, so it does arrive as a key.
                 input.modifiers.command && !input.modifiers.shift && input.key_pressed(egui::Key::Z),
                 input.modifiers.command
                     && (input.key_pressed(egui::Key::Y)
@@ -5020,6 +5038,84 @@ mod tests {
         );
         assert_eq!(wire.a.0, 2);
         assert_eq!(wire.b.0, 3);
+    }
+
+    /// Run one real egui pass carrying `events`, then hand the app its shortcuts.
+    ///
+    /// eframe delivers clipboard shortcuts as events rather than keys, so a test
+    /// that faked a `Key::C` press would be testing something the app never sees.
+    fn shortcuts_with(spike: &mut Spike, events: Vec<egui::Event>) {
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput {
+            events,
+            ..Default::default()
+        });
+        spike.handle_shortcuts(&ctx);
+        let mut output = ctx.end_pass();
+        // Nothing is drawing here; the frame's texture deltas are dropped.
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn the_copy_shortcut_arrives_as_an_event_not_a_key() {
+        // Cmd/Ctrl+C is translated into Event::Copy before it reaches the app
+        // (`NativeOptions::clipboard_shortcuts`), so binding Key::C copied nothing
+        // — which is why Delete and R worked and these three never did.
+        let mut spike = Spike::default();
+        spike.selection.select_part(1);
+        shortcuts_with(&mut spike, vec![egui::Event::Copy]);
+        assert!(
+            !spike.clipboard.parts.is_empty(),
+            "the copy event fills the circuit clipboard"
+        );
+    }
+
+    #[test]
+    fn a_paste_event_pastes_the_circuit() {
+        let mut spike = Spike::default();
+        spike.selection.select_part(1);
+        shortcuts_with(&mut spike, vec![egui::Event::Copy]);
+        let copied = spike.clipboard.parts.len();
+        let before = spike.parts.len();
+        // The string is the system clipboard's, which a circuit paste ignores.
+        shortcuts_with(&mut spike, vec![egui::Event::Paste(String::new())]);
+        assert_eq!(
+            spike.parts.len(),
+            before + copied,
+            "the copied parts land on the canvas"
+        );
+    }
+
+    #[test]
+    fn a_cut_event_copies_and_deletes() {
+        let mut spike = Spike::default();
+        let before = spike.parts.len();
+        spike.selection.select_part(1);
+        shortcuts_with(&mut spike, vec![egui::Event::Cut]);
+        assert!(
+            !spike.clipboard.parts.is_empty(),
+            "cut fills the clipboard too"
+        );
+        assert_eq!(spike.parts.len(), before - 1, "and takes the part away");
+    }
+
+    #[test]
+    fn a_key_that_is_not_a_clipboard_shortcut_still_arrives_as_a_key() {
+        // Delete is not translated, so it keeps working as a key press.
+        let mut spike = Spike::default();
+        let before = spike.parts.len();
+        spike.selection.select_part(1);
+        shortcuts_with(
+            &mut spike,
+            vec![egui::Event::Key {
+                key: egui::Key::Delete,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert_eq!(spike.parts.len(), before - 1);
     }
 
     #[test]
