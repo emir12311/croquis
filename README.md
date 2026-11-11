@@ -50,9 +50,17 @@ See the [How It Works](#how-it-works) section for the diagram.
 
 ## When is Croquis?
 
-Took about 3 days for the v0.1 release.
+| Release | Date | Since the previous |
+| --- | --- | --- |
+| v0.1 | 2026-10-18 | — |
+| v0.1.1 | 2026-10-18 | same day |
+| v0.1.2 | 2026-10-18 | same day |
+| v0.1.3 | 2026-10-20 | 2 days |
+| v0.2.0 | 2026-10-23 | 3 days |
+| v0.3.0 | unreleased | — |
 
-Updates will come in the future.
+Dates are those of the tagged commit. v0.3.0 is the current line of work: the same editor, rewritten
+in Rust with egui.
 
 ## Installation
 
@@ -93,9 +101,8 @@ sudo dnf install ./croquis-*.rpm   # or: sudo zypper install ./croquis-*.rpm
 sudo pacman -U croquis-*.pkg.tar.zst
 ```
 
-A prebuilt package rather than a `PKGBUILD`. There is no AUR entry for Croquis — AUR registration has
-been closed since the June 2026 supply-chain attacks — and a source recipe could not ship the bundled
-toolchain anyway, which is the whole point of the package. `sudo pacman -R croquis` removes it.
+A prebuilt package: nothing is compiled, and the toolchain comes with it. `sudo pacman -R croquis`
+removes it.
 
 ### From source
 
@@ -172,7 +179,6 @@ That's basically it.
 
 ## What it doesn't do yet
 
-* **A generous starter kit.** An Uno, LEDs including RGB, a resistor, a pushbutton, a rotary or slide potentiometer, a photoresistor, an NTC temperature sensor, an analog joystick, tilt/PIR/flame/gas/sound sensors, a DHT22 temperature/humidity sensor, an HC-SR04 ultrasonic sensor, a 4×4 keypad, an IR receiver and remote, a 74HC595 shift register, a servo driven by the bundled offline `Servo` library, a stepper motor, an LCD1602, a buzzer, a relay, 7-segment and 4-digit displays, an LED bar and breadboards.
 * **One board.** A second Uno gets its own circuit but shares the single sketch.
 * **A small electrical model, not a circuit solver.** A resistor does something real and a missing one is reported, and the potentiometer is a fixed divider between its rails. There are no arbitrary parallel networks.
 * **Wokwi files open with one caveat:** a wire using Wokwi's `*` route separator draws a different path here, to the same pins.
