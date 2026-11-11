@@ -39,6 +39,18 @@ machine or this driver; all of them are about *this* project.
   `Event::Copy` / `Cut` / `Paste` rather than for key combinations.
 - **Nested menus close themselves.** In egui, opening a submenu closes its parent, so the Presets menu
   changes state instead of relying on the menu staying open across a click.
+- **A guard that asks can cancel its own answer.** The unsaved-changes question cancels a window close so it
+  can ask. When the reader then chose Discard, the close was sent again — and the guard, still seeing a dirty
+  document, cancelled *that* close and re-opened the prompt, so the button looked dead. Save only appeared to
+  work because saving makes the document clean. The guard has to be disarmed by the answer, not by the outcome:
+  Discard records the current state as the baseline before carrying the close out.
+- **The palette is a process-wide switch, deliberately.** The shell's six colours became a `Palette` with a dark
+  and a light flavour, read through `palette()`. Immediate-mode drawing reads colours from free functions and
+  closures all over this file; threading a palette parameter through every one of them would have touched far
+  more than the constants it replaced. The trade is that the theme is global state — only `apply_theme` writes
+  it, and the saved choice is read once at startup, before the style is built. A colour that does not come from
+  the palette is a theme bug waiting to be found by eye: the canvas, the grid, the palette tiles and the Run
+  button were all caught that way.
 - **The breadboard is generated, not borrowed.** Wokwi's element library has no breadboard, and the
   detailed third-party artwork (Fritzing) is **CC-BY-SA**, which cannot be baked into an AGPL-3.0 binary.
   So it is built from a spec instead — on a breadboard the drawing and the pin map are the *same* regular
