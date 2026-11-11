@@ -12,121 +12,108 @@ it is not a mock-up, and the LED lights to its real current.
 
 Three constraints shape most design decisions, and none of them is negotiable:
 
-- **Fully offline at runtime.** No server, no accounts, no telemetry, no network calls. The fonts
-  are bundled rather than fetched for exactly this reason, and the app is granted only
-  `core:default` and `dialog:default`, under a CSP that allows no network origin. Anything that
-  would add a network dependency is wrong here even if it would be convenient.
+- **Fully offline at runtime.** No server, no accounts, no telemetry, no network calls. The fonts are
+  bundled rather than fetched for exactly this reason. Anything that would add a network dependency
+  is wrong here even if it would be convenient.
 - **Lightweight.** It should start instantly and stay small.
-- **Desktop-first** (Tauri), Linux only so far.
+- **Desktop-first**, Linux only so far — Rust and egui, with no webview in the loop.
 
 ## Commands
 
 | | |
 | --- | --- |
-| `npm install` | once |
 | `./scripts/setup-toolchain.sh` | once — simavr, avr-gcc, the Arduino core |
-| `./scripts/build-toolchain-dist.sh` | **required before `tauri build`** — `tauri.conf.json` bundles `../.toolchain-dist`, which only this creates |
-| `npm run tauri dev` | the real app, with HMR |
-| `npm run tauri build` | a release build |
-| `npm test` | frontend tests, vitest |
-| `npm run check:versions` | every manifest agrees with `package.json` — or pass a tag: `-- v0.1.2` |
-| `npm run check` | svelte-check and TypeScript — must be clean |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | engine tests — compiles and runs real sketches |
+| `cargo run --release --manifest-path spike/egui/Cargo.toml` | the app |
+| `cargo test --manifest-path spike/egui/Cargo.toml` | the app's suite — presets, netlist, UI, editor |
+| `cargo test --manifest-path crates/croquis-core/Cargo.toml` | the engine's suite |
+| `cargo test --manifest-path crates/croquis-sim/Cargo.toml` | the simulator's suite |
+| `cargo check --all-targets --manifest-path spike/egui/Cargo.toml` | warnings are errors in this crate |
+| `./scripts/package.sh all` | the four packages, from one staged payload |
+| `node scripts/check-versions.mjs [tag]` | the app's version declarations agree |
+| `tools/ui-shot.sh` | screenshot the app under a headless sway |
 
 **The toolchain is not in the repository.** `.toolchain/` is git-ignored and holds `avr-gcc`, the
-Arduino core and a from-source `simavr`. If it is missing, `src-tauri/build.rs` panics with the
-simavr steps; the rest are in [the README](README.md#build-from-source).
+Arduino core and a from-source `simavr`; `crates/croquis-sim/build.rs` links `libsimavr` and panics
+without it. `./scripts/build-toolchain-dist.sh` trims it to what ships, and refuses to finish unless
+its own `avr-g++` compiles a sketch for the atmega328p. `scripts/package.sh` runs it.
 
 ## Where things live
 
 | | |
 | --- | --- |
-| `src/App.svelte` | the composition root: markup, panel layout, menus, properties strip |
-| `src/lib/project.svelte.ts` | the circuit document: parts, wires, undo, clipboard, dirty |
-| `src/lib/document.ts` | document types and pure helpers (snapshots, attributes, copies) |
-| `src/lib/file-session.svelte.ts` | save/save-as/open, the home path and its errors |
-| `src/lib/canvas.svelte.ts` | pin geometry from the mounted elements, sprites, palette art, drawing |
-| `src/lib/input.svelte.ts` | selection and the gestures: wiring, dragging, marquee, pan |
-| `src/lib/sim.svelte.ts` | run/stop, chip pins, serial, netlist solving |
-| `src/lib/view.svelte.ts` | zoom/pan/fit and screen ↔ canvas coordinates |
-| `src/lib/sketch.svelte.ts` | the sketch text and its saved/dirty pair |
-| `src/lib/netlist.ts` | the circuit model: nets, LEDs/RGB, sensors, relays and outputs |
-| `src/lib/diagram.ts` | the `diagram.json` format, read and written |
-| `src/lib/route.ts` | orthogonal wire routing. **Nothing here may produce a diagonal** |
-| `src/lib/parts.ts` | the component catalogue — the registry everything else works from |
-| `src/lib/breadboard.ts` | the breadboard, generated from a grid spec |
-| `src/lib/snap.ts` | dropping and moving parts onto holes |
-| `src/lib/circuit-render.ts` | the canvas renderer |
-| `src/lib/part-art.ts` | rasterising the `@wokwi/elements` parts into sprites |
-| `src/lib/buzzer-audio.ts` | the WebAudio voice for driven buzzers |
-| `src/lib/serial-scroll.ts` | whether the serial monitor should follow new output |
-| `src/lib/wokwi.ts` | the `@wokwi/elements` we import, and element fixes such as the slide pot's missing styles |
-| `src/lib/hc595-element.ts` | the hand-drawn 74HC595 DIP-16 — `@wokwi/elements` has no logic parts |
-| `src/lib/shift-register.ts` | the 74HC595's pure shift/latch state machine |
-| `src/lib/arduino-api.ts` | the editor's Arduino completions |
-| `src/lib/presets.ts` + `presets/*.json` | the shipped circuits |
-| `libraries/` | the bundled Arduino libraries compiled offline with a sketch; provenance in `NOTICE.md` |
-| `src-tauri/src/engine.rs` | compiling sketches, and the simavr bridge |
-| `src-tauri/src/lib.rs` | the Tauri commands |
-| `src/lib/*.test.ts` | a test file per module, next to it |
+| `spike/egui/src/main.rs` | the shell: `ui()`, the panels, menus, the context menu, undo/redo, the unsaved guard |
+| `spike/egui/src/scene.rs` | parts and wires on the canvas, the art for kinds Croquis draws itself, presets, `snap_to_axes` |
+| `spike/egui/src/properties.rs` | the properties strip's rows |
+| `spike/egui/src/editor.rs` | the editor's syntax and theme, and the compiler's diagnostics |
+| `spike/egui/src/locales.rs` | `Locale`, the JSON catalogue, `Texts`, the saved choice |
+| `spike/egui/src/art.rs` | rasterising the Wokwi SVGs through resvg into textures |
+| `spike/egui/src/{lcd,knobs,buzzer,sensors,stepper,remote}.rs` | the parts that need behaviour or geometry of their own |
+| `crates/croquis-core/src/netlist.rs` | the circuit model: nets, LEDs, sensors, relays and outputs |
+| `crates/croquis-core/src/{diagram,document,route,catalogue}.rs` | the file format, the document, orthogonal routing, the part catalogue |
+| `crates/croquis-sim/src/engine.rs` | compiling sketches, and the simavr bridge |
+| `assets/locales/en.json`, `tr.json` | the two languages, flat key → text |
+| `presets/*.json` | the shipped circuits, in the same shape Save writes |
+| `libraries/` | the bundled Arduino libraries compiled offline with a sketch; provenance in `NOTICE` |
+| `packaging/org.croquis.app.desktop` | the desktop entry every package installs |
+| `scripts/package.sh` | one staged payload → .deb, .rpm, AppImage and Arch package |
 
-**Adding a component is a catalogue entry plus an element, not a branch everywhere.** `PartDef` in
-`parts.ts` carries the tag, the pin grouping (`pinNode`) and the editable fields, and the renderer,
-palette and properties strip all work from that. Behaviour that is genuinely per-kind — what the
-simulation drives, which state changes a drawing — stays explicit rather than forced into the
-catalogue.
+**Adding a component is a catalogue entry plus its art, not a branch everywhere.** `PartDef` in
+`catalogue.rs` carries the tag, the pin grouping and the editable fields (as translation keys), and
+the palette, properties strip and renderer all work from that. Behaviour that is genuinely per-kind —
+what the simulation drives, which state changes the drawing — stays explicit.
 
 ## Conventions
 
-- **No drop shadows anywhere**, in any stylesheet. Menus and overlays float on a border instead.
+- **No drop shadows anywhere.** Menus and overlays float on a border instead.
 - **No popups, no stacked menus.** Panels dock, or they do not exist.
-- Everything is themed through CSS variables — a light theme and a dark one, and no third.
+- **Every colour the shell paints comes from `palette()`**, in one of its two flavours. A literal
+  colour outside it is a theme bug: it will look right in the theme you are using and wrong in the
+  other. Part art and wire colours are the exception — those are the circuit, not the chrome.
 - The banned list in [`docs/dev-notes.md`](docs/dev-notes.md#anti-patterns-banned) is meant
   literally: no purple gradients, no marketing-speak, no fake loading spinners.
 - **One concern per commit**, and a slice should be runnable rather than described.
 
 ## Traps
 
-- **The dev port is pinned to 5173 with `strictPort: true`**, because Tauri's `devUrl` must match
-  it. A second dev server cannot bind, and `npm run tauri dev` then fails to start **while the stale
-  page stays up** — so you can be looking at old code and not know it. Run anything else with
-  `npm run dev -- --port 5199`.
-- **The circuit is drawn on a `<canvas>`.** Each part's DOM is invisible and exists only for
-  hit-testing; the visible pixels are rasterised sprites. So reading the DOM tells you about
-  *interaction*, not about what a part looks like.
-- **WebKitGTK needs the right renderer** — `src-tauri/src/lib.rs` disables DMA-BUF only on the
-  NVIDIA proprietary driver and on unknown/no-driver machines. Intel and AMD keep the accelerated
-  path; forcing the fallback there makes panning and simulation crawl. A running CSS *animation*
-  makes WebKitGTK drop to low-resolution tiles globally and blur everything, which is why the caret
-  blink is disabled and overlays do not animate.
+- **A wire's geometry is `f32` in one place and `f64` in another.** Pin positions are `f32`, route
+  arithmetic is `f64`, and a corner six millionths off an axis makes the router insert an elbow — a
+  wire that grows a bend every time it is saved. `scene::snap_to_axes` exists for this; the
+  round-trip test over every preset is what caught it.
+- **`egui_wants_keyboard_input` answers the wrong question.** It is true whenever *any* widget holds
+  focus, so it swallowed the editor's own shortcuts. Ask `ctx.text_edit_focused()`.
+- **The `clipboard` feature is load-bearing.** eframe turns Ctrl+C/X/V into events; with
+  `default-features = false` the clipboard is a stub, copying fills nothing, no `Paste` arrives, and
+  the shortcut looks simply dead.
+- **Textures are rasterised once, at startup or on load.** Re-rasterising per frame is how the
+  stepper used to stall; its rotor is drawn live as polygons instead.
 - **`.toolchain/core-cache`** holds precompiled core objects and is what keeps compiles fast.
-  `scripts/setup-toolchain.sh` builds it (step 4), including `yield.c.o` — which stands in for
-  `hooks.c`, a source this toolchain refuses — and `wiring_pulse.S`, which `delay()` needs.
-  `scripts/build-toolchain-dist.sh` ships it read-only, so an object missing here is one the app
-  cannot compile at run time. Bundled-library objects live in its `lib-objects/` subdirectory,
-  because the cache sweep in `compile_core()` links everything at the top level.
+  `scripts/setup-toolchain.sh` builds it, including `yield.c.o` — which stands in for `hooks.c`, a
+  source this toolchain refuses — and `wiring_pulse.S`, which `delay()` needs.
+  `scripts/build-toolchain-dist.sh` ships it read-only, so an object missing there is one the app
+  cannot compile at run time.
+- **Packaging is one payload, four formats.** `scripts/package.sh` stages
+  `usr/bin/croquis` plus `usr/lib/croquis/{toolchain,libraries}` and wraps that one tree. Off an rpm
+  distro the rpm needs `_dbpath` and `__os_install_post` disabled; the Arch package is built without
+  `makepkg` on CI. The details are in [`docs/dev-notes.md`](docs/dev-notes.md).
 
 ## Before you say it works
 
-- `npm run check` clean, and both test commands passing. `npm run check` catches the mistakes that
-  build anyway.
-- If you changed behaviour, **drive the app** rather than reasoning about the code. Several of this
-  project's real bugs were invisible in the source and obvious within a minute of driving it.
-  **`npm run drive`** runs the checks that need a live app: it starts a dev server on 5199 and
-  headless chromium on 9222, drives the real UI, and cleans up after itself. `import { connect }`
-  from `scripts/drive.mjs` to write a one-off check against whatever you are working on.
+- `cargo test` on all three crates, and `cargo check --all-targets` clean — warnings are errors in
+  the app crate, which catches the mistakes that build anyway.
+- If you changed behaviour, **run the app and look at it**. Several of this project's real bugs were
+  invisible in the source and obvious on screen — a dark canvas under a light theme, a button that
+  did nothing. `tools/ui-shot.sh` will photograph it for you.
 - If you are writing a claim into a doc, prove it or say it is unproven. One claim sat in the README
   being read as evidence while being false from the commit that introduced it.
 - **Prove a claim when you write it, not in a sweep at the end.** Every bug this project found late
   was findable on the day its slice landed: a netlist that latched a pin high, a paste that drifted
-  six pixels, a view whose origin sat in a corner. An audit at the end of a project is worth doing
-  and is not a substitute for checking things as you go.
-- **Test the artefact, not just the development build.** A `.deb` was built, its metadata inspected,
-  its dependencies confirmed — and never run. It installed cleanly and could not compile a sketch,
-  because the compiler was looked up in the source tree. Build the package, install it, and use the
-  installed thing before thinking about a release.
+  six pixels, a wire that grew a bend per save. An audit at the end of a project is worth doing and
+  is not a substitute for checking things as you go.
+- **Test the artefact, not just the development build.** A `.deb` was once built, its metadata
+  inspected, its dependencies confirmed — and never run. It installed cleanly and could not compile a
+  sketch. `./scripts/package.sh all`, then install or unpack one, and use *that*.
 - **Every slice ends with something the owner can run.** They are the person who actually uses it;
-  the harness is not a substitute for that, however many checks it runs. A bug that surfaces later
+  the test suite is not a substitute for that, however many checks it runs. A bug that surfaces later
   and was findable at the time is a process failure rather than bad luck.
 
 ## Review convention

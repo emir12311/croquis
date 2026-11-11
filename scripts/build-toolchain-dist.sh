@@ -17,7 +17,7 @@
 #   simavr            linked statically into the binary, so the sources are not needed
 #   every other AVR   avr25, avr4, avr6 and friends: we only target atmega328p
 #
-# Usage: scripts/build-toolchain-dist.sh    (then `npm run tauri build`)
+# Usage: scripts/build-toolchain-dist.sh    (called by scripts/package.sh)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -70,10 +70,10 @@ cp -r "$SRC/core-cache" "$OUT/core-cache"
 # compile error, which looks like the sketch is wrong.
 #
 # Before that, keep every dist file writable by its owner. Some copied files genuinely
-# are read-only — the core's git pack files most of all — and tauri-build re-copies the
-# resources on the next `cargo test` or `tauri dev` by truncating destinations that
-# already exist, which fails with "Permission denied" on a read-only file. The first
-# build worked, and the second never did.
+# are read-only — the core's git pack files most of all — and a second run of this script
+# copies over them by truncating destinations that already exist, which fails with
+# "Permission denied" on a read-only file. The first build worked, and the second never
+# did.
 chmod -R u+w "$OUT"
 echo 'int main() {}' > "$OUT/.selftest.cpp"
 if ! "$OUT/avr/bin/avr-g++" -mmcu=atmega328p -c "$OUT/.selftest.cpp" -o /dev/null 2>"$OUT/.selftest.err"; then

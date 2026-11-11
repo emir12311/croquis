@@ -2,16 +2,12 @@
 /**
  * Every place that states the shipping app's version has to agree.
  *
- * The release that prompted this file: package.json, Cargo.toml and tauri.conf.json
- * said 0.1.1, package-lock.json still said 0.0.0, and packaging/arch/PKGBUILD said
- * 0.1.0 — so `makepkg` fetched the previous release while the README offered the
- * new one.
+ * The release that prompted this file: three manifests said 0.1.1, the lock file still
+ * said 0.0.0, and the Arch recipe said 0.1.0 — so a source build fetched the previous
+ * release while the README offered the new one.
  *
- * What ships now is the egui app in `spike/egui`, so that is what this checks. The
- * Tauri app's files (`package.json`, `src-tauri/`) and its PKGBUILD keep their own
- * v0.2 version and are deliberately not compared to a v0.3 tag: they are no longer
- * released, and failing them against it would mean editing v0.2 to look like
- * something it is not.
+ * The app is `spike/egui`, so its `Cargo.toml` and the `croquis` entry in its
+ * `Cargo.lock` are what this checks.
  *
  *   node scripts/check-versions.mjs          compare to the app's Cargo.toml
  *   node scripts/check-versions.mjs v0.3.0   compare to a tag
