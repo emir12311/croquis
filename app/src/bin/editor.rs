@@ -8,7 +8,7 @@
 //! Run with:
 //!
 //! ```text
-//! cargo run --manifest-path spike/egui/Cargo.toml --bin editor-spike
+//! cargo run --manifest-path app/Cargo.toml --bin editor-spike
 //! ```
 
 use eframe::egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};

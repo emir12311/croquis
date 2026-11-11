@@ -5,7 +5,7 @@ PRESET="${1:-$ROOT/presets/four-digit.json}"
 OUT="${2:-${TMPDIR:-/tmp}/croquis-shot.png}"
 DELAY="${SHOT_DELAY:-3}"
 
-timeout 180 cargo build --manifest-path "$ROOT/spike/egui/Cargo.toml" --bin croquis-egui-spike >/dev/null
+timeout 180 cargo build --manifest-path "$ROOT/app/Cargo.toml" --bin croquis-egui-spike >/dev/null
 
 TMP="$(mktemp -d)"
 export XDG_RUNTIME_DIR="$TMP/xdg"
@@ -51,7 +51,7 @@ setsid env \
   WAYLAND_DISPLAY="$SOCKET" \
   CROQUIS_UI_PRESET="$PRESET" \
   CROQUIS_UI_AUTORUN=1 \
-  "$ROOT/spike/egui/target/debug/croquis-egui-spike" >"$TMP/app.log" 2>&1 &
+  "$ROOT/app/target/debug/croquis-egui-spike" >"$TMP/app.log" 2>&1 &
 APP_PID=$!
 
 # A socket file is not the same as a compositor that will take clients: sway

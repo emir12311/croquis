@@ -39,7 +39,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            spike/egui
+            app
             crates/croquis-core
 
       # `croquis-sim`'s build script needs simavr present before the engine can
@@ -59,7 +59,7 @@ jobs:
       # v0.2 baseline, the netlist, the editor, the whole UI. It worked locally for
       # a day without CI ever running it.
       - name: app tests
-        run: cargo test --manifest-path spike/egui/Cargo.toml
+        run: cargo test --manifest-path app/Cargo.toml
 
       - name: engine tests
         run: cargo test --manifest-path crates/croquis-core/Cargo.toml

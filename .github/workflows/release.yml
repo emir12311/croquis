@@ -40,7 +40,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: spike/egui
+          workspaces: app
 
       # simavr, avr-gcc and the Arduino core are not committed, and the engine's
       # build script needs simavr before anything can compile.
@@ -61,7 +61,7 @@ jobs:
 
       # A tag should not publish a package that has not passed its own suite.
       - name: tests
-        run: cargo test --manifest-path spike/egui/Cargo.toml
+        run: cargo test --manifest-path app/Cargo.toml
 
       # Fetched rather than installed: appimagetool packages are not in the distro
       # and would drag in their own dependence on the runner's FUSE anyway. It is

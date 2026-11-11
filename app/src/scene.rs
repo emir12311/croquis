@@ -116,7 +116,7 @@ pub struct Wire {
 }
 
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
 /// The Blink example, read from the preset file, with the sketch it carries.
@@ -595,7 +595,7 @@ fn part_art(
 }
 
 pub fn part_from_kind(kind: PartKind, center: Pos2, id: String) -> Option<Part> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let text = fs::read_to_string(root.join("assets/wokwi/manifest.json")).ok()?;
     let manifest = serde_json::from_str::<Manifest>(&text).ok()?;
     let defs: HashMap<&str, &ManifestPart> = manifest

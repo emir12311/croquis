@@ -23,11 +23,11 @@ Three constraints shape most design decisions, and none of them is negotiable:
 | | |
 | --- | --- |
 | `./scripts/setup-toolchain.sh` | once — simavr, avr-gcc, the Arduino core |
-| `cargo run --release --manifest-path spike/egui/Cargo.toml` | the app |
-| `cargo test --manifest-path spike/egui/Cargo.toml` | the app's suite — presets, netlist, UI, editor |
+| `cargo run --release --manifest-path app/Cargo.toml` | the app |
+| `cargo test --manifest-path app/Cargo.toml` | the app's suite — presets, netlist, UI, editor |
 | `cargo test --manifest-path crates/croquis-core/Cargo.toml` | the engine's suite |
 | `cargo test --manifest-path crates/croquis-sim/Cargo.toml` | the simulator's suite |
-| `cargo check --all-targets --manifest-path spike/egui/Cargo.toml` | warnings are errors in this crate |
+| `cargo check --all-targets --manifest-path app/Cargo.toml` | warnings are errors in this crate |
 | `./scripts/package.sh all` | the four packages, from one staged payload |
 | `node scripts/check-versions.mjs [tag]` | the app's version declarations agree |
 | `tools/ui-shot.sh` | screenshot the app under a headless sway |
@@ -41,13 +41,13 @@ its own `avr-g++` compiles a sketch for the atmega328p. `scripts/package.sh` run
 
 | | |
 | --- | --- |
-| `spike/egui/src/main.rs` | the shell: `ui()`, the panels, menus, the context menu, undo/redo, the unsaved guard |
-| `spike/egui/src/scene.rs` | parts and wires on the canvas, the art for kinds Croquis draws itself, presets, `snap_to_axes` |
-| `spike/egui/src/properties.rs` | the properties strip's rows |
-| `spike/egui/src/editor.rs` | the editor's syntax and theme, and the compiler's diagnostics |
-| `spike/egui/src/locales.rs` | `Locale`, the JSON catalogue, `Texts`, the saved choice |
-| `spike/egui/src/art.rs` | rasterising the Wokwi SVGs through resvg into textures |
-| `spike/egui/src/{lcd,knobs,buzzer,sensors,stepper,remote}.rs` | the parts that need behaviour or geometry of their own |
+| `app/src/main.rs` | the shell: `ui()`, the panels, menus, the context menu, undo/redo, the unsaved guard |
+| `app/src/scene.rs` | parts and wires on the canvas, the art for kinds Croquis draws itself, presets, `snap_to_axes` |
+| `app/src/properties.rs` | the properties strip's rows |
+| `app/src/editor.rs` | the editor's syntax and theme, and the compiler's diagnostics |
+| `app/src/locales.rs` | `Locale`, the JSON catalogue, `Texts`, the saved choice |
+| `app/src/art.rs` | rasterising the Wokwi SVGs through resvg into textures |
+| `app/src/{lcd,knobs,buzzer,sensors,stepper,remote}.rs` | the parts that need behaviour or geometry of their own |
 | `crates/croquis-core/src/netlist.rs` | the circuit model: nets, LEDs, sensors, relays and outputs |
 | `crates/croquis-core/src/{diagram,document,route,catalogue}.rs` | the file format, the document, orthogonal routing, the part catalogue |
 | `crates/croquis-sim/src/engine.rs` | compiling sketches, and the simavr bridge |

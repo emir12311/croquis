@@ -116,7 +116,7 @@ Requirements:
 git clone https://github.com/emir12311/croquis
 cd croquis
 ./scripts/setup-toolchain.sh        # simavr, avr-gcc and the Arduino core, ~36 MB
-cargo run --release --manifest-path spike/egui/Cargo.toml
+cargo run --release --manifest-path app/Cargo.toml
 ```
 
 `./scripts/package.sh all` builds the four packages above: it stages one payload and wraps it as a

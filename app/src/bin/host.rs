@@ -8,7 +8,7 @@
 //! Run with:
 //!
 //! ```text
-//! cargo run --manifest-path spike/egui/Cargo.toml --bin host
+//! cargo run --manifest-path app/Cargo.toml --bin host
 //! ```
 
 use std::path::{Path, PathBuf};

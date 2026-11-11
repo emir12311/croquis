@@ -7,7 +7,7 @@
 //!
 //! Run with:
 //!
-//!     cargo run --manifest-path spike/egui/Cargo.toml
+//!     cargo run --manifest-path app/Cargo.toml
 //!
 //! A display server is needed for the binary; `cargo test` exercises the pure
 //! geometry without one.
@@ -519,23 +519,23 @@ fn install_fonts(ctx: &egui::Context) {
     for (name, bytes) in [
         (
             "plex-sans",
-            include_bytes!("../../../assets/fonts/IBMPlexSans-Regular.ttf") as &[u8],
+            include_bytes!("../../assets/fonts/IBMPlexSans-Regular.ttf") as &[u8],
         ),
         (
             "plex-sans-medium",
-            include_bytes!("../../../assets/fonts/IBMPlexSans-Medium.ttf"),
+            include_bytes!("../../assets/fonts/IBMPlexSans-Medium.ttf"),
         ),
         (
             "plex-sans-semibold",
-            include_bytes!("../../../assets/fonts/IBMPlexSans-SemiBold.ttf"),
+            include_bytes!("../../assets/fonts/IBMPlexSans-SemiBold.ttf"),
         ),
         (
             "plex-mono",
-            include_bytes!("../../../assets/fonts/IBMPlexMono-Regular.ttf"),
+            include_bytes!("../../assets/fonts/IBMPlexMono-Regular.ttf"),
         ),
         (
             "plex-mono-medium",
-            include_bytes!("../../../assets/fonts/IBMPlexMono-Medium.ttf"),
+            include_bytes!("../../assets/fonts/IBMPlexMono-Medium.ttf"),
         ),
     ] {
         fonts.font_data.insert(
@@ -5243,7 +5243,7 @@ mod tests {
 
     #[test]
     fn tmp_led_art_follows_brightness() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi/led.svg");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/wokwi/led.svg");
         let svg = std::fs::read_to_string(path).expect("led asset");
         for brightness in [1.0, 0.5, 0.16, 0.0] {
             let patched = scene::led_state_svg(&svg, "red", brightness, brightness > 0.0);
@@ -6050,7 +6050,7 @@ mod tests {
         // The rotor is drawn live now. If it were still in the texture, the
         // texture would still change with every angle — which was the lag.
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../assets/wokwi/stepper-motor.svg");
+            .join("../assets/wokwi/stepper-motor.svg");
         let svg = std::fs::read_to_string(&path).expect("the stepper's art");
         let base = scene::stepper_base_svg(&svg);
         assert!(!base.contains("arrow-path"), "the rotor arrow is drawn live");
@@ -6683,7 +6683,7 @@ mod tests {
 
     #[test]
     fn the_keypad_mark_covers_the_key_the_tap_landed_on() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/keypad.json");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/keypad.json");
         let (parts, _wires, _sketch) = scene::load_diagram_file(&root);
         let pad = parts
             .iter()
@@ -6753,7 +6753,7 @@ mod tests {
     }
 
     fn baseline() -> Baseline {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/v0.3-baseline.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/v0.3-baseline.json");
         let text = std::fs::read_to_string(&path).expect("the frozen v0.2 baseline");
         serde_json::from_str(&text).expect("the baseline parses")
     }
@@ -6767,7 +6767,7 @@ mod tests {
         use sha2::{Digest, Sha256};
 
         let baseline = baseline();
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let mut problems = Vec::new();
         for expected in &baseline.presets {
             let path = root.join("presets").join(format!("{}.json", expected.id));
@@ -6907,7 +6907,7 @@ mod tests {
     fn a_loaded_diagram_saves_and_reloads() {
         let path = std::env::temp_dir().join("croquis-roundtrip.json");
         let (parts, wires, sketch) = scene::load_diagram_file(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/button.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/button.json"),
         );
         scene::save_diagram_file(&path, &parts, &wires, &sketch).expect("save");
         let (reloaded_parts, reloaded_wires, reloaded_sketch) = scene::load_diagram_file(&path);
@@ -6923,7 +6923,7 @@ mod tests {
         // to drop it on load and write `None` straight back on save.
         let path = std::env::temp_dir().join("croquis-colour-roundtrip.json");
         let (parts, mut wires, sketch) = scene::load_diagram_file(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/blink.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/blink.json"),
         );
         assert!(!wires.is_empty(), "blink has wires");
         wires[0].colour = Some("red".into());
@@ -6966,7 +6966,7 @@ mod tests {
     #[test]
     fn the_led_bar_patches_lit_and_off_segments() {
         let path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi/led-bar-graph.svg");
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/wokwi/led-bar-graph.svg");
         let svg = std::fs::read_to_string(path).expect("led bar asset");
         let values = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let patched = scene::led_bar_svg(&svg, &values, "red");
@@ -6977,7 +6977,7 @@ mod tests {
     #[test]
     fn seven_segment_patches_lit_segments() {
         let path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi/seven-segment.svg");
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/wokwi/seven-segment.svg");
         let svg = std::fs::read_to_string(path).expect("7-segment asset");
         let patched = scene::seven_segment_svg(&svg, &[1, 0, 0, 0, 0, 0, 0, 0], "red");
         assert_eq!(patched.matches("#dc012d").count(), 1);
@@ -7082,7 +7082,7 @@ mod tests {
 
     #[test]
     fn the_boards_led_and_a_pressed_button_are_both_in_the_art() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/wokwi");
 
         let uno = std::fs::read_to_string(root.join("uno.svg")).expect("uno art");
         let dark = scene::uno_svg(&uno, false);
@@ -7113,7 +7113,7 @@ mod tests {
         // The tick and the tip are drawn live, at about 40 ms a state cheaper
         // than rasterising them per value, so the base art must not carry them:
         // one of each, and both costing nothing on a drag.
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/wokwi");
 
         let pot = std::fs::read_to_string(root.join("potentiometer.svg")).expect("pot asset");
         let base = scene::potentiometer_svg(&pot);
@@ -7132,7 +7132,7 @@ mod tests {
         // The tilt switch is the case the owner could not use: its `tilted`
         // attribute is the whole switch, and nothing could change it. This is
         // the panel's write path, then the solve it triggers.
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/digital-sensors.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/digital-sensors.json");
         let (parts, wires, _) = scene::load_diagram_file(&path);
         let mut spike = Spike::with_blink();
         let tilt = parts
@@ -7168,7 +7168,7 @@ mod tests {
     fn the_button_preset_drives_its_pin_when_pressed() {
         // The real preset, through the real loader and the real netlist — no UI.
         // If this fails, nothing the app does afterwards can work.
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/button.json");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/button.json");
         let (parts, wires, _sketch) = scene::load_diagram_file(&root);
 
         let ids: Vec<&str> = parts.iter().map(|part| part.id.as_str()).collect();
@@ -7219,7 +7219,7 @@ mod tests {
         // The whole app link without a window: load the preset, press the
         // button, solve, and check what was actually handed to the simulator.
         // `last_drives` is the record of exactly that.
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/button.json");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/button.json");
         let (parts, wires, sketch) = scene::load_diagram_file(&root);
         let button = parts
             .iter()
@@ -7261,7 +7261,7 @@ mod tests {
         // The element swaps the cap's gradient while the button is held. If the
         // two rasters differ by a handful of pixels the press cannot be seen,
         // which is what "the pressed state does not show" feels like.
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/wokwi");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/wokwi");
         let button = std::fs::read_to_string(root.join("pushbutton.svg")).expect("button art");
         let up = art::rasterize(&scene::pushbutton_svg(&button, false), 200, 135)
             .expect("the resting cap rasterises");
@@ -7305,7 +7305,7 @@ mod tests {
     fn the_keypad_preset_reports_a_held_key() {
         // The whole loop with no window: real simulator, real sketch, a key
         // held, and the serial monitor checked for the key it should print.
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/keypad.json");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/keypad.json");
         let (parts, wires, sketch) = scene::load_diagram_file(&root);
         let pad = parts
             .iter()
@@ -7698,7 +7698,7 @@ mod tests {
 
     #[test]
     fn a_held_button_pulls_its_pin_for_the_sketch() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/button.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/button.json");
         let (parts, wires, _) = scene::load_diagram_file(&path);
         let held = HashMap::from([("b1".to_string(), true)]);
         let pressed_low = |pressed: &HashMap<String, bool>| {
@@ -7821,7 +7821,7 @@ mod tests {
     }
 
     #[test]
-    fn multiplexed_display_memory_keeps_all_digits() {        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/four-digit.json");
+    fn multiplexed_display_memory_keeps_all_digits() {        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/four-digit.json");
         let (parts, _, _) = scene::load_diagram_file(&path);
         let display = parts
             .iter()
@@ -7859,7 +7859,7 @@ mod tests {
 
     #[test]
     fn a_servo_holds_its_last_angle_without_a_pulse() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/servo.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/servo.json");
         let (parts, _, _) = scene::load_diagram_file(&path);
         let servo = parts
             .iter()
@@ -7894,7 +7894,7 @@ mod tests {
 
     #[test]
     fn the_servo_preset_turns_from_a_pin_pulse() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/servo.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/servo.json");
         let (parts, wires, _) = scene::load_diagram_file(&path);
         let servo = parts
             .iter()
@@ -7921,7 +7921,7 @@ mod tests {
 
     #[test]
     fn all_four_digits_survive_the_real_preset_pins() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/four-digit.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets/four-digit.json");
         let (parts, wires, _) = scene::load_diagram_file(&path);
         let display = parts
             .iter()

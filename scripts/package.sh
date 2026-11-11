@@ -20,7 +20,7 @@ cd "$(dirname "$0")/.."
 
 APP=croquis
 APP_ID=org.croquis.app
-MANIFEST=spike/egui/Cargo.toml
+MANIFEST=app/Cargo.toml
 PAYLOAD=dist/payload
 DIST=dist
 
@@ -66,7 +66,7 @@ stage() {
   rm -rf "$PAYLOAD"
   mkdir -p "$PAYLOAD/usr/bin" "$PAYLOAD/usr/lib/$APP"
 
-  install -m0755 "spike/egui/target/release/$APP" "$PAYLOAD/usr/bin/$APP"
+  install -m0755 "app/target/release/$APP" "$PAYLOAD/usr/bin/$APP"
   # Stripped: this copy is what people download, and the symbols are only useful
   # to us. A failure to strip is not fatal — the package still works.
   strip --strip-unneeded "$PAYLOAD/usr/bin/$APP" 2>/dev/null || true

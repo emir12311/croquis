@@ -6,7 +6,7 @@
  * said 0.0.0, and the Arch recipe said 0.1.0 — so a source build fetched the previous
  * release while the README offered the new one.
  *
- * The app is `spike/egui`, so its `Cargo.toml` and the `croquis` entry in its
+ * The app is `app`, so its `Cargo.toml` and the `croquis` entry in its
  * `Cargo.lock` are what this checks.
  *
  *   node scripts/check-versions.mjs          compare to the app's Cargo.toml
@@ -20,14 +20,14 @@ const readText = (path) => readFileSync(path, 'utf8')
 
 /** `version` in the app's manifest — the first one, which is the package's own. */
 function appTomlVersion() {
-  const m = /^version = "([^"]+)"/m.exec(readText('spike/egui/Cargo.toml'))
+  const m = /^version = "([^"]+)"/m.exec(readText('app/Cargo.toml'))
   return m?.[1]
 }
 
 /** Our own package in the app's lockfile — not a dependency that shares a name. */
 function appLockVersion() {
   const block = /\[\[package\]\]\nname = "croquis"\nversion = "([^"]+)"/.exec(
-    readText('spike/egui/Cargo.lock'),
+    readText('app/Cargo.lock'),
   )
   return block?.[1]
 }
@@ -35,13 +35,13 @@ function appLockVersion() {
 const asked = (process.argv[2] ?? '').replace(/^v/, '')
 const want = asked || appTomlVersion()
 if (!want) {
-  console.error('no version: pass a tag, or put one in spike/egui/Cargo.toml')
+  console.error('no version: pass a tag, or put one in app/Cargo.toml')
   process.exit(2)
 }
 
 const found = [
-  ['spike/egui/Cargo.toml', appTomlVersion()],
-  ['spike/egui/Cargo.lock', appLockVersion()],
+  ['app/Cargo.toml', appTomlVersion()],
+  ['app/Cargo.lock', appLockVersion()],
 ]
 
 const wrong = found.filter(([, got]) => got !== want)

@@ -57,7 +57,7 @@ impl Locale {
 pub type Catalogue = BTreeMap<String, String>;
 
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
 /// Read one language's catalogue. A missing or unreadable file is an empty
