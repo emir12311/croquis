@@ -815,6 +815,13 @@ struct Spike {
     /// Which docked panels are open. A closed panel leaves a rail behind, which
     /// is how v0.2 keeps the editor's history while clipping it to nothing.
     sketch_open: bool,
+    /// The completer the optional editor widget carries between frames.
+    ///
+    /// It is where the widget keeps its completion dictionary, its memory of words
+    /// already typed, and the indentation of the line above — so re-creating it
+    /// every frame would lose auto-indent and autocomplete both.
+    #[cfg(feature = "code-editor")]
+    code_completer: Option<egui_code_editor::Completer>,
     components_open: bool,
     serial_open: bool,
     /// Folded down to its head, still docked. The monitor used to switch itself
@@ -1025,6 +1032,8 @@ impl Default for Spike {
             pin_frequency: HashMap::new(),
             pin13: false,
             sketch_open: true,
+            #[cfg(feature = "code-editor")]
+            code_completer: None,
             components_open: true,
             serial_open: false,
             serial_collapsed: false,
@@ -3093,14 +3102,23 @@ impl eframe::App for Spike {
                         .show(ui, |ui| {
                             #[cfg(feature = "code-editor")]
                             {
-                                // Trying a ready-made widget: numbered lines, keyword
-                                // highlighting and auto-indent come from the crate.
+                                // The ready-made widget with its completer wired up.
+                                // Without the completer it is only a coloured TextEdit:
+                                // completion, the memory of words already typed and the
+                                // auto-indent that keeps the line above's indentation
+                                // all live on it.
                                 let syntax = editor::arduino_syntax();
+                                let completer = self.code_completer.get_or_insert_with(|| {
+                                    egui_code_editor::Completer::new_with_syntax(&syntax)
+                                        .with_auto_indent()
+                                        .with_user_words()
+                                });
                                 egui_code_editor::CodeEditor::default()
                                     .id_source("croquis-sketch-editor")
                                     .with_ui_fontsize(ui)
+                                    .with_theme(editor::code_theme())
                                     .with_numlines(true)
-                                    .show(ui, &mut self.sketch, &syntax);
+                                    .show_with_completer(ui, &mut self.sketch, &syntax, completer);
                                 // Jump-to-line works by writing a TextEditState, so it
                                 // means nothing for this widget. Drop the request
                                 // instead of leaving it pending forever.

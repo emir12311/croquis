@@ -155,6 +155,26 @@ pub fn arduino_syntax() -> egui_code_editor::Syntax {
         .with_special(functions)
 }
 
+/// The widget's theme.
+///
+/// `CodeEditor::default()` draws in Gruvbox, which clashes with the shell's
+/// palette. The crate ships eight themes; Github Dark is the closest to v0.2's
+/// CodeMirror look. Picked by name rather than by index so a reordering upstream
+/// cannot quietly change it, and built once because it parses eight hex colours.
+#[cfg(feature = "code-editor")]
+pub fn code_theme() -> &'static egui_code_editor::Color32Theme {
+    use std::sync::OnceLock;
+    static THEME: OnceLock<egui_code_editor::Color32Theme> = OnceLock::new();
+    THEME.get_or_init(|| {
+        let chosen = egui_code_editor::DEFAULT_THEMES
+            .iter()
+            .find(|theme| theme.name() == "Github Dark")
+            .copied()
+            .unwrap_or(egui_code_editor::DEFAULT_THEMES[0]);
+        egui_code_editor::Color32Theme::from(chosen)
+    })
+}
+
 /// The layouter the hand-rolled editor paints with.
 ///
 /// Unused when the `code-editor` feature is on, which swaps in a ready-made
