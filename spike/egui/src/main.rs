@@ -3075,6 +3075,14 @@ impl eframe::App for Spike {
                 .min_size(200.0)
                 .max_size(560.0)
                 .show(root, |ui| {
+                    // The panel takes the editor's own colour. The widget paints a
+                    // dark background of its own and stops where the text stops, so
+                    // the shell's surface showed below it as a second, lighter panel.
+                    // Painting the whole area in the editor's colour leaves one
+                    // surface instead of a dark box on a grey one.
+                    #[cfg(feature = "code-editor")]
+                    ui.painter()
+                        .rect_filled(ui.max_rect(), 0.0, editor::code_theme().bg);
                     let texts = self.texts.clone();
                     panel_head(ui, texts.t("panel.sketch"), |ui| {
                         let mut open = true;
