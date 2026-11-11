@@ -142,6 +142,7 @@ struct Palette {
     surface: Color32,
     raised: Color32,
     border: Color32,
+    grid: Color32,
     text: Color32,
     muted: Color32,
     accent: Color32,
@@ -154,6 +155,7 @@ const DARK_PALETTE: Palette = Palette {
     surface: Color32::from_rgb(0x21, 0x21, 0x24),
     raised: Color32::from_rgb(0x2a, 0x2a, 0x2e),
     border: Color32::from_rgb(0x35, 0x35, 0x3a),
+    grid: Color32::from_rgb(0x2a, 0x2a, 0x2e),
     text: Color32::from_rgb(0xe6, 0xe4, 0xe0),
     muted: Color32::from_rgb(0xa6, 0xa4, 0xa0),
     accent: Color32::from_rgb(0xd9, 0xa4, 0x41),
@@ -168,6 +170,7 @@ const LIGHT_PALETTE: Palette = Palette {
     surface: Color32::from_rgb(0xfa, 0xf9, 0xf6),
     raised: Color32::from_rgb(0xff, 0xff, 0xff),
     border: Color32::from_rgb(0xd6, 0xd2, 0xc9),
+    grid: Color32::from_rgb(0xe4, 0xe0, 0xd7),
     text: Color32::from_rgb(0x22, 0x21, 0x1f),
     muted: Color32::from_rgb(0x6b, 0x68, 0x62),
     accent: Color32::from_rgb(0xa1, 0x70, 0x1c),
@@ -406,9 +409,9 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> bool {
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if response.hovered() {
-            painter.rect_filled(rect, 0.0, Color32::from_rgb(0x2a, 0x2a, 0x2e));
+            painter.rect_filled(rect, 0.0, palette().raised);
         }
-        let colour = if response.hovered() { Color32::WHITE } else { palette().muted };
+        let colour = if response.hovered() { palette().text } else { palette().muted };
         let stroke = egui::Stroke::new(1.3, colour);
         let c = rect.center();
         match icon {
@@ -1180,7 +1183,16 @@ impl Spike {
                     self.run_pending(ctx);
                 }
             }
-            Some(Answer::Discard) => self.run_pending(ctx),
+            Some(Answer::Discard) => {
+                // Discarding means accepting the loss, so record the current state
+                // as the baseline. Without this the document is still dirty on the
+                // next frame, the close guard fires again and cancels the close it
+                // just asked for — which is what "Discard does nothing" looked like.
+                // For New and Open it is harmless: `run_pending` replaces the
+                // document, and that resets the baseline anyway.
+                self.saved = Some(self.saved_document());
+                self.run_pending(ctx);
+            }
             Some(Answer::Cancel) => self.pending = None,
             None => {}
         }
@@ -3422,11 +3434,13 @@ impl eframe::App for Spike {
                         self.stop_sim();
                     }
                 } else {
+                    // The accent is the shell's and the label is the raised
+                    // surface: dark ink on amber in the dark theme, white on the
+                    // darker accent in the light one.
                     let run = egui::Button::new(
-                        egui::RichText::new(texts.t("run.start"))
-                            .color(Color32::from_rgb(0x1a, 0x1a, 0x1c)),
+                        egui::RichText::new(texts.t("run.start")).color(palette().raised),
                     )
-                    .fill(Color32::from_rgb(0xd9, 0xa4, 0x41));
+                    .fill(palette().accent);
                     if ui.add(run).clicked() {
                         self.start_sim(&ctx);
                     }
@@ -3573,7 +3587,7 @@ impl eframe::App for Spike {
             );
             let rect = response.rect;
 
-            painter.rect_filled(rect, 0.0, Color32::from_rgb(26, 26, 28));
+            painter.rect_filled(rect, 0.0, palette().bg);
             draw_grid(&painter, rect, self.camera);
 
             // The context menu belongs to the right button, which also pans. egui
@@ -4336,7 +4350,7 @@ fn draw_grid(painter: &egui::Painter, rect: Rect, camera: Camera) {
     let origin = camera.world_to_screen(rect, Pos2::ZERO);
     let start_x = rect.left() + (origin.x - rect.left()).rem_euclid(step);
     let start_y = rect.top() + (origin.y - rect.top()).rem_euclid(step);
-    let stroke = Stroke::new(1.0, Color32::from_rgb(42, 42, 46));
+    let stroke = Stroke::new(1.0, palette().grid);
     let mut x = start_x;
     while x <= rect.right() {
         painter.line_segment(
