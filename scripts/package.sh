@@ -201,7 +201,25 @@ rpm() {
   need rpmbuild
   local dir
   dir=$(rpm_spec)
-  rpmbuild --define "_topdir $dir" -bb "$dir/SPECS/$APP.spec" >/dev/null
+  # Two defines that matter when the build host is not an rpm distro:
+  #
+  #   _dbpath          rpmbuild wants a package database, and on Arch/Artix (or
+  #                    Ubuntu) /var/lib/rpm does not exist. A scratch db inside
+  #                    the build dir is enough to build against — rpmbuild creates
+  #                    it on first use. Do not pre-create it with `rpm --initdb`:
+  #                    that segfaults under rpm 6.0.1, and the build does not need
+  #                    it.
+  #   __os_install_post  the default post-install runs brp-strip over everything
+  #                    in the buildroot. Our payload contains the AVR toolchain's
+  #                    .a archives and objects, which the host's binutils does not
+  #                    recognise — and which must not be stripped anyway. The app
+  #                    binary is stripped once, in stage().
+  local db="$dir/.rpmdb"
+
+  rpmbuild --define "_topdir $dir" \
+    --define "_dbpath $db" \
+    --define "__os_install_post %{nil}" \
+    -bb "$dir/SPECS/$APP.spec" >/dev/null
   local built
   built=$(find "$dir/RPMS" -name "*.rpm" -print -quit)
   [ -n "$built" ] || {
