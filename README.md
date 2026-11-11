@@ -57,10 +57,10 @@ See the [How It Works](#how-it-works) section for the diagram.
 | v0.1.2 | 2026-10-18 | same day |
 | v0.1.3 | 2026-10-20 | 2 days |
 | v0.2.0 | 2026-10-23 | 3 days |
-| v0.3.0 | unreleased | — |
+| v0.3.0 | 2026-11-11 07:05 | 19 days |
 
-Dates are those of the tagged commit. v0.3.0 is the current line of work: the same editor, rewritten
-in Rust with egui.
+Dates are those of the tagged commit, and v0.3.0's time is when its tag was made. It is the same
+circuit editor, rewritten in Rust with egui.
 
 ## Installation
 
