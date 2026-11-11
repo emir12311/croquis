@@ -408,8 +408,19 @@ case "${1:-stage}" in
     stage
     deb
     arch_pkg
-    command -v rpmbuild >/dev/null && rpm || echo "skipped rpm: no rpmbuild"
-    command -v appimagetool >/dev/null && appimage || echo "skipped appimage: no appimagetool"
+    # Availability is tested before running, not with `cmd && fn || echo`: that
+    # form reports a *failed* build as if the tool were missing, which would let
+    # a release ship without one of its packages.
+    if command -v rpmbuild >/dev/null; then
+      rpm
+    else
+      echo "skipped rpm: no rpmbuild"
+    fi
+    if command -v appimagetool >/dev/null; then
+      appimage
+    else
+      echo "skipped appimage: no appimagetool"
+    fi
     ;;
   *)
     sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
