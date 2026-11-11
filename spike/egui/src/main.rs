@@ -3121,10 +3121,23 @@ impl eframe::App for Spike {
                                         .with_auto_indent()
                                         .with_user_words()
                                 });
+                                // The widget sizes itself to a row count, so work out
+                                // how many rows the panel holds and ask for all of
+                                // them: a short sketch then has its editing surface
+                                // over the whole panel rather than only where the text
+                                // happens to reach.
+                                let font = egui::TextStyle::Monospace.resolve(ui.style());
+                                let row = ui.fonts_mut(|fonts| {
+                                    fonts.row_height(&egui::FontId::monospace(font.size))
+                                });
+                                let rows = (ui.available_height() / row.max(1.0))
+                                    .floor()
+                                    .max(1.0) as usize;
                                 egui_code_editor::CodeEditor::default()
                                     .id_source("croquis-sketch-editor")
                                     .with_ui_fontsize(ui)
                                     .with_theme(editor::code_theme())
+                                    .with_rows(rows)
                                     // Wrap, not numbers. The crate ignores `wrap`
                                     // whenever `numlines` is on — the gutter is drawn
                                     // per line and wrapping would break its alignment —
