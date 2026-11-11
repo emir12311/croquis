@@ -3117,7 +3117,14 @@ impl eframe::App for Spike {
                                     .id_source("croquis-sketch-editor")
                                     .with_ui_fontsize(ui)
                                     .with_theme(editor::code_theme())
-                                    .with_numlines(true)
+                                    // Wrap, not numbers. The crate ignores `wrap`
+                                    // whenever `numlines` is on — the gutter is drawn
+                                    // per line and wrapping would break its alignment —
+                                    // so a sketch with a long comment has to pick one.
+                                    // Wrapping wins: a line cut off at the panel edge
+                                    // hides code, a missing gutter only hides a count.
+                                    .with_numlines(false)
+                                    .with_wrap(true)
                                     .show_with_completer(ui, &mut self.sketch, &syntax, completer);
                                 // Jump-to-line works by writing a TextEditState, so it
                                 // means nothing for this widget. Drop the request
