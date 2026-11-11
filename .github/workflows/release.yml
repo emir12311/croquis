@@ -24,15 +24,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # What the egui app needs to build, plus the tools the package formats need:
-      # rpmbuild for the rpm, and zstd for the Arch package.
+      # What the egui app needs to build (libelf is simavr's), plus what the four
+      # package formats need: rpmbuild for the rpm, zstd and bsdtar for the Arch
+      # package (scripts/package.sh builds it without makepkg, which Ubuntu does
+      # not have), and ImageMagick for the icons the desktop entry points at.
       - name: system libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libasound2-dev \
+            build-essential pkg-config libasound2-dev libelf-dev zlib1g-dev \
             libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev \
-            rpm zstd fakeroot file wget
+            rpm zstd bsdtar imagemagick fakeroot file wget
 
       - uses: dtolnay/rust-toolchain@stable
 

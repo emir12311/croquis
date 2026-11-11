@@ -78,11 +78,20 @@ stage() {
 
   install -Dm0644 "packaging/$APP_ID.desktop" \
     "$PAYLOAD/usr/share/applications/$APP_ID.desktop"
+  # ImageMagick 7 renamed `convert` to `magick` and both still ship, so use
+  # whichever exists rather than pinning the build to one version.
+  local resize
+  if command -v magick >/dev/null; then
+    resize=magick
+  else
+    need convert
+    resize=convert
+  fi
   local size
   for size in 128 256 512; do
     local dir="$PAYLOAD/usr/share/icons/hicolor/${size}x${size}/apps"
     mkdir -p "$dir"
-    convert croquis-icon.png -resize "${size}x${size}" "$dir/$APP_ID.png"
+    "$resize" croquis-icon.png -resize "${size}x${size}" "$dir/$APP_ID.png"
   done
 
   install -Dm0644 LICENSE "$PAYLOAD/usr/share/doc/$APP/copyright"
@@ -159,13 +168,26 @@ EOF
 # .MTREE wrong is not something a package should fail on.
 
 arch_pkg() {
-  need makepkg
   [ -d "$PAYLOAD" ] || stage
-  local v arch dir out payload_abs
+  local v arch out
   v=$(version)
   arch=$(host_arch)
-  dir="$PWD/$DIST/arch-build"
   out="$PWD/$DIST/${APP}-${v}-1-${arch}.pkg.tar.zst"
+
+  if command -v makepkg >/dev/null; then
+    arch_pkg_makepkg "$v" "$arch" "$out"
+  else
+    arch_pkg_portable "$v" "$arch" "$out"
+  fi
+  echo "built $(basename "$out") ($(du -h "$out" | cut -f1))"
+}
+
+# On an Arch host, let makepkg do it: it writes .PKGINFO, .MTREE and the package
+# itself, and what it writes is right by construction.
+arch_pkg_makepkg() {
+  local v=$1 arch=$2 out=$3
+  local dir="$PWD/$DIST/arch-build"
+  local payload_abs
   # Absolute: makepkg runs package() with $PWD inside its own srcdir, so a path
   # relative to the PKGBUILD would resolve against the wrong directory.
   payload_abs="$(cd "$PAYLOAD" && pwd)"
@@ -180,6 +202,7 @@ pkgdesc="Draw and simulate Arduino circuits"
 arch=('$arch')
 url="$HOMEPAGE"
 license=('GPL-3.0-only')
+depends=('glibc' 'alsa-lib' 'libxkbcommon' 'mesa' 'wayland')
 options=('!strip' '!debug')
 package() {
   cp -a "$payload_abs/usr" "\$pkgdir/"
@@ -188,7 +211,50 @@ EOF
 
   (cd "$dir" && makepkg -f --noconfirm >/dev/null)
   mv "$dir"/*.pkg.tar.zst "$out"
-  echo "built $(basename "$out") ($(du -h "$out" | cut -f1))"
+}
+
+# Anywhere else — the release builds on Ubuntu, where makepkg does not exist.
+#
+# A .pkg.tar.zst is a tar of the payload plus .PKGINFO and .MTREE, and bsdtar
+# writes both, so one machine can build every format without an Arch container.
+# This is the path CI takes; the makepkg path above is for a maintainer on Arch.
+arch_pkg_portable() {
+  local v=$1 arch=$2 out=$3
+  need bsdtar
+  need zstd
+  local dir="$PWD/$DIST/arch-portable"
+  local size
+
+  rm -rf "$dir"
+  mkdir -p "$dir"
+  cp -a "$PAYLOAD/usr" "$dir/"
+  size=$(du -sb "$dir/usr" | cut -f1)
+
+  cat >"$dir/.PKGINFO" <<EOF
+pkgname = $APP
+pkgbase = $APP
+pkgver = $v-1
+pkgdesc = Draw and simulate Arduino circuits
+url = $HOMEPAGE
+builddate = $(date +%s)
+packager = Croquis maintainers <croquis@localhost>
+size = $size
+arch = $arch
+license = GPL-3.0-only
+depend = glibc
+depend = alsa-lib
+depend = libxkbcommon
+depend = mesa
+depend = wayland
+EOF
+
+  # .MTREE is pacman's manifest — sizes and checksums it can verify an install
+  # against. Generated last and shipped last, the way repo-add does it.
+  (cd "$dir" && bsdtar --format=mtree \
+    --options='!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link' \
+    -czf .MTREE .PKGINFO usr)
+  (cd "$dir" && tar --zstd --owner=0 --group=0 --numeric-owner \
+    -cf "$out" .PKGINFO usr .MTREE)
 }
 
 # --- .rpm -------------------------------------------------------------------
@@ -331,6 +397,13 @@ case "${1:-stage}" in
   appimage) appimage ;;
   rpm-spec) rpm_spec ;;
   appdir) appdir ;;
+  # The Arch package the way a non-Arch host builds it. CI takes this path, so it
+  # has to be runnable by hand or it is only ever tested in CI.
+  arch-portable)
+    out="$PWD/$DIST/${APP}-$(version)-1-$(host_arch)-portable.pkg.tar.zst"
+    arch_pkg_portable "$(version)" "$(host_arch)" "$out"
+    echo "built $(basename "$out") ($(du -h "$out" | cut -f1))"
+    ;;
   all)
     stage
     deb
