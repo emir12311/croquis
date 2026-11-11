@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -132,11 +133,91 @@ fn serial_height(open: bool, collapsed: bool) -> f32 {
 
 /// The shell's own chrome, from v0.2's tokens (`--surface`, `--border`,
 /// `--text-muted`, `--accent`).
-const SURFACE: Color32 = Color32::from_rgb(0x21, 0x21, 0x24);
-const BORDER: Color32 = Color32::from_rgb(0x35, 0x35, 0x3a);
-const MUTED: Color32 = Color32::from_rgb(0xa6, 0xa4, 0xa0);
-const ERROR_TEXT: Color32 = Color32::from_rgb(0xe5, 0x48, 0x4d);
-const WARNING_TEXT: Color32 = Color32::from_rgb(0xd9, 0xa4, 0x41);
+/// Every colour the shell itself paints with, in the two flavours it offers.
+///
+/// The part art comes from the Wokwi SVGs and does not change with the theme;
+/// this is only the chrome around it.
+struct Palette {
+    bg: Color32,
+    surface: Color32,
+    raised: Color32,
+    border: Color32,
+    text: Color32,
+    muted: Color32,
+    accent: Color32,
+    error: Color32,
+    warning: Color32,
+}
+
+const DARK_PALETTE: Palette = Palette {
+    bg: Color32::from_rgb(0x1a, 0x1a, 0x1c),
+    surface: Color32::from_rgb(0x21, 0x21, 0x24),
+    raised: Color32::from_rgb(0x2a, 0x2a, 0x2e),
+    border: Color32::from_rgb(0x35, 0x35, 0x3a),
+    text: Color32::from_rgb(0xe6, 0xe4, 0xe0),
+    muted: Color32::from_rgb(0xa6, 0xa4, 0xa0),
+    accent: Color32::from_rgb(0xd9, 0xa4, 0x41),
+    error: Color32::from_rgb(0xe5, 0x48, 0x4d),
+    warning: Color32::from_rgb(0xd9, 0xa4, 0x41),
+};
+
+/// The same shell on paper: warm off-whites, ink text, and the accent darkened
+/// so it still reads as a highlight instead of washing out.
+const LIGHT_PALETTE: Palette = Palette {
+    bg: Color32::from_rgb(0xf1, 0xef, 0xea),
+    surface: Color32::from_rgb(0xfa, 0xf9, 0xf6),
+    raised: Color32::from_rgb(0xff, 0xff, 0xff),
+    border: Color32::from_rgb(0xd6, 0xd2, 0xc9),
+    text: Color32::from_rgb(0x22, 0x21, 0x1f),
+    muted: Color32::from_rgb(0x6b, 0x68, 0x62),
+    accent: Color32::from_rgb(0xa1, 0x70, 0x1c),
+    error: Color32::from_rgb(0xbe, 0x22, 0x28),
+    warning: Color32::from_rgb(0x9a, 0x60, 0x08),
+};
+
+/// Whether the light palette is in use. A process-wide switch rather than a
+/// field because the colours are read from free functions and closures all over
+/// the drawing code, and threading a palette through every one of them would
+/// touch far more than the six constants it replaces.
+static LIGHT: AtomicBool = AtomicBool::new(false);
+
+fn light_theme() -> bool {
+    LIGHT.load(Ordering::Relaxed)
+}
+
+/// The colours the shell paints with right now.
+fn palette() -> &'static Palette {
+    if light_theme() {
+        &LIGHT_PALETTE
+    } else {
+        &DARK_PALETTE
+    }
+}
+
+/// The theme the last run was left in.
+fn saved_light_theme() -> bool {
+    locales::config_file("theme")
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .map(|tag| tag.trim() == "light")
+        .unwrap_or(false)
+}
+
+/// Remember the theme for the next run.
+fn save_light_theme(light: bool) {
+    if let Some(path) = locales::config_file("theme") {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, if light { "light" } else { "dark" });
+    }
+}
+
+/// Switch palettes, restyle what is already on screen, and remember the choice.
+fn apply_theme(ctx: &egui::Context, light: bool) {
+    LIGHT.store(light, Ordering::Relaxed);
+    configure_style(ctx);
+    save_light_theme(light);
+}
 
 /// The palette's thumbnails: the part itself, small, rasterised once.
 ///
@@ -199,7 +280,7 @@ fn palette_tile(
             if response.hovered() && enabled {
                 Color32::from_rgb(0xd9, 0xa4, 0x41)
             } else {
-                BORDER
+                palette().border
             },
         ),
         egui::StrokeKind::Inside,
@@ -246,7 +327,7 @@ fn palette_tile(
         egui::Label::new(
             egui::RichText::new(label)
                 .size(11.0)
-                .color(if enabled { MUTED } else { Color32::from_rgb(0x64, 0x64, 0x68) }),
+                .color(if enabled { palette().muted } else { Color32::from_rgb(0x64, 0x64, 0x68) }),
         )
         .selectable(false)
         .wrap(),
@@ -327,7 +408,7 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> bool {
         if response.hovered() {
             painter.rect_filled(rect, 0.0, Color32::from_rgb(0x2a, 0x2a, 0x2e));
         }
-        let colour = if response.hovered() { Color32::WHITE } else { MUTED };
+        let colour = if response.hovered() { Color32::WHITE } else { palette().muted };
         let stroke = egui::Stroke::new(1.3, colour);
         let c = rect.center();
         match icon {
@@ -390,11 +471,11 @@ fn panel_head(ui: &mut egui::Ui, title: &str, controls: impl FnOnce(&mut egui::U
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 32.0), egui::Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, SURFACE);
+    painter.rect_filled(rect, 0.0, palette().surface);
     painter.hline(
         rect.x_range(),
         rect.max.y - 0.5,
-        egui::Stroke::new(1.0, BORDER),
+        egui::Stroke::new(1.0, palette().border),
     );
     // The rule is drawn along the bottom edge, so the controls sit in a band
     // that stops short of it. Centred in the full height, a filled button like
@@ -412,7 +493,7 @@ fn panel_head(ui: &mut egui::Ui, title: &str, controls: impl FnOnce(&mut egui::U
     head.label(
         egui::RichText::new(title.to_uppercase())
             .size(12.0)
-            .color(MUTED),
+            .color(palette().muted),
     );
     head.with_layout(egui::Layout::right_to_left(egui::Align::Center), controls);
 }
@@ -477,15 +558,34 @@ fn configure_style(ctx: &egui::Context) {
     install_fonts(ctx);
     use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
 
-    let bg = Color32::from_rgb(0x1a, 0x1a, 0x1c);
-    let surface = Color32::from_rgb(0x21, 0x21, 0x24);
-    let raised = Color32::from_rgb(0x2a, 0x2a, 0x2e);
-    let border = Color32::from_rgb(0x35, 0x35, 0x3a);
-    let text = Color32::from_rgb(0xe6, 0xe4, 0xe0);
-    let muted = Color32::from_rgb(0xa6, 0xa4, 0xa0);
-    let accent = Color32::from_rgb(0xd9, 0xa4, 0x41);
+    // The palette decides the colours; the theme only chooses which built-in
+    // defaults egui starts from and which one it is told to draw with.
+    let p = palette();
+    let bg = p.bg;
+    let surface = p.surface;
+    let raised = p.raised;
+    let border = p.border;
+    let text = p.text;
+    let muted = p.muted;
+    let accent = p.accent;
+    let light = light_theme();
+    let theme = if light { egui::Theme::Light } else { egui::Theme::Dark };
+    let preference = if light {
+        egui::ThemePreference::Light
+    } else {
+        egui::ThemePreference::Dark
+    };
+    let hover = if light {
+        Color32::from_rgb(0xe9, 0xe6, 0xdf)
+    } else {
+        Color32::from_rgb(0x35, 0x33, 0x2e)
+    };
 
-    let mut visuals = egui::Visuals::dark();
+    let mut visuals = if light {
+        egui::Visuals::light()
+    } else {
+        egui::Visuals::dark()
+    };
     // v0.2 fills panels with `--surface` and only the canvas with `--bg`, which
     // is what separates the docked chrome from the circuit.
     visuals.panel_fill = surface;
@@ -512,7 +612,7 @@ fn configure_style(ctx: &egui::Context) {
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, border);
     visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, text);
     visuals.widgets.inactive.corner_radius = CornerRadius::same(2);
-    visuals.widgets.hovered.bg_fill = Color32::from_rgb(0x35, 0x33, 0x2e);
+    visuals.widgets.hovered.bg_fill = hover;
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, accent);
     visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, text);
     visuals.widgets.hovered.corner_radius = CornerRadius::same(2);
@@ -521,7 +621,7 @@ fn configure_style(ctx: &egui::Context) {
     visuals.widgets.active.fg_stroke = Stroke::new(1.0, bg);
     visuals.widgets.active.corner_radius = CornerRadius::same(2);
 
-    let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
+    let mut style = (*ctx.style_of(theme)).clone();
     style.visuals = visuals;
     style.spacing.item_spacing = Vec2::new(8.0, 6.0);
     style.spacing.button_padding = Vec2::new(10.0, 4.0);
@@ -543,8 +643,8 @@ fn configure_style(ctx: &egui::Context) {
     style
         .text_styles
         .insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
-    ctx.set_theme(egui::ThemePreference::Dark);
-    ctx.set_style_of(egui::Theme::Dark, style);
+    ctx.set_theme(preference);
+    ctx.set_style_of(theme, style);
 }
 
 fn main() -> eframe::Result {
@@ -563,6 +663,9 @@ fn main() -> eframe::Result {
         "croquis-egui-spike",
         options,
         Box::new(|cc| {
+            // The palette is read while the style is built, so the saved choice
+            // has to be in place before that happens.
+            LIGHT.store(saved_light_theme(), Ordering::Relaxed);
             configure_style(&cc.egui_ctx);
             Ok(Box::new(Spike::starting_in(locales::saved_locale())))
         }),
@@ -829,6 +932,10 @@ struct Spike {
     avr_pins: HashMap<String, bool>,
     serial: String,
     run_error: Option<String>,
+    /// Whether a switch's contact chatters as it changes, so an undebounced
+    /// sketch really does see several edges per press. Off by default, like
+    /// v0.2: it is a debugging aid, not a normal running condition.
+    switch_bounce: bool,
     /// What the compiler said, one entry per problem. The raw transcript stays
     /// in `run_error`, because a linker failure has no line to point at.
     diagnostics: Vec<editor::Diagnostic>,
@@ -836,6 +943,11 @@ struct Spike {
     /// the sketch panel on the frame after the click.
     pending_jump: Option<(usize, usize)>,
     path: Option<PathBuf>,
+    /// The document as last saved or opened; `None` means nothing has been
+    /// recorded yet, which counts as unsaved.
+    saved: Option<SavedDocument>,
+    /// A document-replacing action waiting on the unsaved-changes question.
+    pending: Option<Pending>,
     file_error: Option<String>,
     presets: Vec<scene::Preset>,
     auto_run: bool,
@@ -845,6 +957,32 @@ struct Spike {
     settled: Snapshot,
     past: Vec<Snapshot>,
     future: Vec<Snapshot>,
+}
+
+/// The document as it last left the disk, so the app can tell whether there is
+/// anything to lose before replacing it.
+#[derive(Clone, PartialEq)]
+struct SavedDocument {
+    parts: Vec<scene::Part>,
+    wires: Vec<scene::Wire>,
+    sketch: String,
+}
+
+/// An action that would replace the document, held until the question is
+/// answered. The circuit is the one thing here that cannot be regenerated, so
+/// every path that throws it away goes through this.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Pending {
+    New,
+    Open,
+    Close,
+}
+
+/// How the reader answered the unsaved-changes question.
+enum Answer {
+    Save,
+    Discard,
+    Cancel,
 }
 
 impl Spike {
@@ -876,6 +1014,7 @@ impl Spike {
         // without this an undo would restore "empty" rather than the circuit the
         // test just loaded.
         spike.reset_history();
+        spike.saved = Some(spike.saved_document());
         spike
     }
 
@@ -959,6 +1098,92 @@ impl Spike {
         self.settled = self.snapshot();
         self.past.clear();
         self.future.clear();
+    }
+
+    /// The document as it stands, for comparison against the last saved copy.
+    fn saved_document(&self) -> SavedDocument {
+        SavedDocument {
+            parts: self.parts.clone(),
+            wires: self.wires.clone(),
+            sketch: self.sketch.clone(),
+        }
+    }
+
+    /// Whether there is anything to lose by replacing the document.
+    fn is_dirty(&self) -> bool {
+        match &self.saved {
+            None => true,
+            Some(saved) => {
+                saved.parts != self.parts
+                    || saved.wires != self.wires
+                    || saved.sketch != self.sketch
+            }
+        }
+    }
+
+    /// Whether the document can be replaced right now. When it cannot, the
+    /// request is remembered so the prompt can carry it out once answered.
+    fn may_replace_document(&mut self, what: Pending) -> bool {
+        if self.is_dirty() {
+            self.pending = Some(what);
+            false
+        } else {
+            true
+        }
+    }
+
+    /// Carry out whatever the prompt was holding, now that it has an answer.
+    fn run_pending(&mut self, ctx: &egui::Context) {
+        match self.pending.take() {
+            Some(Pending::New) => self.new_document(),
+            Some(Pending::Open) => self.open_dialog(ctx),
+            Some(Pending::Close) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            None => {}
+        }
+    }
+
+    /// The "you have unsaved changes" question, drawn over everything else.
+    ///
+    /// It only appears when something would actually be lost — the three paths
+    /// that replace the document ask here rather than throwing the circuit away.
+    fn unsaved_prompt(&mut self, ctx: &egui::Context) {
+        if self.pending.is_none() {
+            return;
+        }
+        let texts = self.texts.clone();
+        let mut answer = None;
+        egui::Window::new(texts.t("prompt.unsaved.title"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(texts.t("prompt.unsaved.body"));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(texts.t("prompt.save")).clicked() {
+                        answer = Some(Answer::Save);
+                    }
+                    if ui.button(texts.t("prompt.discard")).clicked() {
+                        answer = Some(Answer::Discard);
+                    }
+                    if ui.button(texts.t("prompt.cancel")).clicked() {
+                        answer = Some(Answer::Cancel);
+                    }
+                });
+            });
+        match answer {
+            Some(Answer::Save) => {
+                self.save();
+                // save() may have opened a picker, and a cancelled picker means
+                // nothing was written — so only carry on if it actually landed.
+                if !self.is_dirty() {
+                    self.run_pending(ctx);
+                }
+            }
+            Some(Answer::Discard) => self.run_pending(ctx),
+            Some(Answer::Cancel) => self.pending = None,
+            None => {}
+        }
     }
 }
 
@@ -1049,6 +1274,9 @@ impl Default for Spike {
             avr_pins: HashMap::new(),
             serial: String::new(),
             run_error: None,
+            switch_bounce: false,
+            saved: None,
+            pending: None,
             diagnostics: Vec::new(),
             pending_jump: None,
             path,
@@ -1063,6 +1291,8 @@ impl Default for Spike {
         // The circuit the app opened with is step zero, not something to undo
         // back into.
         spike.reset_history();
+        // Nothing has been edited yet, so there is nothing to warn about.
+        spike.saved = Some(spike.saved_document());
         spike
     }
 }
@@ -1717,6 +1947,8 @@ impl Spike {
         self.pending_jump = None;
         self.file_error = None;
         self.path = None;
+        // Nothing to lose yet: a new document is its own baseline.
+        self.saved = Some(self.saved_document());
         // The canvas art belongs to the parts that were just cleared; the palette
         // thumbnails belong to the catalogue and are still what the panel draws.
         keep_palette(&mut self.textures);
@@ -1761,6 +1993,8 @@ impl Spike {
         self.file_error = None;
         // Another document means another history.
         self.reset_history();
+        // And it is what is on disk now, so it is not unsaved work.
+        self.saved = Some(self.saved_document());
         self.camera = Camera::default();
         let eval =
             scene::evaluate_scene(
@@ -1794,6 +2028,7 @@ impl Spike {
             Ok(()) => {
                 self.path = Some(path);
                 self.file_error = None;
+                self.saved = Some(self.saved_document());
             }
             Err(error) => self.file_error = Some(error),
         }
@@ -2581,7 +2816,11 @@ impl Spike {
                     let _ = sender.send(event);
                     repaint.request_repaint();
                 });
-                match engine::Simulator::start(Path::new(&firmware.elf), emit, false) {
+                match engine::Simulator::start(
+                    Path::new(&firmware.elf),
+                    emit,
+                    self.switch_bounce,
+                ) {
                     Ok(sim) => {
                         // The responder can answer now: it holds the same pulse
                         // channels the simulator listens on.
@@ -2757,6 +2996,16 @@ impl eframe::App for Spike {
         ensure_palette_textures(&ctx, &mut self.textures);
         self.poll_engine();
         self.handle_shortcuts(&ctx);
+        // A window close replaces the document too, and the circuit is the one
+        // thing here that cannot be regenerated — so it asks like the others.
+        if ctx.input(|input| input.viewport().close_requested())
+            && !matches!(self.pending, Some(Pending::Close))
+            && self.is_dirty()
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.pending = Some(Pending::Close);
+        }
+        self.unsaved_prompt(&ctx);
         if self.auto_run && !self.running {
             self.auto_run = false;
             self.start_sim(&ctx);
@@ -2805,12 +3054,12 @@ impl eframe::App for Spike {
                 widgets.inactive.bg_stroke = egui::Stroke::NONE;
                 widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
                 widgets.hovered.bg_fill = Color32::from_rgb(0x2a, 0x2a, 0x2e);
-                widgets.hovered.bg_stroke = egui::Stroke::new(1.0, BORDER);
+                widgets.hovered.bg_stroke = egui::Stroke::new(1.0, palette().border);
                 let bar = ui.max_rect();
                 ui.painter().hline(
                     bar.x_range(),
                     bar.max.y,
-                    egui::Stroke::new(1.0, BORDER),
+                    egui::Stroke::new(1.0, palette().border),
                 );
                 // One copy of the text for the whole bar: `t` borrows the
                 // `Texts` it reads from, and the menus below want `self` mutably.
@@ -2824,10 +3073,14 @@ impl eframe::App for Spike {
                     );
                     ui.add_space(10.0);
                     ui.menu_button(texts.t("menu.file"), |ui| {
-                        if ui.button(texts.t("file.new")).clicked() {
+                        if ui.button(texts.t("file.new")).clicked()
+                            && self.may_replace_document(Pending::New)
+                        {
                             self.new_document();
                         }
-                        if ui.button(texts.t("file.open")).clicked() {
+                        if ui.button(texts.t("file.open")).clicked()
+                            && self.may_replace_document(Pending::Open)
+                        {
                             self.open_dialog(&ctx);
                         }
                         if ui.button(texts.t("file.save")).clicked() {
@@ -2901,6 +3154,13 @@ impl eframe::App for Spike {
                         ui.separator();
                         ui.checkbox(&mut self.sketch_open, texts.t("panel.sketch"));
                         ui.checkbox(&mut self.components_open, texts.t("panel.components"));
+                        ui.separator();
+                        // Switching restyles what is already on screen rather than
+                        // waiting for the next start, and the choice is remembered.
+                        let mut light = light_theme();
+                        if ui.checkbox(&mut light, texts.t("view.light")).changed() {
+                            apply_theme(&ctx, light);
+                        }
                         ui.checkbox(&mut self.serial_open, texts.t("panel.serial"));
                         ui.separator();
                         // Each language names itself: someone who cannot read the
@@ -2923,6 +3183,12 @@ impl eframe::App for Spike {
                         } else if ui.button(texts.t("run.start")).clicked() {
                             self.start_sim(&ctx);
                         }
+                        ui.separator();
+                        // Read when the simulator starts, so a change here takes
+                        // effect on the next Run rather than mutating a running
+                        // circuit's contact behaviour underneath it.
+                        ui.checkbox(&mut self.switch_bounce, texts.t("run.bounce"))
+                            .on_hover_text(texts.t("run.bounce.hint"));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(if self.running {
@@ -2943,7 +3209,7 @@ impl eframe::App for Spike {
                                 )),
                                 None => ui.label(error.lines().next().unwrap_or("")),
                             };
-                            ui.colored_label(ERROR_TEXT, texts.t("run.failed"));
+                            ui.colored_label(palette().error, texts.t("run.failed"));
                         }
                     });
                 });
@@ -3077,7 +3343,7 @@ impl eframe::App for Spike {
                     // Painting the whole area in the editor's colour leaves one
                     // surface instead of a dark box on a grey one.
                     ui.painter()
-                        .rect_filled(ui.max_rect(), 0.0, editor::code_theme().bg);
+                        .rect_filled(ui.max_rect(), 0.0, editor::code_theme(light_theme()).bg);
                     let texts = self.texts.clone();
                     panel_head(ui, texts.t("panel.sketch"), |ui| {
                         let mut open = true;
@@ -3117,7 +3383,7 @@ impl eframe::App for Spike {
                             egui_code_editor::CodeEditor::default()
                                 .id_source("croquis-sketch-editor")
                                 .with_ui_fontsize(ui)
-                                .with_theme(editor::code_theme())
+                                .with_theme(editor::code_theme(light_theme()))
                                 .with_rows(rows)
                                 // Wrap, not numbers. The crate ignores `wrap` whenever
                                 // `numlines` is on — the gutter is drawn per line and
@@ -3202,7 +3468,7 @@ impl eframe::App for Spike {
             // pushed the canvas down — under the pointer, while wiring.
             const STRIP_HEIGHT: f32 = 36.0;
             let strip = egui::Frame::new()
-                .fill(SURFACE)
+                .fill(palette().surface)
                 .inner_margin(egui::Margin::symmetric(12, 0))
                 .show(ui, |ui| {
                     ui.set_height(STRIP_HEIGHT);
@@ -3287,7 +3553,7 @@ impl eframe::App for Spike {
             ui.painter().hline(
                 strip.response.rect.x_range(),
                 strip.response.rect.max.y,
-                egui::Stroke::new(1.0, BORDER),
+                egui::Stroke::new(1.0, palette().border),
             );
             if strip.inner {
                 self.reevaluate = true;
@@ -3794,8 +4060,8 @@ impl eframe::App for Spike {
                             ui.spacing_mut().item_spacing.y = 2.0;
                             for problem in &self.diagnostics {
                                 let colour = match problem.severity {
-                                    editor::Severity::Error => ERROR_TEXT,
-                                    editor::Severity::Warning => WARNING_TEXT,
+                                    editor::Severity::Error => palette().error,
+                                    editor::Severity::Warning => palette().warning,
                                 };
                                 let text = format!(
                                     "{}:{}  {}",
@@ -5929,6 +6195,72 @@ mod tests {
             "a fresh edit invalidates the redo branch"
         );
         assert_eq!(spike.parts.len(), before - 1);
+    }
+
+    #[test]
+    fn the_two_palettes_are_actually_different() {
+        assert_ne!(DARK_PALETTE.surface, LIGHT_PALETTE.surface);
+        assert!(
+            LIGHT_PALETTE.surface.r() > DARK_PALETTE.surface.r(),
+            "the light palette's surfaces are lighter"
+        );
+        assert!(
+            LIGHT_PALETTE.text.r() < DARK_PALETTE.text.r(),
+            "and its ink is darker than the dark theme's"
+        );
+    }
+
+    #[test]
+    fn a_document_as_opened_is_not_dirty() {
+        let spike = Spike::with_blink();
+        assert!(
+            !spike.is_dirty(),
+            "the document it started with is the baseline"
+        );
+    }
+
+    #[test]
+    fn editing_the_sketch_makes_it_dirty() {
+        let mut spike = Spike::with_blink();
+        spike.sketch.push_str("\n// not saved yet\n");
+        assert!(spike.is_dirty());
+    }
+
+    #[test]
+    fn moving_a_part_makes_it_dirty() {
+        let mut spike = Spike::with_blink();
+        spike.parts[0].center += Vec2::new(6.0, 0.0);
+        assert!(spike.is_dirty());
+    }
+
+    #[test]
+    fn new_waits_for_the_question_before_throwing_work_away() {
+        let mut spike = Spike::with_blink();
+        spike.sketch.push_str("\n// not saved yet\n");
+        let before = spike.parts.len();
+
+        assert!(
+            !spike.may_replace_document(Pending::New),
+            "the request waits for an answer"
+        );
+        assert_eq!(spike.pending, Some(Pending::New));
+        assert_eq!(spike.parts.len(), before, "and nothing is thrown away yet");
+    }
+
+    #[test]
+    fn saving_answers_the_question() {
+        let mut spike = Spike::with_blink();
+        spike.sketch.push_str("\n// not saved yet\n");
+        let path = std::env::temp_dir().join("croquis-unsaved-guard-test.json");
+        spike.save_to(path.clone());
+        let _ = std::fs::remove_file(&path);
+
+        assert!(!spike.is_dirty(), "a saved document is not unsaved work");
+        assert!(
+            spike.may_replace_document(Pending::New),
+            "so New goes ahead without asking"
+        );
+        assert_eq!(spike.pending, None, "and no question was left pending");
     }
 
     #[test]

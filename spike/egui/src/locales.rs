@@ -77,11 +77,20 @@ pub fn load(locale: Locale) -> Catalogue {
 /// the reader, not to the circuit they happen to have open, so one file for the
 /// app is right. XDG first, because that is where a Linux desktop expects a
 /// config file, with `~/.config` as the fallback.
-fn config_path() -> Option<PathBuf> {
+pub fn config_path() -> Option<PathBuf> {
+    config_file("locale")
+}
+
+/// A file in the app's own config directory, by name.
+///
+/// The language and the theme are both the reader's, not the circuit's, so they
+/// live in one directory outside any document. XDG first, with `~/.config` as the
+/// fallback, and nothing anywhere if neither exists.
+pub fn config_file(name: &str) -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-    Some(base.join("croquis").join("locale"))
+    Some(base.join("croquis").join(name))
 }
 
 /// The language the last run chose, or English.

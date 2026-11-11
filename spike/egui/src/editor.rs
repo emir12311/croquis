@@ -127,28 +127,32 @@ pub fn arduino_syntax() -> egui_code_editor::Syntax {
 /// The widget's theme.
 ///
 /// `CodeEditor::default()` draws in Gruvbox, which clashes with the shell's
-/// palette. The crate ships eight themes; Github Dark is the closest to v0.2's
-/// CodeMirror look. Picked by name rather than by index so a reordering upstream
-/// cannot quietly change it, and built once because it parses eight hex colours.
-pub fn code_theme() -> &'static egui_code_editor::Color32Theme {
+/// palette. Picked by name rather than by index so a reordering upstream cannot
+/// quietly change it, and built once per theme because it parses eight hex
+/// colours.
+///
+/// The widget's own backgrounds — near-black, near-white — read as a different
+/// surface from the panels around them: a slab inside the panel rather than part
+/// of it. Taking the shell's colour makes the sketch panel one surface, while the
+/// syntax colours stay the theme's own.
+pub fn code_theme(light: bool) -> &'static egui_code_editor::Color32Theme {
     use std::sync::OnceLock;
-    /// The colour the editor draws its background in.
-    ///
-    /// The theme's own background is near-black (`#0d1117`), which read as a
-    /// different surface from the rest of the shell: a black slab inside a grey
-    /// panel. This is the shell's own SURFACE, so the panel is one colour — and it
-    /// is still dark enough for the theme's syntax colours to carry.
-    const EDITOR_BG: Color32 = Color32::from_rgb(0x21, 0x21, 0x24);
+    static DARK: OnceLock<egui_code_editor::Color32Theme> = OnceLock::new();
+    static LIGHT: OnceLock<egui_code_editor::Color32Theme> = OnceLock::new();
 
-    static THEME: OnceLock<egui_code_editor::Color32Theme> = OnceLock::new();
-    THEME.get_or_init(|| {
+    let (cell, name, editor_bg) = if light {
+        (&LIGHT, "Github Light", Color32::from_rgb(0xfa, 0xf9, 0xf6))
+    } else {
+        (&DARK, "Github Dark", Color32::from_rgb(0x21, 0x21, 0x24))
+    };
+    cell.get_or_init(|| {
         let chosen = egui_code_editor::DEFAULT_THEMES
             .iter()
-            .find(|theme| theme.name() == "Github Dark")
+            .find(|theme| theme.name() == name)
             .copied()
             .unwrap_or(egui_code_editor::DEFAULT_THEMES[0]);
         let mut theme = egui_code_editor::Color32Theme::from(chosen);
-        theme.bg = EDITOR_BG;
+        theme.bg = editor_bg;
         theme
     })
 }
