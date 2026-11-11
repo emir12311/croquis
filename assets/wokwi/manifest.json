@@ -1,0 +1,1549 @@
+{
+  "license": "MIT",
+  "source": "@wokwi/elements 1.9.2",
+  "parts": [
+    {
+      "kind": "uno",
+      "tag": "wokwi-arduino-uno",
+      "attrs": {},
+      "width": 274.3125,
+      "height": 201.59375,
+      "svg": "uno.svg",
+      "pins": [
+        {
+          "name": "A5.2",
+          "x": 87,
+          "y": 9,
+          "signals": [
+            "analog",
+            "i2c"
+          ]
+        },
+        {
+          "name": "A4.2",
+          "x": 97,
+          "y": 9,
+          "signals": [
+            "analog",
+            "i2c"
+          ]
+        },
+        {
+          "name": "AREF",
+          "x": 106,
+          "y": 9,
+          "signals": []
+        },
+        {
+          "name": "GND.1",
+          "x": 115.5,
+          "y": 9,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "13",
+          "x": 125,
+          "y": 9,
+          "signals": [
+            "spi"
+          ]
+        },
+        {
+          "name": "12",
+          "x": 134.5,
+          "y": 9,
+          "signals": [
+            "spi"
+          ]
+        },
+        {
+          "name": "11",
+          "x": 144,
+          "y": 9,
+          "signals": [
+            "spi",
+            "pwm"
+          ]
+        },
+        {
+          "name": "10",
+          "x": 153.5,
+          "y": 9,
+          "signals": [
+            "spi",
+            "pwm"
+          ]
+        },
+        {
+          "name": "9",
+          "x": 163,
+          "y": 9,
+          "signals": [
+            "pwm"
+          ]
+        },
+        {
+          "name": "8",
+          "x": 173,
+          "y": 9,
+          "signals": []
+        },
+        {
+          "name": "7",
+          "x": 189,
+          "y": 9,
+          "signals": []
+        },
+        {
+          "name": "6",
+          "x": 198.5,
+          "y": 9,
+          "signals": [
+            "pwm"
+          ]
+        },
+        {
+          "name": "5",
+          "x": 208,
+          "y": 9,
+          "signals": [
+            "pwm"
+          ]
+        },
+        {
+          "name": "4",
+          "x": 217.5,
+          "y": 9,
+          "signals": []
+        },
+        {
+          "name": "3",
+          "x": 227,
+          "y": 9,
+          "signals": [
+            "pwm"
+          ]
+        },
+        {
+          "name": "2",
+          "x": 236.5,
+          "y": 9,
+          "signals": []
+        },
+        {
+          "name": "1",
+          "x": 246,
+          "y": 9,
+          "signals": [
+            "usart"
+          ]
+        },
+        {
+          "name": "0",
+          "x": 255.5,
+          "y": 9,
+          "signals": [
+            "usart"
+          ]
+        },
+        {
+          "name": "IOREF",
+          "x": 131,
+          "y": 191.5,
+          "signals": []
+        },
+        {
+          "name": "RESET",
+          "x": 140.5,
+          "y": 191.5,
+          "signals": []
+        },
+        {
+          "name": "3.3V",
+          "x": 150,
+          "y": 191.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "5V",
+          "x": 160,
+          "y": 191.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "GND.2",
+          "x": 169.5,
+          "y": 191.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "GND.3",
+          "x": 179,
+          "y": 191.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "VIN",
+          "x": 188.5,
+          "y": 191.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "A0",
+          "x": 208,
+          "y": 191.5,
+          "signals": [
+            "analog"
+          ]
+        },
+        {
+          "name": "A1",
+          "x": 217.5,
+          "y": 191.5,
+          "signals": [
+            "analog"
+          ]
+        },
+        {
+          "name": "A2",
+          "x": 227,
+          "y": 191.5,
+          "signals": [
+            "analog"
+          ]
+        },
+        {
+          "name": "A3",
+          "x": 236.5,
+          "y": 191.5,
+          "signals": [
+            "analog"
+          ]
+        },
+        {
+          "name": "A4",
+          "x": 246,
+          "y": 191.5,
+          "signals": [
+            "analog",
+            "i2c"
+          ]
+        },
+        {
+          "name": "A5",
+          "x": 255.5,
+          "y": 191.5,
+          "signals": [
+            "analog",
+            "i2c"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "led",
+      "tag": "wokwi-led",
+      "attrs": {
+        "color": "red"
+      },
+      "width": 40,
+      "height": 50,
+      "svg": "led.svg",
+      "pins": [
+        {
+          "name": "A",
+          "x": 25,
+          "y": 42,
+          "description": "Anode",
+          "signals": []
+        },
+        {
+          "name": "C",
+          "x": 15,
+          "y": 42,
+          "description": "Cathode",
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "rgb-led",
+      "tag": "wokwi-rgb-led",
+      "attrs": {},
+      "width": 42.125,
+      "height": 72.578125,
+      "svg": "rgb-led.svg",
+      "pins": [
+        {
+          "name": "R",
+          "x": 8.5,
+          "y": 44,
+          "signals": []
+        },
+        {
+          "name": "COM",
+          "x": 18,
+          "y": 54,
+          "signals": []
+        },
+        {
+          "name": "G",
+          "x": 26.4,
+          "y": 44,
+          "signals": []
+        },
+        {
+          "name": "B",
+          "x": 35.7,
+          "y": 44,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "resistor",
+      "tag": "wokwi-resistor",
+      "attrs": {
+        "value": "220"
+      },
+      "width": 59.125,
+      "height": 11.328125,
+      "svg": "resistor.svg",
+      "pins": [
+        {
+          "name": "1",
+          "x": 0,
+          "y": 5.65,
+          "signals": []
+        },
+        {
+          "name": "2",
+          "x": 58.8,
+          "y": 5.65,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "pushbutton",
+      "tag": "wokwi-pushbutton",
+      "attrs": {},
+      "width": 67.28125,
+      "height": 45.34375,
+      "svg": "pushbutton.svg",
+      "pins": [
+        {
+          "name": "1.l",
+          "x": 0,
+          "y": 13,
+          "signals": []
+        },
+        {
+          "name": "2.l",
+          "x": 0,
+          "y": 32,
+          "signals": []
+        },
+        {
+          "name": "1.r",
+          "x": 67,
+          "y": 13,
+          "signals": []
+        },
+        {
+          "name": "2.r",
+          "x": 67,
+          "y": 32,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "potentiometer",
+      "tag": "wokwi-potentiometer",
+      "attrs": {
+        "value": "0"
+      },
+      "width": 75.578125,
+      "height": 75.578125,
+      "svg": "potentiometer.svg",
+      "pins": [
+        {
+          "name": "GND",
+          "x": 29,
+          "y": 68.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "SIG",
+          "x": 39,
+          "y": 68.5,
+          "signals": [
+            "analog"
+          ]
+        },
+        {
+          "name": "VCC",
+          "x": 49,
+          "y": 68.5,
+          "signals": [
+            "power"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "slide-potentiometer",
+      "tag": "wokwi-slide-potentiometer",
+      "attrs": {
+        "value": "0"
+      },
+      "width": 207.859375,
+      "height": 109.59375,
+      "svg": "slide-potentiometer.svg",
+      "pins": [
+        {
+          "name": "VCC",
+          "x": 1,
+          "y": 43,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "SIG",
+          "x": 1,
+          "y": 63,
+          "signals": [
+            "analog"
+          ]
+        },
+        {
+          "name": "GND",
+          "x": 207,
+          "y": 43,
+          "signals": [
+            "power"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "photoresistor-sensor",
+      "tag": "wokwi-photoresistor-sensor",
+      "attrs": {
+        "light": "50",
+        "threshold": "50"
+      },
+      "width": 173.65625,
+      "height": 61.46875,
+      "svg": "photoresistor-sensor.svg",
+      "pins": [
+        {
+          "name": "VCC",
+          "x": 172,
+          "y": 16,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "GND",
+          "x": 172,
+          "y": 26,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "DO",
+          "x": 172,
+          "y": 35.8,
+          "signals": []
+        },
+        {
+          "name": "AO",
+          "x": 172,
+          "y": 45.5,
+          "signals": [
+            "analog"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "ntc-temperature-sensor",
+      "tag": "wokwi-ntc-temperature-sensor",
+      "attrs": {
+        "temperature": "25"
+      },
+      "width": 135.390625,
+      "height": 71.796875,
+      "svg": "ntc-temperature-sensor.svg",
+      "pins": [
+        {
+          "name": "GND",
+          "x": 135,
+          "y": 26.2,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "VCC",
+          "x": 135,
+          "y": 35.8,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "OUT",
+          "x": 135,
+          "y": 45.5,
+          "signals": [
+            "analog"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "analog-joystick",
+      "tag": "wokwi-analog-joystick",
+      "attrs": {
+        "x": "50",
+        "y": "50"
+      },
+      "width": 102.796875,
+      "height": 120.1875,
+      "svg": "analog-joystick.svg",
+      "pins": [
+        {
+          "name": "VCC",
+          "x": 33,
+          "y": 115.8,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "VERT",
+          "x": 42.6012,
+          "y": 115.8,
+          "signals": [
+            "analog"
+          ]
+        },
+        {
+          "name": "HORZ",
+          "x": 52.2024,
+          "y": 115.8,
+          "signals": [
+            "analog"
+          ]
+        },
+        {
+          "name": "SEL",
+          "x": 61.8036,
+          "y": 115.8,
+          "signals": []
+        },
+        {
+          "name": "GND",
+          "x": 71.4048,
+          "y": 115.8,
+          "signals": [
+            "power"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "membrane-keypad",
+      "tag": "wokwi-membrane-keypad",
+      "attrs": {
+        "columns": "4",
+        "connector": "true"
+      },
+      "width": 265.828125,
+      "height": 343.921875,
+      "svg": "membrane-keypad.svg",
+      "pins": [
+        {
+          "name": "R1",
+          "x": 100,
+          "y": 338,
+          "signals": []
+        },
+        {
+          "name": "R2",
+          "x": 110,
+          "y": 338,
+          "signals": []
+        },
+        {
+          "name": "R3",
+          "x": 119.5,
+          "y": 338,
+          "signals": []
+        },
+        {
+          "name": "R4",
+          "x": 129,
+          "y": 338,
+          "signals": []
+        },
+        {
+          "name": "C1",
+          "x": 138.5,
+          "y": 338,
+          "signals": []
+        },
+        {
+          "name": "C2",
+          "x": 148,
+          "y": 338,
+          "signals": []
+        },
+        {
+          "name": "C3",
+          "x": 157.75,
+          "y": 338,
+          "signals": []
+        },
+        {
+          "name": "C4",
+          "x": 167.5,
+          "y": 338,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "dht22",
+      "tag": "wokwi-dht22",
+      "attrs": {
+        "temperature": "25",
+        "humidity": "50"
+      },
+      "width": 57.0625,
+      "height": 116.71875,
+      "svg": "dht22.svg",
+      "pins": [
+        {
+          "name": "VCC",
+          "x": 15,
+          "y": 114.9,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "SDA",
+          "x": 24.5,
+          "y": 114.9,
+          "signals": []
+        },
+        {
+          "name": "NC",
+          "x": 34.1,
+          "y": 114.9,
+          "signals": []
+        },
+        {
+          "name": "GND",
+          "x": 43.8,
+          "y": 114.9,
+          "signals": [
+            "power"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "tilt-switch",
+      "tag": "wokwi-tilt-switch",
+      "attrs": {
+        "tilted": "0"
+      },
+      "width": 88.4375,
+      "height": 55.546875,
+      "svg": "tilt-switch.svg",
+      "pins": [
+        {
+          "name": "GND",
+          "x": 88,
+          "y": 18,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "VCC",
+          "x": 88,
+          "y": 27.8,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "OUT",
+          "x": 88,
+          "y": 37.5,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "pir-motion-sensor",
+      "tag": "wokwi-pir-motion-sensor",
+      "attrs": {
+        "motion": "0"
+      },
+      "width": 90.703125,
+      "height": 92.390625,
+      "svg": "pir-motion-sensor.svg",
+      "pins": [
+        {
+          "name": "VCC",
+          "x": 36.178,
+          "y": 92,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "OUT",
+          "x": 45.9175,
+          "y": 92,
+          "signals": []
+        },
+        {
+          "name": "GND",
+          "x": 55.6415,
+          "y": 92,
+          "signals": [
+            "power"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "flame-sensor",
+      "tag": "wokwi-flame-sensor",
+      "attrs": {
+        "flame": "0"
+      },
+      "width": 199.9375,
+      "height": 61.46875,
+      "svg": "flame-sensor.svg",
+      "pins": [
+        {
+          "name": "VCC",
+          "x": 199,
+          "y": 14.6,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "GND",
+          "x": 199,
+          "y": 24.3,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "DOUT",
+          "x": 199,
+          "y": 34,
+          "signals": []
+        },
+        {
+          "name": "AOUT",
+          "x": 199,
+          "y": 43.7,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "gas-sensor",
+      "tag": "wokwi-gas-sensor",
+      "attrs": {
+        "gas": "0"
+      },
+      "width": 136.9375,
+      "height": 62.796875,
+      "svg": "gas-sensor.svg",
+      "pins": [
+        {
+          "name": "AOUT",
+          "x": 137,
+          "y": 16.5,
+          "signals": []
+        },
+        {
+          "name": "DOUT",
+          "x": 137,
+          "y": 26.4,
+          "signals": []
+        },
+        {
+          "name": "GND",
+          "x": 137,
+          "y": 36.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "VCC",
+          "x": 137,
+          "y": 46.2,
+          "signals": [
+            "power"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "sound-sensor",
+      "tag": "wokwi-small-sound-sensor",
+      "attrs": {
+        "noise": "0"
+      },
+      "width": 133.078125,
+      "height": 50.4375,
+      "svg": "sound-sensor.svg",
+      "pins": [
+        {
+          "name": "AOUT",
+          "x": 0,
+          "y": 11,
+          "signals": []
+        },
+        {
+          "name": "GND",
+          "x": 0,
+          "y": 20.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "VCC",
+          "x": 0,
+          "y": 30.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "DOUT",
+          "x": 0,
+          "y": 40.5,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "hc-sr04",
+      "tag": "wokwi-hc-sr04",
+      "attrs": {
+        "distance": "100"
+      },
+      "width": 170.078125,
+      "height": 94.484375,
+      "svg": "hc-sr04.svg",
+      "pins": [
+        {
+          "name": "VCC",
+          "x": 71.3,
+          "y": 94.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "TRIG",
+          "x": 81.3,
+          "y": 94.5,
+          "signals": []
+        },
+        {
+          "name": "ECHO",
+          "x": 91.3,
+          "y": 94.5,
+          "signals": []
+        },
+        {
+          "name": "GND",
+          "x": 101.3,
+          "y": 94.5,
+          "signals": [
+            "power"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "ir-receiver",
+      "tag": "wokwi-ir-receiver",
+      "attrs": {},
+      "width": 61.140625,
+      "height": 88.75,
+      "svg": "ir-receiver.svg",
+      "pins": [
+        {
+          "name": "GND",
+          "x": 20.977,
+          "y": 87.75,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "VCC",
+          "x": 30.578,
+          "y": 87.75,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "DAT",
+          "x": 40.18,
+          "y": 87.75,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "ir-remote",
+      "tag": "wokwi-ir-remote",
+      "attrs": {},
+      "width": 151.171875,
+      "height": 316.15625,
+      "svg": "ir-remote.svg",
+      "pins": []
+    },
+    {
+      "kind": "buzzer",
+      "tag": "wokwi-buzzer",
+      "attrs": {},
+      "width": 64.25,
+      "height": 75.578125,
+      "svg": "buzzer.svg",
+      "pins": [
+        {
+          "name": "1",
+          "x": 27,
+          "y": 84,
+          "signals": []
+        },
+        {
+          "name": "2",
+          "x": 37,
+          "y": 84,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "relay",
+      "tag": "wokwi-ks2e-m-dc5",
+      "attrs": {},
+      "width": 79.359375,
+      "height": 37.78125,
+      "svg": "relay.svg",
+      "pins": [
+        {
+          "name": "NO2",
+          "x": 5.5,
+          "y": 5.1,
+          "signals": []
+        },
+        {
+          "name": "NC2",
+          "x": 25,
+          "y": 5.1,
+          "signals": []
+        },
+        {
+          "name": "P2",
+          "x": 45,
+          "y": 5.1,
+          "signals": []
+        },
+        {
+          "name": "COIL2",
+          "x": 74,
+          "y": 5.1,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "NO1",
+          "x": 5.5,
+          "y": 32.7,
+          "signals": []
+        },
+        {
+          "name": "NC1",
+          "x": 25,
+          "y": 32.7,
+          "signals": []
+        },
+        {
+          "name": "P1",
+          "x": 45,
+          "y": 32.7,
+          "signals": []
+        },
+        {
+          "name": "COIL1",
+          "x": 74,
+          "y": 32.7,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "servo",
+      "tag": "wokwi-servo",
+      "attrs": {},
+      "width": 170.078125,
+      "height": 119.53125,
+      "svg": "servo.svg",
+      "pins": [
+        {
+          "name": "GND",
+          "x": 0,
+          "y": 50,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "V+",
+          "x": 0,
+          "y": 59.5,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "PWM",
+          "x": 0,
+          "y": 69,
+          "signals": [
+            "pwm"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "stepper-motor",
+      "tag": "wokwi-stepper-motor",
+      "attrs": {
+        "steps": "200"
+      },
+      "width": 220.34375,
+      "height": 235.453125,
+      "svg": "stepper-motor.svg",
+      "pins": [
+        {
+          "name": "A-",
+          "x": 95.12199999999999,
+          "y": 235.49399999999997,
+          "signals": []
+        },
+        {
+          "name": "A+",
+          "x": 104.72319999999999,
+          "y": 235.49399999999997,
+          "signals": []
+        },
+        {
+          "name": "B+",
+          "x": 114.32439999999998,
+          "y": 235.49399999999997,
+          "signals": []
+        },
+        {
+          "name": "B-",
+          "x": 123.92559999999999,
+          "y": 235.49399999999997,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "seven-segment",
+      "tag": "wokwi-7segment",
+      "attrs": {},
+      "width": 47.421875,
+      "height": 83.140625,
+      "svg": "seven-segment.svg",
+      "pins": [
+        {
+          "name": "COM.1",
+          "x": 23.7195,
+          "y": 71.82,
+          "description": "Common",
+          "signals": []
+        },
+        {
+          "name": "COM.2",
+          "x": 23.7195,
+          "y": 3.78,
+          "description": "Common",
+          "signals": []
+        },
+        {
+          "name": "A",
+          "x": 33.3207,
+          "y": 3.78,
+          "description": "Segment A",
+          "signals": []
+        },
+        {
+          "name": "B",
+          "x": 42.9219,
+          "y": 3.78,
+          "description": "Segment B",
+          "signals": []
+        },
+        {
+          "name": "C",
+          "x": 33.3207,
+          "y": 71.82,
+          "description": "Segment C",
+          "signals": []
+        },
+        {
+          "name": "D",
+          "x": 14.118300000000001,
+          "y": 71.82,
+          "description": "Segment D",
+          "signals": []
+        },
+        {
+          "name": "E",
+          "x": 4.517100000000003,
+          "y": 71.82,
+          "description": "Segment E",
+          "signals": []
+        },
+        {
+          "name": "F",
+          "x": 14.118300000000001,
+          "y": 3.78,
+          "description": "Segment F",
+          "signals": []
+        },
+        {
+          "name": "G",
+          "x": 4.517100000000003,
+          "y": 3.78,
+          "description": "Segment G",
+          "signals": []
+        },
+        {
+          "name": "DP",
+          "x": 42.9219,
+          "y": 71.82,
+          "description": "Decimal Point",
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "seven-segment-4",
+      "tag": "wokwi-7segment-4",
+      "attrs": {},
+      "width": 189.71875,
+      "height": 83.140625,
+      "svg": "seven-segment-4.svg",
+      "pins": [
+        {
+          "name": "A",
+          "x": 75.67559999999999,
+          "y": 3.78,
+          "description": "Segment A",
+          "signals": []
+        },
+        {
+          "name": "B",
+          "x": 114.0804,
+          "y": 3.78,
+          "description": "Segment B",
+          "signals": []
+        },
+        {
+          "name": "C",
+          "x": 94.878,
+          "y": 71.82,
+          "description": "Segment C",
+          "signals": []
+        },
+        {
+          "name": "D",
+          "x": 75.67559999999999,
+          "y": 71.82,
+          "description": "Segment D",
+          "signals": []
+        },
+        {
+          "name": "E",
+          "x": 66.0744,
+          "y": 71.82,
+          "description": "Segment E",
+          "signals": []
+        },
+        {
+          "name": "F",
+          "x": 85.27680000000001,
+          "y": 3.78,
+          "description": "Segment F",
+          "signals": []
+        },
+        {
+          "name": "G",
+          "x": 104.47919999999999,
+          "y": 71.82,
+          "description": "Segment G",
+          "signals": []
+        },
+        {
+          "name": "DP",
+          "x": 85.27680000000001,
+          "y": 71.82,
+          "description": "Decimal Point",
+          "signals": []
+        },
+        {
+          "name": "DIG1",
+          "x": 66.0744,
+          "y": 3.78,
+          "description": "Digit 1 Common",
+          "signals": []
+        },
+        {
+          "name": "DIG2",
+          "x": 94.878,
+          "y": 3.78,
+          "description": "Digit 2 Common",
+          "signals": []
+        },
+        {
+          "name": "DIG3",
+          "x": 104.47919999999999,
+          "y": 3.78,
+          "description": "Digit 3 Common",
+          "signals": []
+        },
+        {
+          "name": "DIG4",
+          "x": 114.0804,
+          "y": 71.82,
+          "description": "Digit 4 Common",
+          "signals": []
+        },
+        {
+          "name": "COM",
+          "x": 123.68159999999999,
+          "y": 71.82,
+          "description": "Common pin",
+          "signals": []
+        },
+        {
+          "name": "CLN",
+          "x": 123.68159999999999,
+          "y": 3.78,
+          "description": "Colon",
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "lcd1602",
+      "tag": "wokwi-lcd1602",
+      "attrs": {},
+      "width": 302.359375,
+      "height": 136.0625,
+      "svg": "lcd1602.svg",
+      "pins": [
+        {
+          "name": "VSS",
+          "x": 32,
+          "y": 130.97,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "VDD",
+          "x": 41.5,
+          "y": 130.97,
+          "signals": [
+            "power"
+          ]
+        },
+        {
+          "name": "V0",
+          "x": 51.5,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "RS",
+          "x": 60.5,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "RW",
+          "x": 70.5,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "E",
+          "x": 80,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "D0",
+          "x": 89.5,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "D1",
+          "x": 99.5,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "D2",
+          "x": 109,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "D3",
+          "x": 118.5,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "D4",
+          "x": 128,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "D5",
+          "x": 137.5,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "D6",
+          "x": 147,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "D7",
+          "x": 156.5,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "A",
+          "x": 166.5,
+          "y": 130.97,
+          "signals": []
+        },
+        {
+          "name": "K",
+          "x": 176,
+          "y": 130.97,
+          "signals": []
+        }
+      ]
+    },
+    {
+      "kind": "led-bar-graph",
+      "tag": "wokwi-led-bar-graph",
+      "attrs": {
+        "color": "red"
+      },
+      "width": 38.171875,
+      "height": 96.375,
+      "svg": "led-bar-graph.svg",
+      "pins": [
+        {
+          "name": "A1",
+          "x": 4.8006,
+          "y": 4.8006,
+          "description": "Anode 1",
+          "signals": []
+        },
+        {
+          "name": "A2",
+          "x": 4.8006,
+          "y": 14.4018,
+          "description": "Anode 2",
+          "signals": []
+        },
+        {
+          "name": "A3",
+          "x": 4.8006,
+          "y": 24.002999999999997,
+          "description": "Anode 3",
+          "signals": []
+        },
+        {
+          "name": "A4",
+          "x": 4.8006,
+          "y": 33.6042,
+          "description": "Anode 4",
+          "signals": []
+        },
+        {
+          "name": "A5",
+          "x": 4.8006,
+          "y": 43.2054,
+          "description": "Anode 5",
+          "signals": []
+        },
+        {
+          "name": "A6",
+          "x": 4.8006,
+          "y": 52.8066,
+          "description": "Anode 6",
+          "signals": []
+        },
+        {
+          "name": "A7",
+          "x": 4.8006,
+          "y": 62.4078,
+          "description": "Anode 7",
+          "signals": []
+        },
+        {
+          "name": "A8",
+          "x": 4.8006,
+          "y": 72.009,
+          "description": "Anode 8",
+          "signals": []
+        },
+        {
+          "name": "A9",
+          "x": 4.8006,
+          "y": 81.61019999999999,
+          "description": "Anode 9",
+          "signals": []
+        },
+        {
+          "name": "A10",
+          "x": 4.8006,
+          "y": 91.2114,
+          "description": "Anode 10",
+          "signals": []
+        },
+        {
+          "name": "C1",
+          "x": 33.3774,
+          "y": 4.8006,
+          "description": "Cathode 1",
+          "signals": []
+        },
+        {
+          "name": "C2",
+          "x": 33.3774,
+          "y": 14.4018,
+          "description": "Cathode 2",
+          "signals": []
+        },
+        {
+          "name": "C3",
+          "x": 33.3774,
+          "y": 24.002999999999997,
+          "description": "Cathode 3",
+          "signals": []
+        },
+        {
+          "name": "C4",
+          "x": 33.3774,
+          "y": 33.6042,
+          "description": "Cathode 4",
+          "signals": []
+        },
+        {
+          "name": "C5",
+          "x": 33.3774,
+          "y": 43.2054,
+          "description": "Cathode 5",
+          "signals": []
+        },
+        {
+          "name": "C6",
+          "x": 33.3774,
+          "y": 52.8066,
+          "description": "Cathode 6",
+          "signals": []
+        },
+        {
+          "name": "C7",
+          "x": 33.3774,
+          "y": 62.4078,
+          "description": "Cathode 7",
+          "signals": []
+        },
+        {
+          "name": "C8",
+          "x": 33.3774,
+          "y": 72.009,
+          "description": "Cathode 8",
+          "signals": []
+        },
+        {
+          "name": "C9",
+          "x": 33.3774,
+          "y": 81.61019999999999,
+          "description": "Cathode 9",
+          "signals": []
+        },
+        {
+          "name": "C10",
+          "x": 33.3774,
+          "y": 91.2114,
+          "description": "Cathode 10",
+          "signals": []
+        }
+      ]
+    }
+  ]
+}

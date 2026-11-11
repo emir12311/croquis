@@ -12,7 +12,9 @@
     "tauri": "tauri",
     "test": "vitest run",
     "check:versions": "node scripts/check-versions.mjs",
-    "drive": "node scripts/drive.mjs"
+    "drive": "node scripts/drive.mjs",
+    "inventory": "node tools/inventory.mjs",
+    "extract:wokwi": "node tools/extract-wokwi.mjs"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.20.3",

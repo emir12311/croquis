@@ -1,0 +1,60 @@
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="50.2mm" height="22mm" viewBox="0 0 50.2 22">
+        <defs>
+          <pattern id="pin-pattern" height="2" width="2.54" patternUnits="userSpaceOnUse">
+            <!--?lit$325995789$--><circle cx="1.27" cy="1" r="0.5" fill="#aaa"></circle>
+          </pattern>
+        </defs>
+        <rect x="0" height="20.5" y="0" width="50.2"></rect>
+        <!--?lit$325995789$--><!---->
+      <g transform="skewX(-8) translate(3.5, 2.4) scale(0.81)">
+        <polygon points="2 0 8 0 9 1 8 2 2 2 1 1" fill="#444"></polygon>
+        <polygon points="10 2 10 8 9 9 8 8 8 2 9 1" fill="#444"></polygon>
+        <polygon points="10 10 10 16 9 17 8 16 8 10 9 9" fill="#444"></polygon>
+        <polygon points="8 18 2 18 1 17 2 16 8 16 9 17" fill="#444"></polygon>
+        <polygon points="0 16 0 10 1 9 2 10 2 16 1 17" fill="#444"></polygon>
+        <polygon points="0 8 0 2 1 1 2 2 2 8 1 9" fill="#444"></polygon>
+        <polygon points="2 8 8 8 9 9 8 10 2 10 1 9" fill="#444"></polygon>
+      </g>
+      <circle r="0.89" cx="10.9" cy="16" fill="#444"></circle>
+    <!----><!---->
+      <g transform="skewX(-8) translate(16.2, 2.4) scale(0.81)">
+        <polygon points="2 0 8 0 9 1 8 2 2 2 1 1" fill="#444"></polygon>
+        <polygon points="10 2 10 8 9 9 8 8 8 2 9 1" fill="#444"></polygon>
+        <polygon points="10 10 10 16 9 17 8 16 8 10 9 9" fill="#444"></polygon>
+        <polygon points="8 18 2 18 1 17 2 16 8 16 9 17" fill="#444"></polygon>
+        <polygon points="0 16 0 10 1 9 2 10 2 16 1 17" fill="#444"></polygon>
+        <polygon points="0 8 0 2 1 1 2 2 2 8 1 9" fill="#444"></polygon>
+        <polygon points="2 8 8 8 9 9 8 10 2 10 1 9" fill="#444"></polygon>
+      </g>
+      <circle r="0.89" cx="23.6" cy="16" fill="#444"></circle>
+    <!----><!---->
+      <g transform="skewX(-8) translate(28.9, 2.4) scale(0.81)">
+        <polygon points="2 0 8 0 9 1 8 2 2 2 1 1" fill="#444"></polygon>
+        <polygon points="10 2 10 8 9 9 8 8 8 2 9 1" fill="#444"></polygon>
+        <polygon points="10 10 10 16 9 17 8 16 8 10 9 9" fill="#444"></polygon>
+        <polygon points="8 18 2 18 1 17 2 16 8 16 9 17" fill="#444"></polygon>
+        <polygon points="0 16 0 10 1 9 2 10 2 16 1 17" fill="#444"></polygon>
+        <polygon points="0 8 0 2 1 1 2 2 2 8 1 9" fill="#444"></polygon>
+        <polygon points="2 8 8 8 9 9 8 10 2 10 1 9" fill="#444"></polygon>
+      </g>
+      <circle r="0.89" cx="36.3" cy="16" fill="#444"></circle>
+    <!----><!---->
+      <g transform="skewX(-8) translate(41.599999999999994, 2.4) scale(0.81)">
+        <polygon points="2 0 8 0 9 1 8 2 2 2 1 1" fill="#444"></polygon>
+        <polygon points="10 2 10 8 9 9 8 8 8 2 9 1" fill="#444"></polygon>
+        <polygon points="10 10 10 16 9 17 8 16 8 10 9 9" fill="#444"></polygon>
+        <polygon points="8 18 2 18 1 17 2 16 8 16 9 17" fill="#444"></polygon>
+        <polygon points="0 16 0 10 1 9 2 10 2 16 1 17" fill="#444"></polygon>
+        <polygon points="0 8 0 2 1 1 2 2 2 8 1 9" fill="#444"></polygon>
+        <polygon points="2 8 8 8 9 9 8 10 2 10 1 9" fill="#444"></polygon>
+      </g>
+      <circle r="0.89" cx="48.99999999999999" cy="16" fill="#444"></circle>
+    <!----><!-- -->
+        <!--?lit$325995789$--><!-- -->
+        <!--?lit$325995789$-->
+      <g fill="url(#pin-pattern)" transform="translate(16.21, 0)">
+        <rect height="2" width="17.78"></rect>
+        <rect height="2" width="17.78" transform="translate(0, 18)"></rect>
+      </g>
+    
+      </svg>

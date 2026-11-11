@@ -1,0 +1,47 @@
+<svg height="29mm" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="55mm" viewBox="0 0 55 29">
+      <defs>
+        <filter id="outline">
+          <feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#4faaff"></feDropShadow>
+        </filter>
+        <linearGradient id="tipGradient" x1="36.482" x2="50.447" y1="91.25" y2="91.25" gradientTransform="matrix(.8593 0 0 1.1151 -14.849 -92.256)" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#1a1a1a" offset="0"></stop>
+          <stop stop-color="#595959" offset=".4"></stop>
+          <stop stop-color="#595959" offset=".6"></stop>
+          <stop stop-color="#1a1a1a" offset="1"></stop>
+        </linearGradient>
+        <radialGradient id="bodyGradient" cx="62.59" cy="65.437" r="22.5" gradientTransform="matrix(1.9295 3.7154e-8 0 .49697 -98.268 -23.02)" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#d2d2d2" offset="0"></stop>
+          <stop stop-color="#7a7a7a" offset="1"></stop>
+        </radialGradient>
+        <g id="screw">
+          <circle cx="0" cy="0" r="1" fill="#858585" stroke="#000" stroke-width=".05"></circle>
+          <path d="m0 1 0-2" fill="none" stroke="#000" stroke-width=".151"></path>
+        </g>
+      </defs>
+      <!-- pins -->
+      <g fill="#ccc">
+        <rect x="0" y="11" width="5" height="0.75"></rect>
+        <rect y="11" width="5" height="0.75" x="50"></rect>
+        <rect x="0" y="16.25" width="5" height="0.75"></rect>
+      </g>
+      <g transform="translate(5 5)">
+        <!-- Body -->
+        <rect id="sliderCase" x="0" y="5" height="9" rx=".2" ry=".2" fill="url(#bodyGradient)" fill-rule="evenodd" width="45"></rect>
+        <rect x="3.25" y="8" height="3" rx=".1" ry=".1" fill="#3f1e1e" width="38.5"></rect>
+        <!-- Screw Left -->
+        <g transform="translate(1.625 9.5) rotate(45)">
+          <use href="#screw"></use>
+        </g>
+        <!-- Screw Right -->
+        <g transform="translate(43.375 9.5) rotate(45)">
+          <use href="#screw"></use>
+        </g>
+        <!-- Tip -->
+        <g id="tip" transform="translate(-15 0)">
+          <rect x="19.75" y="8.6" width="5.5" height="1.8"></rect>
+          <rect x="16.5" y="0" width="12" height="19" fill="url(#tipGradient)" stroke-width="2.6518" rx=".1" ry=".1"></rect>
+          <rect x="22.2" y="0" width=".6" height="19" fill="#efefef"></rect>
+        </g>
+      </g>
+      <rect x="0" y="14" width="1" height="1" fill="none" id="firefox-workaround"></rect>
+    </svg>

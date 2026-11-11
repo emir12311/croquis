@@ -1,0 +1,44 @@
+<svg version="1.1" style="font-size: 1.5px; font-family: monospace" xmlns="http://www.w3.org/2000/svg" width="80mm" height="36mm" viewBox="0 0 80 36">
+        <defs>
+          <pattern id="characters" width="3.55" height="5.95" patternUnits="userSpaceOnUse" x="12.45" y="12.55">
+            <rect width="2.95" height="5.55" fill-opacity="0.05"></rect>
+          </pattern>
+          <pattern id="pins" width="2.54" height="3.255" patternUnits="userSpaceOnUse" y="1.1">
+            <path fill="#92926d" d="M0,0.55c0,0 0.21,-0.52 0.87,-0.52 0.67,0 0.81,0.51 0.81,0.51v1.81h-1.869z"></path>
+            <circle r="0.45" cx="0.827" cy="0.9" color="black"></circle>
+          </pattern>
+        </defs>
+        <rect fill="#087f45" width="80" height="36"></rect>
+        <rect x="4.95" y="5.7" width="71.2" height="25.2"></rect>
+        <rect x="7.55" y="10.3" rx="1.5" ry="1.5" width="66" height="16" fill="#6cb201"></rect>
+        <rect x="7.55" y="10.3" rx="1.5" ry="1.5" width="66" height="16" opacity="0"></rect>
+        <!--?lit$325995789$-->
+        <!--?lit$325995789$-->
+      <g transform="translate(0, 32.6)">
+        <rect x="7.55" y="1" height="2.5" width="40.64" fill="url(#pins)"></rect>
+        <text fill="rgb(255, 255, 255)" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">
+          <tspan x="6" y="2.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">1</tspan>
+          <tspan x="7.2" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">VSS</tspan>
+          <tspan x="9.9" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">VDD</tspan>
+          <tspan x="12.7" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">V0</tspan>
+          <tspan x="15.2" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">RS</tspan>
+          <tspan x="17.8" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">RW</tspan>
+          <tspan x="20.8" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">E</tspan>
+          <tspan x="22.7" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D0</tspan>
+          <tspan x="25.3" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D1</tspan>
+          <tspan x="27.9" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D2</tspan>
+          <tspan x="30.4" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D3</tspan>
+          <tspan x="33" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D4</tspan>
+          <tspan x="35.6" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D5</tspan>
+          <tspan x="38.2" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D6</tspan>
+          <tspan x="40.8" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">D7</tspan>
+          <tspan x="43.6" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">A</tspan>
+          <tspan x="46.2" y="0.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">K</tspan>
+          <tspan x="48" y="2.7" font-size="1.5px" font-family="monospace" font-weight="400" font-style="normal" fill="rgb(255, 255, 255)" fill-opacity="1" stroke="none" stroke-width="1px" text-anchor="start" letter-spacing="normal" opacity="1">16</tspan>
+        </text>
+      </g>
+    
+        <rect fill="url(#characters)" x="12.45" y="12.55" width="56.2" height="11.5"></rect>
+        <path d="" transform="translate(12.45, 12.55)" fill="black"></path>
+        <!--?lit$325995789$-->
+      </svg>

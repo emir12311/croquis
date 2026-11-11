@@ -1,0 +1,34 @@
+[package]
+name = "croquis"
+version = "0.3.0"
+edition = "2021"
+publish = false
+default-run = "croquis"
+
+[dependencies]
+# Glow keeps the spike small and matches the kind of backend a native Linux app
+# would use; wgpu is deliberately not pulled in until Spike C measures it.
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "clipboard"] }
+resvg = "0.48"
+croquis-sim = { path = "../../crates/croquis-sim" }
+croquis-core = { path = "../../crates/croquis-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.17"
+rodio = { version = "0.23", default-features = false, features = ["playback"] }
+# The sketch editor. Not optional and not a feature: it *is* the app's editor.
+egui_code_editor = "0.5"
+
+[dev-dependencies]
+# The preset corpus is checked against docs/v0.3-baseline.json, whose sketch
+# hashes are sha256 of the sketch text, so a test can compare v0.2's answer to
+# ours byte for byte.
+sha2 = "0.10"
+
+# A warning here is a defect that has not bitten yet — an unused fixture, a
+# variable nobody reads. `deny` makes the build stop instead of scrolling past.
+#
+# The table is package-scoped, so it applies to this crate and not to its
+# dependencies: a third party's warnings cannot break our build.
+[lints.rust]
+warnings = "deny"

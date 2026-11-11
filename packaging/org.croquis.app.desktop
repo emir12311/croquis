@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Croquis
+GenericName=Circuit editor
+Comment=Draw, wire and simulate Arduino circuits
+Exec=croquis %f
+Icon=org.croquis.app
+Terminal=false
+Categories=Development;Electronics;
+Keywords=arduino;circuit;breadboard;simulator;electronics;
+StartupNotify=true
+StartupWMClass=croquis

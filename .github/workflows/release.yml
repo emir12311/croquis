@@ -2,8 +2,10 @@ name: release
 
 # Builds the Linux packages on a clean machine and attaches them to a draft release.
 #
-# Two reasons this exists rather than building locally: an AppImage needs a machine where
-# linuxdeploy behaves, and the maintainer's upload speed makes a 50 MB release painful.
+# Two reasons this exists rather than building locally: an AppImage wants a machine
+# where appimagetool behaves, and the maintainer's upload speed makes a 50 MB release
+# painful. It also builds a package on a machine that has never had the toolchain, so
+# "it works here" cannot hide a missing file.
 on:
   push:
     tags: ['v*']
@@ -17,63 +19,63 @@ permissions:
 
 jobs:
   linux:
-    runs-on: ubuntu-24.04 # the first LTS with webkit2gtk-4.1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
+      # What the egui app needs to build, plus the tools the package formats need:
+      # rpmbuild for the rpm, and zstd for the Arch package.
       - name: system libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf \
-            build-essential curl wget file libssl-dev libelf-dev zlib1g-dev
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+            build-essential pkg-config libasound2-dev \
+            libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev \
+            rpm zstd fakeroot file wget
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: spike/egui
 
-      # simavr, avr-gcc and the Arduino core: about 36 MB of download and a minute of
-      # compiling, and the reason a packaged build can compile a sketch offline.
+      # simavr, avr-gcc and the Arduino core are not committed, and the engine's
+      # build script needs simavr before anything can compile.
+      - name: cache the toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: .toolchain
+          key: toolchain-${{ runner.os }}-${{ hashFiles('scripts/setup-toolchain.sh') }}
+
       - name: toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
         run: ./scripts/setup-toolchain.sh
 
-      - run: npm ci
-
-      # Only what the app uses at runtime, which is what gets shipped inside the package.
-      # This has to exist before `cargo test`: the Tauri build script validates that the
-      # bundled resource path (`../.toolchain-dist`) is there, and a clean runner does not
-      # have it yet. `.toolchain` itself is left untouched, so the tests still use the
-      # full compiler and core.
-      - name: trim the toolchain for shipping
-        run: ./scripts/build-toolchain-dist.sh
-
-      # A release used to package whatever built, without running the suites that say it
-      # works — so a regression could ship as a green release.
       - name: versions agree with the tag
         if: startsWith(github.ref, 'refs/tags/')
-        run: npm run check:versions -- "${GITHUB_REF_NAME}"
+        run: node scripts/check-versions.mjs "$GITHUB_REF_NAME"
 
-      - name: type-check
-        run: npm run check
+      # A tag should not publish a package that has not passed its own suite.
+      - name: tests
+        run: cargo test --manifest-path spike/egui/Cargo.toml
 
-      - name: frontend tests
-        run: npm test
+      # Fetched rather than installed: appimagetool packages are not in the distro
+      # and would drag in their own dependence on the runner's FUSE anyway. It is
+      # itself an AppImage, so it runs with APPIMAGE_EXTRACT_AND_RUN below.
+      - name: appimagetool
+        run: |
+          sudo wget -q -O /usr/local/bin/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          sudo chmod +x /usr/local/bin/appimagetool
 
-      - name: engine tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
-
-      # deb and rpm only. Tauri's AppImage bundler dies inside linuxdeploy with no output,
-      # on this machine and on a clean runner alike, so it is not allowed to block a release
-      # that otherwise works. scripts/make-appimage.sh builds one from the deb afterwards.
-      - name: build packages
-        run: npm run tauri build -- --bundles deb,rpm
+      # One command for every format: scripts/package.sh stages the payload once and
+      # wraps it four ways, so the four packages cannot disagree about what is inside.
+      - name: packages
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: ./scripts/package.sh all
 
       # Prove the package can do its job before it is offered to anyone: compile the
       # shipped preset sketches using only the toolchain inside the .deb.
@@ -83,8 +85,8 @@ jobs:
       - name: the package builds a sketch
         run: |
           mkdir -p /tmp/installed
-          ar p src-tauri/target/release/bundle/deb/*.deb data.tar.gz | tar -xzf - -C /tmp/installed
-          TC=/tmp/installed/usr/lib/Croquis/toolchain
+          ar p dist/croquis_*_amd64.deb data.tar.xz | tar -xJf - -C /tmp/installed
+          TC=/tmp/installed/usr/lib/croquis/toolchain
           test -x "$TC/avr/bin/avr-g++"
           printf '#include <Arduino.h>\nvoid setup(){pinMode(13,OUTPUT);}\nvoid loop(){digitalWrite(13,HIGH);delay(500);digitalWrite(13,LOW);delay(500);}\n' > /tmp/sk.cpp
           "$TC/avr/bin/avr-g++" -mmcu=atmega328p -DF_CPU=16000000L -DARDUINO=10806 -Os \
@@ -109,18 +111,24 @@ jobs:
           test -s /tmp/sk.hex
           echo "the packaged toolchain builds firmware: $(wc -c < /tmp/sk.hex) bytes of hex"
 
-      # Tauri's bundler cannot make one, so build it from the .deb we just proved works.
-      - name: AppImage from the .deb
-        run: ./scripts/make-appimage.sh
+      # The bundled Arduino libraries are the other half of what a package has to
+      # carry: a sketch that includes one compiles only if they are where the engine
+      # looks, which is next to the code.
+      - name: the package carries the Arduino libraries
+        run: |
+          test -d /tmp/installed/usr/lib/croquis/libraries/DHT
+          test -f /tmp/installed/usr/lib/croquis/libraries/DHT/DHT.h
+          echo "libraries present: $(ls /tmp/installed/usr/lib/croquis/libraries | wc -l)"
 
       - uses: actions/upload-artifact@v4
         with:
           name: croquis-linux
           path: |
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/rpm/*.rpm
-            src-tauri/target/release/bundle/appimage/*.AppImage
-          if-no-files-found: warn # the AppImage may fail; the others still matter
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+            dist/*.pkg.tar.zst
+          if-no-files-found: warn
 
       # Notes live in the repository, one file per tag. An inline `body` used to
       # overwrite whatever had been written on the release — including a manual
@@ -136,6 +144,7 @@ jobs:
           draft: true
           body_path: docs/releases/${{ github.ref_name }}.md
           files: |
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/rpm/*.rpm
-            src-tauri/target/release/bundle/appimage/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+            dist/*.pkg.tar.zst
