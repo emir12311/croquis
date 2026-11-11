@@ -25,7 +25,6 @@ use croquis_core::netlist::{
 use croquis_core::route::{expand_path, leg_bend, Point as CorePoint};
 use croquis_core::shift_register::{step_shift_register, ShiftState, ShiftWiring};
 use croquis_sim::engine::{self, SimEvent};
-use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod art;
@@ -138,30 +137,6 @@ const BORDER: Color32 = Color32::from_rgb(0x35, 0x35, 0x3a);
 const MUTED: Color32 = Color32::from_rgb(0xa6, 0xa4, 0xa0);
 const ERROR_TEXT: Color32 = Color32::from_rgb(0xe5, 0x48, 0x4d);
 const WARNING_TEXT: Color32 = Color32::from_rgb(0xd9, 0xa4, 0x41);
-
-/// The sketch editor's id. A diagnostic jump writes the caret through
-/// `TextEditState`, and that needs the widget to keep one id across frames.
-fn sketch_editor_id() -> egui::Id {
-    egui::Id::unique("croquis-sketch-editor")
-}
-
-/// Put the caret where a diagnostic points. `false` means the editor has not
-/// written its state yet (it has not been shown), so there is nothing to move.
-///
-/// Unused when the `code-editor` feature is on: that widget has no `TextEditState`
-/// to write, so jumping to a line is not something it can do.
-#[cfg_attr(feature = "code-editor", allow(dead_code))]
-fn place_caret(ctx: &egui::Context, sketch: &str, line: usize, column: usize) -> bool {
-    let index = editor::line_col_to_char_index(sketch, line, column);
-    let Some(mut state) = egui::text_edit::TextEditState::load(ctx, sketch_editor_id()) else {
-        return false;
-    };
-    state
-        .cursor
-        .set_char_range(Some(CCursorRange::one(CCursor::new(index))));
-    state.store(ctx, sketch_editor_id());
-    true
-}
 
 /// The palette's thumbnails: the part itself, small, rasterised once.
 ///
@@ -815,12 +790,11 @@ struct Spike {
     /// Which docked panels are open. A closed panel leaves a rail behind, which
     /// is how v0.2 keeps the editor's history while clipping it to nothing.
     sketch_open: bool,
-    /// The completer the optional editor widget carries between frames.
+    /// The completer the editor widget carries between frames.
     ///
     /// It is where the widget keeps its completion dictionary, its memory of words
     /// already typed, and the indentation of the line above — so re-creating it
     /// every frame would lose auto-indent and autocomplete both.
-    #[cfg(feature = "code-editor")]
     code_completer: Option<egui_code_editor::Completer>,
     components_open: bool,
     serial_open: bool,
@@ -1032,7 +1006,6 @@ impl Default for Spike {
             pin_frequency: HashMap::new(),
             pin13: false,
             sketch_open: true,
-            #[cfg(feature = "code-editor")]
             code_completer: None,
             components_open: true,
             serial_open: false,
@@ -2355,10 +2328,12 @@ impl Spike {
                 .all(|index| self.parts.get(*index).is_some_and(|part| part.kind == "uno"))
     }
 
-    /// Raise the sketch panel and put the caret in it.
-    fn edit_code(&mut self, ctx: &egui::Context) {
+    /// Raise the sketch panel.
+    ///
+    /// It does not put the caret anywhere: the editor widget exposes no way to
+    /// place one, so opening the panel is as far as "edit code" can honestly go.
+    fn edit_code(&mut self) {
         self.sketch_open = true;
-        ctx.memory_mut(|memory| memory.request_focus(sketch_editor_id()));
     }
 
     /// The palette as menu rows: the default, then every named colour.
@@ -3080,7 +3055,6 @@ impl eframe::App for Spike {
                     // the shell's surface showed below it as a second, lighter panel.
                     // Painting the whole area in the editor's colour leaves one
                     // surface instead of a dark box on a grey one.
-                    #[cfg(feature = "code-editor")]
                     ui.painter()
                         .rect_filled(ui.max_rect(), 0.0, editor::code_theme().bg);
                     let texts = self.texts.clone();
@@ -3090,14 +3064,6 @@ impl eframe::App for Spike {
                             self.sketch_open = false;
                         }
                     });
-                    // The hand-rolled editor: a TextEdit with our own layouter. Kept
-                    // for the `code-editor` feature being off, which is the default.
-                    #[cfg(not(feature = "code-editor"))]
-                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
-                        let mut job = editor::highlight(text.as_str());
-                        job.wrap.max_width = wrap_width;
-                        ui.fonts_mut(|fonts| fonts.layout_job(job))
-                    };
                     // The editor is the panel: no well, no border, no inset, and
                     // it fills the height it is given.
                     let widgets = &mut ui.style_mut().visuals.widgets;
@@ -3108,72 +3074,44 @@ impl eframe::App for Spike {
                         .id_salt("sketch-editor")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            #[cfg(feature = "code-editor")]
-                            {
-                                // The ready-made widget with its completer wired up.
-                                // Without the completer it is only a coloured TextEdit:
-                                // completion, the memory of words already typed and the
-                                // auto-indent that keeps the line above's indentation
-                                // all live on it.
-                                let syntax = editor::arduino_syntax();
-                                let completer = self.code_completer.get_or_insert_with(|| {
-                                    egui_code_editor::Completer::new_with_syntax(&syntax)
-                                        .with_auto_indent()
-                                        .with_user_words()
-                                });
-                                // The widget sizes itself to a row count, so work out
-                                // how many rows the panel holds and ask for all of
-                                // them: a short sketch then has its editing surface
-                                // over the whole panel rather than only where the text
-                                // happens to reach.
-                                let font = egui::TextStyle::Monospace.resolve(ui.style());
-                                let row = ui.fonts_mut(|fonts| {
-                                    fonts.row_height(&egui::FontId::monospace(font.size))
-                                });
-                                let rows = (ui.available_height() / row.max(1.0))
-                                    .floor()
-                                    .max(1.0) as usize;
-                                egui_code_editor::CodeEditor::default()
-                                    .id_source("croquis-sketch-editor")
-                                    .with_ui_fontsize(ui)
-                                    .with_theme(editor::code_theme())
-                                    .with_rows(rows)
-                                    // Wrap, not numbers. The crate ignores `wrap`
-                                    // whenever `numlines` is on — the gutter is drawn
-                                    // per line and wrapping would break its alignment —
-                                    // so a sketch with a long comment has to pick one.
-                                    // Wrapping wins: a line cut off at the panel edge
-                                    // hides code, a missing gutter only hides a count.
-                                    .with_numlines(false)
-                                    .with_wrap(true)
-                                    .show_with_completer(ui, &mut self.sketch, &syntax, completer);
-                                // Jump-to-line works by writing a TextEditState, so it
-                                // means nothing for this widget. Drop the request
-                                // instead of leaving it pending forever.
-                                self.pending_jump = None;
-                            }
-                            #[cfg(not(feature = "code-editor"))]
-                            {
-                                let editor = ui.add_sized(
-                                    ui.available_size(),
-                                    egui::TextEdit::multiline(&mut self.sketch)
-                                        .id(sketch_editor_id())
-                                        .code_editor()
-                                        .desired_width(f32::INFINITY)
-                                        .layouter(&mut layouter),
-                                );
-                                // A click on a problem in the serial panel asks for
-                                // the caret here. The state is written after the
-                                // widget has run, so the next frame both shows the
-                                // caret and scrolls it into view.
-                                if let Some((line, column)) = self.pending_jump.take() {
-                                    // TextEdit scrolls when the range changes.
-                                    if place_caret(&ctx, &self.sketch, line, column) {
-                                        editor.request_focus();
-                                        ctx.request_repaint();
-                                    }
-                                }
-                            }
+                            // Completion, the memory of words already typed and the
+                            // auto-indent that keeps the line above's indentation all
+                            // live on the completer, so it is kept across frames.
+                            let syntax = editor::arduino_syntax();
+                            let completer = self.code_completer.get_or_insert_with(|| {
+                                egui_code_editor::Completer::new_with_syntax(&syntax)
+                                    .with_auto_indent()
+                                    .with_user_words()
+                            });
+                            // The widget sizes itself to a row count, so work out how
+                            // many rows the panel holds and ask for all of them: a
+                            // short sketch then has its editing surface over the whole
+                            // panel rather than only where the text happens to reach.
+                            let font = egui::TextStyle::Monospace.resolve(ui.style());
+                            let row = ui.fonts_mut(|fonts| {
+                                fonts.row_height(&egui::FontId::monospace(font.size))
+                            });
+                            let rows =
+                                (ui.available_height() / row.max(1.0)).floor().max(1.0) as usize;
+                            egui_code_editor::CodeEditor::default()
+                                .id_source("croquis-sketch-editor")
+                                .with_ui_fontsize(ui)
+                                .with_theme(editor::code_theme())
+                                .with_rows(rows)
+                                // Wrap, not numbers. The crate ignores `wrap` whenever
+                                // `numlines` is on — the gutter is drawn per line and
+                                // wrapping would break its alignment — so a sketch with
+                                // a long comment has to pick one. Wrapping wins: a line
+                                // cut off at the panel edge hides code, a missing gutter
+                                // only hides a count.
+                                .with_numlines(false)
+                                .with_wrap(true)
+                                .show_with_completer(ui, &mut self.sketch, &syntax, completer);
+                            // A diagnostic's line cannot be jumped to: that needs a
+                            // caret API this widget does not expose. The request is
+                            // cleared rather than left pending, so it cannot fire later
+                            // against text that has moved.
+                            let _ = self.pending_jump.take();
                         });
                 });
 } else {
@@ -3388,7 +3326,7 @@ impl eframe::App for Spike {
                             if self.selection_is_mcu() {
                                 ui.separator();
                                 if ui.button(menu_texts.t("edit.edit_code")).clicked() {
-                                    self.edit_code(&ctx);
+                                    self.edit_code();
                                     ui.close();
                                 }
                             }
@@ -6943,23 +6881,6 @@ mod tests {
         if let Some(mut sim) = spike.sim.take() {
             sim.stop();
         }
-    }
-
-    #[test]
-    fn a_diagnostic_jump_writes_the_caret_into_the_editor_state() {
-        // The half of a jump that is not the pointer: given the editor's state,
-        // the caret lands on the character the compiler named.
-        let ctx = egui::Context::default();
-        egui::text_edit::TextEditState::default().store(&ctx, sketch_editor_id());
-        let sketch = "void setup() {\n  pinModee(13, OUTPUT);\n}\n";
-        assert!(place_caret(&ctx, sketch, 2, 3));
-        let state = egui::text_edit::TextEditState::load(&ctx, sketch_editor_id())
-            .expect("the state is still there");
-        assert_eq!(
-            state.cursor.char_range(),
-            Some(CCursorRange::one(CCursor::new(17))),
-            "line 2, column 3 is the 'p' of pinModee"
-        );
     }
 
     #[test]

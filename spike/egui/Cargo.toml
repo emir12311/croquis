@@ -16,14 +16,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rfd = "0.17"
 rodio = { version = "0.23", default-features = false, features = ["playback"] }
-# The editor widget, on by default: it is what the app ships with. The feature
-# still exists so the hand-rolled TextEdit can be built with `--no-default-features`
-# and compared — that fallback is what makes trying things reversible.
-egui_code_editor = { version = "0.5", optional = true }
-
-[features]
-default = ["code-editor"]
-code-editor = ["dep:egui_code_editor"]
+# The sketch editor. Not optional and not a feature: it *is* the app's editor.
+egui_code_editor = "0.5"
 
 [dev-dependencies]
 # The preset corpus is checked against docs/v0.3-baseline.json, whose sketch

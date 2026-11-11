@@ -60,11 +60,6 @@ jobs:
       - name: app tests
         run: cargo test --manifest-path spike/egui/Cargo.toml
 
-      # The editor widget is a dependency we chose, so the build without it has to
-      # keep working — that is what makes it a choice rather than a commitment.
-      - name: app tests without the editor widget
-        run: cargo test --manifest-path spike/egui/Cargo.toml --no-default-features
-
       - name: engine tests
         run: cargo test --manifest-path crates/croquis-core/Cargo.toml
 
