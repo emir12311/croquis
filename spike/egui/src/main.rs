@@ -272,16 +272,15 @@ fn palette_tile(
     if !ui.is_rect_visible(rect) {
         return response;
     }
-    let raised = Color32::from_rgb(0x26, 0x26, 0x2a);
     let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, raised);
+    painter.rect_filled(rect, 0.0, palette().raised);
     painter.rect_stroke(
         rect,
         0.0,
         egui::Stroke::new(
             1.0,
             if response.hovered() && enabled {
-                Color32::from_rgb(0xd9, 0xa4, 0x41)
+                palette().accent
             } else {
                 palette().border
             },
@@ -310,8 +309,12 @@ fn palette_tile(
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             if enabled {
                 Color32::WHITE
+            } else if light_theme() {
+                // A white tint brightens the art on a light tile instead of
+                // dimming it, so the tint has to follow the background.
+                Color32::from_black_alpha(110)
             } else {
-                Color32::from_rgba_unmultiplied(255, 255, 255, 110)
+                Color32::from_white_alpha(110)
             },
         );
     }
@@ -330,7 +333,13 @@ fn palette_tile(
         egui::Label::new(
             egui::RichText::new(label)
                 .size(11.0)
-                .color(if enabled { palette().muted } else { Color32::from_rgb(0x64, 0x64, 0x68) }),
+                .color(if enabled {
+                    palette().muted
+                } else {
+                    // Dimmer than an enabled name, without a fixed grey that only
+                    // works on one background.
+                    palette().muted.gamma_multiply(0.6)
+                }),
         )
         .selectable(false)
         .wrap(),
@@ -3065,7 +3074,7 @@ impl eframe::App for Spike {
                 widgets.inactive.bg_fill = Color32::TRANSPARENT;
                 widgets.inactive.bg_stroke = egui::Stroke::NONE;
                 widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-                widgets.hovered.bg_fill = Color32::from_rgb(0x2a, 0x2a, 0x2e);
+                widgets.hovered.bg_fill = palette().raised;
                 widgets.hovered.bg_stroke = egui::Stroke::new(1.0, palette().border);
                 let bar = ui.max_rect();
                 ui.painter().hline(
@@ -3209,7 +3218,7 @@ impl eframe::App for Spike {
                             texts.t("run.stopped")
                         });
                         if let Some(error) = &self.file_error {
-                            ui.colored_label(Color32::from_rgb(0xe5, 0x48, 0x4d), error);
+                            ui.colored_label(palette().error, error);
                         }
                         if let Some(error) = &self.run_error {
                             // Right to left, so the detail is added first and
@@ -3503,10 +3512,7 @@ impl eframe::App for Spike {
                                     let changed = properties::row(ui, part, &self.texts, !self.running);
                                     if let Some(warning) = warning {
                                         ui.separator();
-                                        ui.colored_label(
-                                            Color32::from_rgb(0xd9, 0xa4, 0x41),
-                                            warning,
-                                        );
+                                        ui.colored_label(palette().warning, warning);
                                     }
                                     changed
                                 }
