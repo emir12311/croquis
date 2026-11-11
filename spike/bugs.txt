@@ -13,11 +13,15 @@ list of finished work.
 Still open — real work, not bugs
 --------------------------------
 
-1. The code editor's QoL is poor.
-   Multiline edit, syntax colouring, completion and diagnostic jumps all work
-   (see Spike B), but there is no bracket matching, no auto-indent, no comment
-   toggle and no grouped undo. Judgement call, not a defect: it needs a
-   decision about which of those are worth having before it needs code.
+1. The editor's ceiling is the widget's, not ours.
+   The editor is `egui_code_editor`, merged in with no feature flag and no
+   fallback behind it. It brings wrapping, completion, auto-indent, a memory of
+   words already typed and Github Dark colouring on the shell's grey. What it
+   has no API for is what it cannot do: line numbers, auto-closing brackets and
+   quotes, find/replace, bracket matching, and jumping to a diagnostic's line.
+   None of those are bugs to chase in our code — replacing the widget with our
+   own editor is the only way past them, and until then clicking a diagnostic
+   opens the panel but cannot place the caret.
 
 
 Done — the language system (landed 2026-11-10)
