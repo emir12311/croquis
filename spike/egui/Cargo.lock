@@ -524,16 +524,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "croquis-core"
-version = "0.2.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "croquis-egui-spike"
-version = "0.1.0"
+name = "croquis"
+version = "0.3.0"
 dependencies = [
  "croquis-core",
  "croquis-sim",
@@ -545,6 +537,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "croquis-core"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
