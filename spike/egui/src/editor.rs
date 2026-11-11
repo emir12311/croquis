@@ -164,6 +164,14 @@ pub fn arduino_syntax() -> egui_code_editor::Syntax {
 #[cfg(feature = "code-editor")]
 pub fn code_theme() -> &'static egui_code_editor::Color32Theme {
     use std::sync::OnceLock;
+    /// The colour the editor draws its background in.
+    ///
+    /// The theme's own background is near-black (`#0d1117`), which read as a
+    /// different surface from the rest of the shell: a black slab inside a grey
+    /// panel. This is the shell's own SURFACE, so the panel is one colour — and it
+    /// is still dark enough for the theme's syntax colours to carry.
+    const EDITOR_BG: Color32 = Color32::from_rgb(0x21, 0x21, 0x24);
+
     static THEME: OnceLock<egui_code_editor::Color32Theme> = OnceLock::new();
     THEME.get_or_init(|| {
         let chosen = egui_code_editor::DEFAULT_THEMES
@@ -171,7 +179,9 @@ pub fn code_theme() -> &'static egui_code_editor::Color32Theme {
             .find(|theme| theme.name() == "Github Dark")
             .copied()
             .unwrap_or(egui_code_editor::DEFAULT_THEMES[0]);
-        egui_code_editor::Color32Theme::from(chosen)
+        let mut theme = egui_code_editor::Color32Theme::from(chosen);
+        theme.bg = EDITOR_BG;
+        theme
     })
 }
 
