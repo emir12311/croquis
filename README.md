@@ -56,25 +56,27 @@ Updates will come in the future.
 
 ## Installation
 
+Every package is self-contained: it carries the AVR toolchain and the bundled Arduino libraries, so a
+sketch compiles on a machine that has never had `avr-gcc` installed.
+
 ### AppImage — recommended
 
-Download it from [Releases](https://github.com/emir12311/croquis/releases/latest), then:
+Download `croquis-<version>-x86_64.AppImage` from
+[Releases](https://github.com/emir12311/croquis/releases/latest), then:
 
 ```bash
-chmod +x Croquis_*.AppImage
-./Croquis_*.AppImage
+chmod +x croquis-*.AppImage
+./croquis-*.AppImage
 ```
 
-One file, nothing to install, no root, works on any distribution. On first launch it adds itself to
-your application menu, so after that you start it like anything else. Move the file and the menu entry
-follows on the next run; delete it and there is nothing left behind.
+One file, nothing to install, no root, works on any distribution. Delete it and nothing is left behind.
 
 ### Debian, Ubuntu, Mint and anything else on apt
 
 From the same [Releases](https://github.com/emir12311/croquis/releases/latest) page:
 
 ```bash
-sudo apt install ./Croquis_*.deb
+sudo apt install ./croquis_*.deb
 ```
 
 Installs the app, its icon and the menu entry together. `sudo apt remove croquis` removes all of it.
@@ -82,60 +84,56 @@ Installs the app, its icon and the menu entry together. `sudo apt remove croquis
 ### Fedora, openSUSE and anything else on rpm
 
 ```bash
-sudo dnf install ./Croquis-*.rpm   # or: sudo zypper install ./Croquis-*.rpm
+sudo dnf install ./croquis-*.rpm   # or: sudo zypper install ./croquis-*.rpm
 ```
 
 ### Arch, Artix, Endeavour
 
 ```bash
-git clone https://github.com/emir12311/croquis
-cd croquis/packaging/arch
-makepkg -si
+sudo pacman -U croquis-*.pkg.tar.zst
 ```
 
-This builds from source — a few minutes — because there is no Arch repository for it.
+A prebuilt package rather than a `PKGBUILD`. There is no AUR entry for Croquis — AUR registration has
+been closed since the June 2026 supply-chain attacks — and a source recipe could not ship the bundled
+toolchain anyway, which is the whole point of the package. `sudo pacman -R croquis` removes it.
 
 ### From source
 
-Any distribution, if none of the above fit. Requirements:
+Requirements:
 
 * A **glibc** Linux — desktop is the only target so far
-* [Node](https://nodejs.org) and `npm`
-* [Rust](https://rustup.rs)
-* WebKitGTK — `webkit2gtk-4.1`
+* [Rust](https://rustup.rs) and a C toolchain
+* ALSA, and the usual X11/Wayland/GL development headers (`alsa-lib`, `libxkbcommon`, `libglvnd` on Arch)
 
 ```bash
 git clone https://github.com/emir12311/croquis
 cd croquis
-./scripts/setup-toolchain.sh   # simavr, avr-gcc and the Arduino core, ~36 MB
-npm install
-./scripts/build-toolchain-dist.sh   # trims it to what ships: 276 MB → 153 MB
-npm run tauri build
+./scripts/setup-toolchain.sh        # simavr, avr-gcc and the Arduino core, ~36 MB
+cargo run --release --manifest-path spike/egui/Cargo.toml
 ```
 
-`npm run tauri dev` runs it live instead. The dev server is pinned to port `5173`; to run anything else
-alongside it, use `npm run dev -- --port 5199`.
+`./scripts/package.sh all` builds the four packages above: it stages one payload and wraps it as a
+.deb, an .rpm, an AppImage and an Arch package, so they cannot disagree about what is inside.
 
 ## Usage
 
-Write a sketch, place parts, wire them up, and press **Run** in the top right of the circuit bar. While a sketch runs the circuit is frozen — **Restart** applies an edited sketch, **Stop** lets you rewire.
+Write a sketch, place parts, wire them up, and press **Run** in the top right of the circuit bar. While a sketch runs the circuit is frozen — **Stop** lets you rewire, and **Run** again applies an edited sketch.
 
-Compiler errors appear in the serial panel with their line number; click one to put the caret there. While a sketch runs, the serial monitor's input row sends text to `Serial.read()` — with an optional trailing newline. Closing the window with unsaved changes asks before discarding them.
+Compiler errors appear in the serial panel with their line number. While a sketch runs, the serial monitor's input row sends text to `Serial.read()` — with an optional trailing newline. Closing the window with unsaved changes asks before discarding them.
 
 | Input | Does |
 | --- | --- |
 | Click a pin, then another pin | Wire them together |
 | Click the same two pins again | Remove that wire |
 | Click empty space mid-wire | Drop a corner, to route around a part |
-| Drag a wire's middle | Slide that segment |
+| Select a wire, drag one of its corners | Move that bend |
 | Select a wire, drag its endpoint | Re-route it to another pin |
-| Right-drag on empty space | Select everything inside the box |
+| Drag empty space | Select everything inside the box |
 | `Ctrl+A` | Select everything |
 | Drag a part | Move it — the whole selection, if several are picked |
-| Arrow keys | Nudge the selection one grid step |
 | `R` / `Shift+R` | Rotate 90° / 180° |
 | Right-click a part or a wire | Copy, cut, duplicate, rotate, delete — and **Edit code** on the Uno |
-| Drag empty canvas | Pan |
+| Right-drag or middle-drag | Pan |
 | Wheel · `Ctrl +` · `Ctrl -` · `Ctrl 0` | Zoom toward the pointer · out · reset |
 | `Ctrl+S` · `Ctrl+Shift+S` · `Ctrl+O` · `Ctrl+N` | Save · save as · open · new |
 | `Ctrl+Z` · `Ctrl+Shift+Z` | Undo · redo |
