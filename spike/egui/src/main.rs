@@ -860,6 +860,25 @@ impl Spike {
         spike
     }
 
+    /// A Spike holding the Blink example.
+    ///
+    /// The app starts on a blank canvas now, but almost every test is about
+    /// editing a circuit that already exists — so they build from this rather
+    /// than each one loading the preset itself.
+    #[cfg(test)]
+    fn with_blink() -> Self {
+        let mut spike = Self::default();
+        let (parts, wires, sketch) = scene::load_blink_document();
+        spike.parts = parts;
+        spike.wires = wires;
+        spike.sketch = sketch;
+        // The history baseline is seeded by `Default` from the blank canvas, so
+        // without this an undo would restore "empty" rather than the circuit the
+        // test just loaded.
+        spike.reset_history();
+        spike
+    }
+
     fn snapshot(&self) -> Snapshot {
         Snapshot {
             parts: self.parts.clone(),
@@ -950,8 +969,10 @@ impl Default for Spike {
             let (parts, wires, sketch) = scene::load_diagram_file(&path);
             (parts, wires, sketch, Some(path))
         } else {
-            let (parts, wires) = scene::load_blink();
-            (parts, wires, scene::blink_sketch(), None)
+            // A blank canvas. This used to open on the Blink example, which made
+            // the app look like a viewer for someone else's circuit and hid what
+            // an empty document looks like. `New` starts this way; so does this.
+            (Vec::new(), Vec::new(), SKETCH_TEMPLATE.to_string(), None)
         };
         let auto_run = std::env::var("CROQUIS_UI_AUTORUN").is_ok();
         let mut spike = Self {
@@ -5048,7 +5069,7 @@ mod tests {
 
     #[test]
     fn a_quarter_turn_swaps_the_box_and_carries_the_pins() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let led = spike
             .parts
             .iter()
@@ -5076,7 +5097,7 @@ mod tests {
 
     #[test]
     fn four_quarter_turns_come_back_where_they_started() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.selection.parts = vec![0, 1, 2];
         let before: Vec<Pos2> = (0..spike.parts.len())
             .map(|index| spike.parts[index].pin_world(0))
@@ -5092,7 +5113,7 @@ mod tests {
 
     #[test]
     fn a_turn_survives_a_save_and_a_load() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.selection.parts = vec![0, 1, 2];
         spike.rotate_selection(90.0);
         let path = std::env::temp_dir().join("croquis-rotate-roundtrip.json");
@@ -5118,7 +5139,7 @@ mod tests {
     #[test]
     fn deleting_a_parts_takes_its_wires_and_leaves_the_rest_alone() {
         // Blink: the Uno, a resistor and an LED, wired end to end.
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         assert_eq!(spike.parts.len(), 3);
         assert_eq!(spike.wires.len(), 3);
 
@@ -5142,7 +5163,7 @@ mod tests {
     fn deleting_one_of_two_parts_keeps_the_others_wires_indexed() {
         // Four parts, wired 0-1, 1-2, 2-3: removing part 1 must drop the first
         // two wires and pull the third's indices down with it.
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let kinds = [
             croquis_core::catalogue::PartKind::Resistor,
             croquis_core::catalogue::PartKind::Resistor,
@@ -5198,7 +5219,7 @@ mod tests {
         // Cmd/Ctrl+C is translated into Event::Copy before it reaches the app
         // (`NativeOptions::clipboard_shortcuts`), so binding Key::C copied nothing
         // — which is why Delete and R worked and these three never did.
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.selection.select_part(1);
         let output = shortcuts_with(&mut spike, vec![egui::Event::Copy]);
         assert!(
@@ -5218,7 +5239,7 @@ mod tests {
 
     #[test]
     fn a_paste_event_pastes_the_circuit() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.selection.select_part(1);
         shortcuts_with(&mut spike, vec![egui::Event::Copy]);
         let copied = spike.clipboard.parts.len();
@@ -5234,7 +5255,7 @@ mod tests {
 
     #[test]
     fn a_cut_event_copies_and_deletes() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let before = spike.parts.len();
         spike.selection.select_part(1);
         shortcuts_with(&mut spike, vec![egui::Event::Cut]);
@@ -5248,7 +5269,7 @@ mod tests {
     #[test]
     fn a_key_that_is_not_a_clipboard_shortcut_still_arrives_as_a_key() {
         // Delete is not translated, so it keeps working as a key press.
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let before = spike.parts.len();
         spike.selection.select_part(1);
         shortcuts_with(
@@ -5266,7 +5287,7 @@ mod tests {
 
     #[test]
     fn duplicating_leaves_what_was_copied_alone() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         // Something the reader copied earlier, which duplicating must not eat.
         spike.selection.select_part(1);
         spike.copy_selection();
@@ -5284,7 +5305,7 @@ mod tests {
 
     #[test]
     fn edit_code_is_offered_only_for_microcontrollers() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let uno = spike
             .parts
             .iter()
@@ -5309,7 +5330,7 @@ mod tests {
 
     #[test]
     fn copy_and_paste_copies_the_wiring_between_the_parts() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.selection.parts = vec![0, 1, 2];
         spike.copy_selection();
         spike.paste();
@@ -5336,7 +5357,7 @@ mod tests {
 
     #[test]
     fn a_pasted_wire_keeps_its_bends() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.wires[0].waypoints = vec![Pos2::new(80.0, 90.0)];
         spike.selection.parts = vec![0, 1, 2];
         spike.copy_selection();
@@ -5407,7 +5428,7 @@ mod tests {
 
     #[test]
     fn the_marquee_selects_the_parts_it_covers() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let led = spike
             .parts
             .iter()
@@ -5578,7 +5599,7 @@ mod tests {
     fn the_app_starts_in_the_language_it_is_given() {
         // `Default` must stay English so no test depends on this machine's saved
         // config; starting_in is the one that honours a choice.
-        let english = Spike::default();
+        let english = Spike::with_blink();
         assert_eq!(english.texts.locale(), locales::Locale::English);
         assert_eq!(english.texts.t("menu.file"), "File");
         let turkish = Spike::starting_in(locales::Locale::Turkish);
@@ -5677,7 +5698,7 @@ mod tests {
 
     #[test]
     fn a_new_document_starts_from_the_sketch_template() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         assert!(!spike.parts.is_empty(), "the preset loaded first");
         spike.new_document();
         assert!(spike.parts.is_empty(), "and the document is empty");
@@ -5851,7 +5872,7 @@ mod tests {
 
     #[test]
     fn an_edit_can_be_undone_and_redone() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let before = spike.parts.len();
         spike.selection.select_part(1);
         spike.delete_selection();
@@ -5867,7 +5888,7 @@ mod tests {
 
     #[test]
     fn a_drag_is_one_step_and_not_one_per_frame() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let start = spike.parts[0].center;
         // While the pointer is down the drag is not finished, so nothing is
         // committed however many frames it lasts.
@@ -5891,7 +5912,7 @@ mod tests {
 
     #[test]
     fn editing_after_an_undo_drops_what_was_ahead() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let before = spike.parts.len();
         spike.selection.select_part(1);
         spike.delete_selection();
@@ -5912,7 +5933,7 @@ mod tests {
 
     #[test]
     fn another_document_starts_another_history() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.selection.select_part(1);
         spike.delete_selection();
         spike.commit_history(false);
@@ -6230,7 +6251,7 @@ mod tests {
 
     #[test]
     fn nothing_moves_while_the_circuit_runs() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.running = true;
         // A plain part cannot be picked up.
         let centre = spike.parts[0].center;
@@ -6263,7 +6284,7 @@ mod tests {
 
     #[test]
     fn a_wire_can_be_clicked_and_a_point_away_from_it_cannot() {
-        let spike = Spike::default();
+        let spike = Spike::with_blink();
         let camera = Camera::default();
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
         let path = wire_screen_path(&spike.parts, &spike.wires[0], camera, rect);
@@ -6289,7 +6310,7 @@ mod tests {
 
     #[test]
     fn a_marquee_catches_a_wire_that_crosses_it() {
-        let spike = Spike::default();
+        let spike = Spike::with_blink();
         let camera = Camera::default();
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
         let path = wire_screen_path(&spike.parts, &spike.wires[0], camera, rect);
@@ -6579,7 +6600,7 @@ mod tests {
 
     #[test]
     fn a_chosen_colour_reaches_every_selected_wire() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.selection.wires = vec![0];
         spike.set_wire_colour(Some("blue"));
         assert_eq!(spike.wires[0].colour.as_deref(), Some("blue"));
@@ -6761,7 +6782,7 @@ mod tests {
         // the panel's write path, then the solve it triggers.
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets/digital-sensors.json");
         let (parts, wires, _) = scene::load_diagram_file(&path);
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let tilt = parts
             .iter()
             .position(|part| part.id == "tilt1")
@@ -6862,7 +6883,7 @@ mod tests {
         let sim = engine::Simulator::start(Path::new(&firmware.elf), emit, false)
             .expect("the simulator starts");
 
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.parts = parts;
         spike.wires = wires;
         spike.sim = Some(sim);
@@ -6960,7 +6981,7 @@ mod tests {
         let sim = engine::Simulator::start(Path::new(&firmware.elf), emit, false)
             .expect("the simulator starts");
 
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.parts = parts;
         spike.wires = wires;
         spike.sim = Some(sim);
@@ -7017,7 +7038,7 @@ mod tests {
 
     #[test]
     fn a_bend_is_pinned_while_routing_and_kept_by_the_wire() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.wires.clear();
         let (a, b) = ((0usize, 1usize), (2usize, 3usize));
 
@@ -7049,7 +7070,7 @@ mod tests {
 
     #[test]
     fn cancelling_gives_up_the_wire_and_its_bends() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.wire_press((0, 1));
         spike.wire_bend(Pos2::new(50.0, 50.0));
         spike.cancel_wire();
@@ -7059,7 +7080,7 @@ mod tests {
 
     #[test]
     fn a_wire_needs_two_different_pins() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         // `default()` loads whatever preset is in the environment.
         spike.wires.clear();
         let (a, b) = ((0usize, 1usize), (2usize, 3usize));
@@ -7086,7 +7107,7 @@ mod tests {
 
     #[test]
     fn a_release_away_from_a_pin_leaves_the_wire_armed() {
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.wires.clear();
         spike.wire_press((0, 1));
         spike.wire_release(None);
@@ -7101,7 +7122,7 @@ mod tests {
         // A pressed part is still a part. Buttons and keypads used to take the
         // press and never enter the drag state, so they could not be moved at
         // all — which is what the owner hit.
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.parts = vec![scene::part_from_kind(
             PartKind::Pushbutton,
             Pos2::new(100.0, 100.0),
@@ -7118,7 +7139,7 @@ mod tests {
         );
         assert_eq!(spike.dragging, None, "a press alone must not move it");
 
-        let mut pad = Spike::default();
+        let mut pad = Spike::with_blink();
         pad.parts = vec![scene::part_from_kind(
             PartKind::MembraneKeypad,
             Pos2::new(100.0, 100.0),
@@ -7177,7 +7198,7 @@ mod tests {
             wire(("led", "C"), ("uno", "GND.1")),
         ];
 
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.parts = parts;
         spike.wires = wires;
         let lights = |spike: &Spike| {
@@ -7279,7 +7300,7 @@ mod tests {
     #[test]
     fn a_press_picks_up_the_control_under_it() {
         use croquis_core::catalogue::PartKind;
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         let button =
             scene::part_from_kind(PartKind::Pushbutton, Pos2::ZERO, "b".into()).expect("button");
         let pad = scene::part_from_kind(PartKind::MembraneKeypad, Pos2::new(400.0, 0.0), "pad".into())
@@ -7456,7 +7477,7 @@ mod tests {
             .expect("four-digit part")
             .id
             .clone();
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.parts = parts;
         spike.outputs.insert(
             display.clone(),
@@ -7494,7 +7515,7 @@ mod tests {
             .expect("servo part")
             .id
             .clone();
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.parts = parts;
         spike.outputs.insert(
             servo.clone(),
@@ -7556,7 +7577,7 @@ mod tests {
             .expect("four-digit part")
             .id
             .clone();
-        let mut spike = Spike::default();
+        let mut spike = Spike::with_blink();
         spike.parts = parts;
         spike.wires = wires;
         for digit in 0..4u8 {

@@ -119,9 +119,19 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// The Blink example, read from the preset file, with the sketch it carries.
+#[cfg(test)]
+pub fn load_blink_document() -> (Vec<Part>, Vec<Wire>, String) {
+    load_diagram_file(&root().join("presets/blink.json"))
+}
+
+/// The Blink example's parts and wires.
+///
+/// A test fixture now: the app opens on a blank canvas, but the tests want a
+/// small circuit whose parts and pins they already know.
+#[cfg(test)]
 pub fn load_blink() -> (Vec<Part>, Vec<Wire>) {
-    let path = root().join("presets/blink.json");
-    let (parts, wires, _) = load_diagram_file(&path);
+    let (parts, wires, _) = load_blink_document();
     (parts, wires)
 }
 
@@ -550,18 +560,6 @@ pub fn joystick_svg(svg: &str) -> String {
         "",
     );
     out
-}
-
-/// The sketch text from the Blink preset.
-pub fn blink_sketch() -> String {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let Ok(text) = fs::read_to_string(root.join("presets/blink.json")) else {
-        return String::new();
-    };
-    parse_diagram(&text, &CATALOGUE)
-        .ok()
-        .and_then(|diagram| diagram.sketch)
-        .unwrap_or_default()
 }
 
 /// Create a new instance of a catalogue part for the palette.
