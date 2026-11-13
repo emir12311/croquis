@@ -143,6 +143,13 @@ pub fn row(ui: &mut egui::Ui, part: &mut Part, texts: &Texts, editable: bool) ->
     ui.spacing_mut().slider_width = 92.0;
     ui.spacing_mut().item_spacing.x = 6.0;
     ui.spacing_mut().interact_size.y = ROW_HEIGHT;
+    // A dropdown draws its label plus `button_padding` on top of `interact_size`,
+    // so it comes out a couple of pixels taller than a box that was sized to the
+    // row — and in a centred row that reads as a skew. Deriving the padding from
+    // the row height and the text height is what actually puts them on one line.
+    let body = egui::TextStyle::Body.resolve(ui.style()).size;
+    let text_height = ui.fonts_mut(|fonts| fonts.row_height(&egui::FontId::proportional(body)));
+    ui.spacing_mut().button_padding.y = ((ROW_HEIGHT - text_height) / 2.0).max(0.0);
     // The name reads as text, not as muted chrome: labels inherit the
     // non-interactive foreground, which here is the muted colour.
     ui.label(
