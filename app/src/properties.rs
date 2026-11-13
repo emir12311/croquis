@@ -123,6 +123,13 @@ pub fn field_commit(part: &mut Part, field: &PartField, value: EditorValue) -> b
 /// One row, always present, so the canvas does not jump when the selection
 /// changes. Fields sit inline: v0.2's `.props` is a single flex row.
 pub fn row(ui: &mut egui::Ui, part: &mut Part, texts: &Texts, editable: bool) -> bool {
+    /// One height for every control in the strip.
+    ///
+    /// Each widget otherwise sizes itself: a drag box, a slider and a dropdown all
+    /// default differently, and in a centred row that reads as a skewed line. The
+    /// number beside a unit dropdown is where it showed worst.
+    const ROW_HEIGHT: f32 = 20.0;
+
     if !editable {
         // While the circuit runs the strip still names the part and shows what it
         // is set to, but a change here would edit the circuit underneath the
@@ -135,6 +142,7 @@ pub fn row(ui: &mut egui::Ui, part: &mut Part, texts: &Texts, editable: bool) ->
     let mut changed = false;
     ui.spacing_mut().slider_width = 92.0;
     ui.spacing_mut().item_spacing.x = 6.0;
+    ui.spacing_mut().interact_size.y = ROW_HEIGHT;
     // The name reads as text, not as muted chrome: labels inherit the
     // non-interactive foreground, which here is the muted colour.
     ui.label(
@@ -189,7 +197,9 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField, texts: &Texts) ->
             let drag = DragValue::new(&mut number)
                 .speed(speed)
                 .range(min / factor..=max / factor);
-            let typed = ui.add_sized([70.0, 18.0], drag).changed();
+            let typed = ui
+                .add_sized([70.0, ui.spacing().interact_size.y], drag)
+                .changed();
             let mut unit_changed = false;
             ComboBox::from_id_salt(format!("unit-{}-{}", part.id, field.name))
                 .width(64.0)
