@@ -3724,8 +3724,13 @@ impl eframe::App for Spike {
             let pointer = response.hover_pos();
             let world_pointer = pointer.map(|p| self.camera.screen_to_world(rect, p));
             // The highlight follows the same order a click does: a pin under a
-            // wire, or under another part, is not what the pointer is on.
-            self.hovered_pin = pointer.and_then(|p| {
+            // wire, or under another part, is not what the pointer is on. The
+            // pointer also has to be on this layer: a dropdown's popup floats above
+            // the canvas, and a pin highlighted behind it would let a wire start
+            // through the popup.
+            self.hovered_pin = pointer
+                .filter(|p| ctx.layer_id_at(*p).is_none_or(|layer| layer == response.layer_id))
+                .and_then(|p| {
                 match pick_at(
                     &self.parts,
                     &self.wires,
@@ -3767,7 +3772,15 @@ impl eframe::App for Spike {
             let shift = ctx.input(|input| input.modifiers.shift);
             if pressed_now {
                 if let Some(pos) = ctx.input(|input| input.pointer.interact_pos()) {
-                    if rect.contains(pos) {
+                    // A press belongs to the canvas only if the pointer is on the
+                    // canvas's own layer. A dropdown's popup floats above it, so raw
+                    // input would otherwise read a click on its items as a click on
+                    // empty canvas — which clears the selection whose value is being
+                    // edited, and the strip closes under the pointer mid-change.
+                    let ours = ctx
+                        .layer_id_at(pos)
+                        .is_none_or(|layer| layer == response.layer_id);
+                    if rect.contains(pos) && ours {
                         let world = self.camera.screen_to_world(rect, pos);
                         let pick = pick_at(
                             &self.parts,
