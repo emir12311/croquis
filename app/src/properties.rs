@@ -8,10 +8,37 @@
 //! the diagram file.
 
 use eframe::egui::{self, ComboBox, DragValue, Slider};
-use croquis_core::catalogue::{parse_kind, part_by_kind, FieldControl, PartField};
+use croquis_core::catalogue::{
+    parse_kind, part_by_kind, FieldControl, PartField, ResistanceUnit,
+};
 
 use crate::locales::Texts;
 use crate::scene::Part;
+
+/// Split ohms into a number and the unit that reads best for it.
+///
+/// The largest unit that does not push the number below 1, so 10 000 Ω reads as
+/// `10 kΩ` and 0.5 Ω as `500 mΩ` rather than `0.5 Ω`. A value that is zero, unset
+/// or not a number keeps the plain ohm unit instead of falling to pΩ.
+fn split_resistance(ohms: f64, units: &[ResistanceUnit]) -> (f64, usize) {
+    let plain = units
+        .iter()
+        .position(|unit| unit.factor == 1.0)
+        .unwrap_or(0);
+    if !ohms.is_finite() || ohms <= 0.0 {
+        return (ohms, plain);
+    }
+    let mut best: Option<usize> = None;
+    for (index, unit) in units.iter().enumerate() {
+        if unit.factor <= ohms && best.is_none_or(|best| unit.factor > units[best].factor) {
+            best = Some(index);
+        }
+    }
+    match best {
+        Some(index) => (ohms / units[index].factor, index),
+        None => (ohms, plain),
+    }
+}
 
 
 /// What an editor currently shows for a field.
@@ -144,20 +171,42 @@ fn edit(ui: &mut egui::Ui, part: &mut Part, field: &PartField, texts: &Texts) ->
             }
             false
         }
-        FieldControl::Resistance { min, max, .. } => {
-            let EditorValue::Number(mut number) = field_editor(part, field) else {
+        FieldControl::Resistance { units, min, max } => {
+            let EditorValue::Number(ohms) = field_editor(part, field) else {
                 return false;
             };
             ui.label(texts.t(field.label_key));
-            // A resistance spans twelve decades, so a slider is useless: type it,
-            // and let the drag speed grow with the value.
-            let speed = number.max(1.0) / 50.0;
+            // A number and its unit, as v0.2 has it: 10 kΩ reads as `10` beside a
+            // `kΩ`, not as `10000 Ω`. The unit is chosen to keep the number near 1
+            // and up, and changing it re-reads the value in the new unit — that is
+            // the whole point of a unit selector.
+            //
+            // The parted value is recomputed from ohms every frame rather than
+            // remembered, so the box and the dropdown cannot drift apart.
+            let (mut number, mut unit_index) = split_resistance(ohms, &units);
+            let factor = units[unit_index].factor;
+            let speed = if number.abs() < 10.0 { 0.1 } else { 1.0 };
             let drag = DragValue::new(&mut number)
-                .range(min..=max)
                 .speed(speed)
-                .suffix(" Ω");
-            if ui.add_sized([140.0, 18.0], drag).changed() {
-                return field_commit(part, field, EditorValue::Number(number));
+                .range(min / factor..=max / factor);
+            let typed = ui.add_sized([70.0, 18.0], drag).changed();
+            let mut unit_changed = false;
+            ComboBox::from_id_salt(format!("unit-{}-{}", part.id, field.name))
+                .width(64.0)
+                .selected_text(units[unit_index].label)
+                .show_ui(ui, |ui| {
+                    for (index, unit) in units.iter().enumerate() {
+                        if ui
+                            .selectable_value(&mut unit_index, index, unit.label)
+                            .clicked()
+                        {
+                            unit_changed = true;
+                        }
+                    }
+                });
+            if typed || unit_changed {
+                let ohms = number * units[unit_index].factor;
+                return field_commit(part, field, EditorValue::Number(ohms));
             }
             false
         }
@@ -260,6 +309,23 @@ mod tests {
             EditorValue::Text("blue".into())
         ));
         assert_eq!(led.attrs["color"], "blue");
+    }
+
+    #[test]
+    fn a_resistance_picks_the_unit_that_reads_best() {
+        use croquis_core::catalogue::RESISTANCE_UNITS;
+
+        let (number, index) = split_resistance(10_000.0, RESISTANCE_UNITS);
+        assert_eq!(number, 10.0, "10 kΩ reads as 10, not 10000");
+        assert_eq!(RESISTANCE_UNITS[index].label, "kΩ");
+
+        let (number, index) = split_resistance(220.0, RESISTANCE_UNITS);
+        assert_eq!(number, 220.0);
+        assert_eq!(RESISTANCE_UNITS[index].label, "Ω");
+
+        let (number, index) = split_resistance(0.5, RESISTANCE_UNITS);
+        assert_eq!(number, 500.0, "half an ohm reads as 500 mΩ");
+        assert_eq!(RESISTANCE_UNITS[index].label, "mΩ");
     }
 
     #[test]

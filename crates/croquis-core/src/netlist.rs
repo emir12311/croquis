@@ -23,6 +23,14 @@ const LED_STEPS: f64 = 31.0;
 const BREADBOARD_PITCH: f64 = 67.0 / 7.0;
 const HOLE_REACH: f64 = BREADBOARD_PITCH * 0.45;
 
+/// How close two pins of *different* parts must be to count as touching.
+///
+/// Dragging a part snaps its pin onto a pin it comes close to, and two pins on the
+/// same spot are one node — the same promise the hole rule above makes for a
+/// breadboard. Without this the snap was cosmetic and a circuit built that way
+/// could not run.
+const PIN_CONTACT: f64 = 0.5;
+
 const UNO_DIGITAL: &[(&str, &str, u8)] = &[
     ("0", "D", 0),
     ("1", "D", 1),
@@ -546,6 +554,53 @@ pub fn evaluate_circuit_with_keypad(
 }
 
 /// Like [`evaluate_circuit_with_keypad`], with prior shift-register state.
+/// Contact between pins of different parts, expressed as wires.
+///
+/// Dragging a part snaps its pin onto a pin it comes close to, and two pins on the
+/// same spot are one node. The netlist reads connectivity from the wire list — both
+/// the net union and the rail resolution — so contact has to appear there. Breadboards
+/// are excluded: their hole grid is its own rule (`HOLE_REACH`), and the holes sit
+/// close enough together that this one would weld neighbouring strips.
+fn contact_wires(parts: &[EvalPart]) -> Vec<EvalWire> {
+    let mut out = Vec::new();
+    let contact_sq = PIN_CONTACT * PIN_CONTACT;
+    for (index, part) in parts.iter().enumerate() {
+        if is_breadboard(part.kind) || part.pins.is_empty() {
+            continue;
+        }
+        for pin in &part.pins {
+            for other in parts.iter().skip(index + 1) {
+                if is_breadboard(other.kind) {
+                    continue;
+                }
+                for other_pin in &other.pins {
+                    let dx = other_pin.x - pin.x;
+                    if dx.abs() > PIN_CONTACT {
+                        continue;
+                    }
+                    let dy = other_pin.y - pin.y;
+                    if dy.abs() > PIN_CONTACT {
+                        continue;
+                    }
+                    if dx * dx + dy * dy <= contact_sq {
+                        out.push(EvalWire {
+                            a: PinRef {
+                                instance_id: part.id.clone(),
+                                pin: pin.name.clone(),
+                            },
+                            b: PinRef {
+                                instance_id: other.id.clone(),
+                                pin: other_pin.name.clone(),
+                            },
+                        });
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 pub fn evaluate_circuit_with_state(
     parts: &[EvalPart],
     wires: &[EvalWire],
@@ -559,6 +614,16 @@ pub fn evaluate_circuit_with_state(
     // `tone(pin, 440)` sounds at 440 rather than at one fixed note.
     pin_frequency: &HashMap<String, f64>,
 ) -> CircuitEval {
+    // Pins on the same spot conduct, so contact becomes a wire. Everything below
+    // reads connectivity from this list — the net union *and* the rail resolution —
+    // which is why it cannot be unioned separately: without the wire, `collect_rails`
+    // never learns which pin is on which rail and a wireless circuit stays dark.
+    let contact = contact_wires(parts);
+    let mut all_wires: Vec<EvalWire> = Vec::with_capacity(wires.len() + contact.len());
+    all_wires.extend(wires.iter().cloned());
+    all_wires.extend(contact);
+    let wires: &[EvalWire] = &all_wires;
+
     let mut uf = UnionFind::new();
     let key = |reference: &PinRef| {
         let kind = parts
@@ -1479,6 +1544,36 @@ mod tests {
 
     fn wire(a: PinRef, b: PinRef) -> EvalWire {
         EvalWire { a, b }
+    }
+
+    fn pin(name: &str, x: f64, y: f64) -> PinPoint {
+        PinPoint {
+            name: name.into(),
+            x,
+            y,
+        }
+    }
+
+    #[test]
+    fn touching_pins_conduct_without_a_wire() {
+        // Laid so the pins sit on top of each other, with no wire drawn at all.
+        // Dragging a part snaps its pin onto a pin it comes close to, so the snap
+        // has to mean what it looks like: resistor on D13, LED anode on the
+        // resistor, LED cathode on GND.
+        let mut uno = uno();
+        uno.pins = vec![pin("13", 0.0, 0.0), pin("GND.2", 0.0, 20.0)];
+        let mut r = resistor("220");
+        r.pins = vec![pin("1", 0.0, 0.0), pin("2", 10.0, 10.0)];
+        let mut led = led("red");
+        led.pins = vec![pin("A", 10.0, 10.0), pin("C", 0.0, 20.0)];
+
+        let avr = HashMap::from([("B5".to_string(), true)]);
+        let out = evaluate_circuit(&[uno, r, led], &[], &HashMap::new(), &avr, &HashMap::new());
+        assert_eq!(
+            out.leds["led"],
+            LedState::Lit,
+            "contact alone has to complete the circuit"
+        );
     }
 
     fn run(parts: &[EvalPart], wires: &[EvalWire], avr: &[(&str, bool)]) -> CircuitEval {
