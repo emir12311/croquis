@@ -1934,7 +1934,12 @@ fn ensure_textures(
             } else if part.kind == "seven-segment" || part.kind == "seven-segment-4" {
                 part.svg.clone()
             } else {
-                part.svg.clone()
+                // Anything without a stateful branch of its own still gets its
+                // resting art, which is where a value-dependent drawing lives — a
+                // resistor's bands are painted there. This used to be
+                // `part.svg.clone()`, which is why setting 10 kΩ changed the
+                // palette thumbnail and nothing on the canvas.
+                scene::resting_svg(part)
             };
             let width = (part.size.x * 3.0).max(1.0) as u32;
             let height = (part.size.y * 3.0).max(1.0) as u32;
@@ -6106,6 +6111,27 @@ mod tests {
         let ten_k = scene::resistor_svg(&svg, scene::resistor_bands(10_000.0));
         assert_ne!(ten_k, svg, "10 kΩ has to look different");
         assert_eq!(ten_k.matches("#FF7F00").count(), 1, "one orange band");
+    }
+
+    #[test]
+    fn a_resistor_drawn_on_the_canvas_carries_its_bands() {
+        // The canvas does not use the asset directly: ensure_textures picks the art
+        // per kind and falls back to the resting drawing, which is what this checks.
+        // The bug was that the fallback was the raw asset, so the canvas kept the
+        // 220 Ω drawing while the palette thumbnail updated.
+        let mut part = scene::part_from_kind(
+            croquis_core::catalogue::PartKind::Resistor,
+            Pos2::ZERO,
+            "r1".to_string(),
+        )
+        .expect("the catalogue knows the resistor");
+        part.attrs.insert("value".into(), "10000".into());
+
+        let svg = scene::resting_svg(&part);
+        assert!(
+            svg.contains("#FF7F00"),
+            "10 kΩ has an orange multiplier band"
+        );
     }
 
     #[test]
