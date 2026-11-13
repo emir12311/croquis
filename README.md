@@ -1,116 +1,78 @@
 <div align="center">
 
-[![GitHub Stars](https://img.shields.io/github/stars/emir12311/croquis?style=for-the-badge)](https://github.com/emir12311/croquis/stargazers)
-[![GitHub Issues](https://img.shields.io/github/issues/emir12311/croquis?style=for-the-badge)](https://github.com/emir12311/croquis/issues)
-[![License](https://img.shields.io/badge/license-AGPL%20v3-blue?style=for-the-badge)](https://www.gnu.org/licenses/agpl-3.0.html)
+<img src="croquis-logo.png" alt="Croquis" width="160">
 
-<br>
+# Croquis
 
-<img src="croquis-logo.png" alt="Croquis logo" width="180">
+**Draw an Arduino circuit, wire it to the Uno, and run a real AVR program — offline, on your own machine.**
 
-<br>
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](LICENSE)
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
+[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey?style=flat-square&logo=linux&logoColor=white)](#install)
+[![Latest release](https://img.shields.io/github/v/release/emir12311/croquis?style=flat-square)](https://github.com/emir12311/croquis/releases/latest)
+[![Stars](https://img.shields.io/github/stars/emir12311/croquis?style=flat-square)](https://github.com/emir12311/croquis/stargazers)
 
-<h1>Croquis</h1>
-
-<p>A circuit simulator, running entirely on your own machine.</p>
+<img src="croquis-screenshot.png" alt="Croquis with a Blink circuit on the canvas" width="880">
 
 </div>
 
-<img src="croquis-screenshot.png" alt="Croquis with a blink circuit on the canvas">
+Croquis is a desktop simulator for Arduino circuits. Drag components onto a canvas, wire them up, write a sketch, press **Run**. The sketch is compiled to a real AVR program and executed instruction by instruction on `simavr`; the circuit around it is solved from your wires, so an LED with the right resistor lights at its simulated current — and one without a resistor is reported instead of lit.
 
-## What is Croquis?
+**No server. No account. No telemetry. No network calls.** Everything — the compiler, the chip, the parts, the libraries — ships inside the app.
 
-A desktop app for building and running Arduino circuits without an Arduino.
+> **Written by AI, directed by a human.** The code, tests and docs are generated; the scope, the taste and the bug reports are mine. This release is a rewrite in Rust and egui of the Tauri app that came before it.
 
-You drag components onto a canvas, wire them up, write a sketch and press Run. The sketch is compiled locally with `avr-gcc` and executed on a simulated AVR chip.
+## Contents
 
-There are twenty-four circuits to start from — **Blink**, **Button**, **Potentiometer**, **Photoresistor**, **Thermometer**, **Slide potentiometer**, **RGB LED**, **Joystick**, **Digital sensors**, **Gas sensor**, **DHT22**, **Keypad**, **IR remote**, **Ultrasonic**, **Seven segment**, **Four digit**, **LED bar**, **Servo**, **Stepper**, **Shift register**, **LCD 1602**, **Buzzer & relay**, **Button + serial** and **Fade** — under File → Presets.
+[What it does](#what-it-does) · [Circuits](#twenty-four-circuits-to-start-from) · [Install](#install) · [Controls](#controls) · [How it works](#how-it-works) · [Under the hood](#under-the-hood) · [Limits](#what-it-doesnt-do-yet) · [Releases](#releases) · [Docs](#docs)
 
-| Feature | What it does |
+## What it does
+
+| Category | Details |
 | --- | --- |
-| **Parts** | Uno, LED and RGB LED, resistor, pushbutton, rotary and slide potentiometers, photoresistor, NTC temperature sensor, analog joystick, tilt switch, PIR, flame, gas and sound sensors, DHT22, HC-SR04, 4×4 keypad, IR receiver and remote, 74HC595, servo, stepper, LCD1602, buzzer, relay, 7-segment and 4-digit displays, LED bar; half and full breadboards |
-| **Canvas** | Drag, rotate, snap; orthogonal wiring; multi-select; undo/redo; copy/paste |
-| **Simulation** | `avr-gcc` + `simavr`; LEDs and RGB LEDs at simulated current and PWM brightness, live buttons, analogue sensors (a divider, a LDR module with a thresholded output, an NTC, a two-axis joystick), digital sensors (tilt, PIR, flame, gas and sound), DHT22/HC-SR04/keypad/stepper/IR/74HC595 models, offline Servo and LiquidCrystal libraries, buzzer audio, relay contacts, 7-segment (1/4-digit) and LED-bar outputs, modelled bounce |
-| **Editor** | CodeMirror + Arduino API completions; serial monitor docked beside the circuit |
-| **Files** | Wokwi's `diagram.json` import and export, sketch included |
+| **Parts** | Arduino Uno, LEDs (including RGB), resistor, pushbutton, rotary and slide potentiometers, photoresistor, NTC temperature sensor, analog joystick, tilt / PIR / flame / gas / sound sensors, DHT22, HC-SR04, 4×4 keypad, IR receiver and remote, 74HC595, servo, stepper, LCD1602, buzzer, relay, 7-segment and 4-digit displays, LED bar — plus half and full breadboards |
+| **Canvas** | Drag, rotate, and drop into breadboard holes; orthogonal wiring with draggable corners and re-pluggable ends; marquee select; undo/redo; copy, cut, paste and duplicate — parts and the wiring between them |
+| **Simulation** | `avr-gcc` compiles, `simavr` runs. LEDs follow simulated current and PWM duty; buttons, joysticks and sensor modules drive the pins; DHT22, HC-SR04, keypad, stepper, IR and 74HC595 have protocol models; buzzer audio; relay contacts; a switch's bounce is modelled and optional |
+| **Editor** | Completion from the Arduino API, auto-indent, wrapping, and the compiler's diagnostics listed with their line. A serial monitor that both prints and sends |
+| **Files** | Wokwi's `diagram.json`, in both directions, sketch included. A circuit does not creep when it is opened and saved again |
+| **Extras** | English and Turkish, a light and a dark theme, and a question before anything unsaved is thrown away |
 
-Written by AI, directed by me: the code, tests and docs are generated, the scope and the bug reports are mine.
+## Twenty-four circuits to start from
 
-## Why is Croquis?
+**File → Presets → Basics / Sensors / Outputs** — each one a real `diagram.json` with its sketch, so you can press Run before writing anything.
 
-I was frustrated by a gap in the industry: a circuit simulator that was local, offline, free and polished just didn't exist.
+<details>
+<summary><b>Show the list</b></summary>
 
-That's why I made Croquis. No server, no account, no telemetry, no network calls.
+<br>
 
-## How is Croquis?
+| Group | Circuits |
+| --- | --- |
+| **Basics** | Blink · Button · Button + serial · Fade |
+| **Sensors** | Potentiometer · Slide potentiometer · Photoresistor · Thermometer · DHT22 · Digital sensors · Gas sensor · Joystick · Keypad · IR remote · Ultrasonic |
+| **Outputs** | RGB LED · Seven segment · Four digit · LED bar · Servo · Stepper · Shift register · LCD 1602 · Buzzer & relay |
 
-The sketch isn't interpreted. It's compiled to a real AVR program and run instruction by instruction, paced to real time.
+</details>
 
-See the [How It Works](#how-it-works) section for the diagram.
+## Install
 
-## When is Croquis?
+Every package carries the AVR toolchain and the bundled Arduino libraries, so a sketch compiles on a machine that has never had `avr-gcc` installed. All four are on the [Releases](https://github.com/emir12311/croquis/releases/latest) page.
 
-| Release | Date | Since the previous |
-| --- | --- | --- |
-| v0.1 | 2026-10-18 | — |
-| v0.1.1 | 2026-10-18 | same day |
-| v0.1.2 | 2026-10-18 | same day |
-| v0.1.3 | 2026-10-20 | 2 days |
-| v0.2.0 | 2026-10-23 | 3 days |
-| v0.3.0 | 2026-11-11 07:05 | 19 days |
+| Format | Command |
+| --- | --- |
+| **AppImage** — recommended | `chmod +x croquis-*.AppImage && ./croquis-*.AppImage` |
+| **.deb** — Debian, Ubuntu, Mint | `sudo apt install ./croquis_*.deb` |
+| **.rpm** — Fedora, openSUSE | `sudo dnf install ./croquis-*.rpm` |
+| **Arch package** — Arch, Artix, Endeavour | `sudo pacman -U croquis-*.pkg.tar.zst` |
 
-Dates are those of the tagged commit, and v0.3.0's time is when its tag was made. It is the same
-circuit editor, rewritten in Rust with egui.
+One file and no root with the AppImage; every other format installs the app, its icon and the menu entry together, and removes with `apt remove croquis`, `dnf remove croquis` or `pacman -R croquis`.
 
-## Installation
+<details>
+<summary><b>Build from source</b></summary>
 
-Every package is self-contained: it carries the AVR toolchain and the bundled Arduino libraries, so a
-sketch compiles on a machine that has never had `avr-gcc` installed.
+<br>
 
-### AppImage — recommended
-
-Download `croquis-<version>-x86_64.AppImage` from
-[Releases](https://github.com/emir12311/croquis/releases/latest), then:
-
-```bash
-chmod +x croquis-*.AppImage
-./croquis-*.AppImage
-```
-
-One file, nothing to install, no root, works on any distribution. Delete it and nothing is left behind.
-
-### Debian, Ubuntu, Mint and anything else on apt
-
-From the same [Releases](https://github.com/emir12311/croquis/releases/latest) page:
-
-```bash
-sudo apt install ./croquis_*.deb
-```
-
-Installs the app, its icon and the menu entry together. `sudo apt remove croquis` removes all of it.
-
-### Fedora, openSUSE and anything else on rpm
-
-```bash
-sudo dnf install ./croquis-*.rpm   # or: sudo zypper install ./croquis-*.rpm
-```
-
-### Arch, Artix, Endeavour
-
-```bash
-sudo pacman -U croquis-*.pkg.tar.zst
-```
-
-A prebuilt package: nothing is compiled, and the toolchain comes with it. `sudo pacman -R croquis`
-removes it.
-
-### From source
-
-Requirements:
-
-* A **glibc** Linux — desktop is the only target so far
-* [Rust](https://rustup.rs) and a C toolchain
-* ALSA, and the usual X11/Wayland/GL development headers (`alsa-lib`, `libxkbcommon`, `libglvnd` on Arch)
+Requirements: a glibc Linux, [Rust](https://rustup.rs) with a C toolchain, and ALSA plus the usual X11/Wayland/GL development headers (`alsa-lib`, `libxkbcommon`, `libglvnd` on Arch).
 
 ```bash
 git clone https://github.com/emir12311/croquis
@@ -119,14 +81,11 @@ cd croquis
 cargo run --release --manifest-path app/Cargo.toml
 ```
 
-`./scripts/package.sh all` builds the four packages above: it stages one payload and wraps it as a
-.deb, an .rpm, an AppImage and an Arch package, so they cannot disagree about what is inside.
+`./scripts/package.sh all` builds the four packages above from one staged payload, so they cannot disagree about what is inside.
 
-## Usage
+</details>
 
-Write a sketch, place parts, wire them up, and press **Run** in the top right of the circuit bar. While a sketch runs the circuit is frozen — **Stop** lets you rewire, and **Run** again applies an edited sketch.
-
-Compiler errors appear in the serial panel with their line number. While a sketch runs, the serial monitor's input row sends text to `Serial.read()` — with an optional trailing newline. Closing the window with unsaved changes asks before discarding them.
+## Controls
 
 | Input | Does |
 | --- | --- |
@@ -148,7 +107,9 @@ Compiler errors appear in the serial panel with their line number. While a sketc
 | `Delete` · `Backspace` | Delete the selection |
 | `Esc` | Cancel a wire, or clear the selection |
 
-## How It Works
+## How it works
+
+The sketch is not interpreted. It is compiled and then run, one instruction at a time, paced to real time:
 
 ```text
 Your sketch
@@ -175,20 +136,53 @@ Your sketch
     held as a voltage, so analogRead(A0) re-reads it every loop
 ```
 
-That's basically it.
+## Under the hood
+
+| Category | Details |
+| --- | --- |
+| **Shell** | Rust and [egui](https://github.com/emilk/egui) — immediate mode, drawn by the app itself. There is no webview, no browser and no JavaScript in the loop |
+| **Engine** | `crates/croquis-sim` compiles sketches and bridges [simavr](https://github.com/buserror/simavr); `crates/croquis-core` holds the netlist, the orthogonal router and the `diagram.json` format |
+| **Part art** | The [Wokwi](https://github.com/wokwi/wokwi-elements) element SVGs, rasterised once into textures with [resvg](https://github.com/linebender/resvg) |
+| **Editor** | [`egui_code_editor`](https://github.com/falcon7886/egui_code_editor) — completion, auto-indent and wrapping, on the shell's own colours |
+| **Tests** | 258 of them: 171 in the app, 62 in the core, 25 in the simulator. All 24 presets are compiled, simulated and checked against a frozen v0.2 baseline |
+| **Packaging** | One payload, four formats, built by `scripts/package.sh` — each package carries `usr/lib/croquis/{toolchain,libraries}` |
 
 ## What it doesn't do yet
 
-* **One board.** A second Uno gets its own circuit but shares the single sketch.
-* **A small electrical model, not a circuit solver.** A resistor does something real and a missing one is reported, and the potentiometer is a fixed divider between its rails. There are no arbitrary parallel networks.
-* **Wokwi files open with one caveat:** a wire using Wokwi's `*` route separator draws a different path here, to the same pins.
+- **One board.** A second Uno gets its own circuit but shares the single sketch.
+- **A small electrical model, not a circuit solver.** A resistor does something real and a missing one is reported, and the potentiometer is a fixed divider between its rails. There are no arbitrary parallel networks.
+- **Wokwi files open with one caveat:** a wire using Wokwi's `*` route separator draws a different path here, to the same pins.
+- **No jumping to a line.** The editor widget exposes no way to place a caret, so a compiler error names its line but a click cannot take you there.
+
+## Releases
+
+| Release | Date | Since the previous | Explanation |
+| --- | --- | --- | --- |
+| v0.1 | 2026-10-18 | — | First release |
+| v0.1.1 | 2026-10-18 | same day | Presets frame themselves on load; each compile gets its own build directory |
+| v0.1.2 | 2026-10-18 | same day | Snapping fixes — a part moves only when *every* leg lands in a hole |
+| v0.1.3 | 2026-10-20 | 2 days | A potentiometer you can turn while the sketch runs; compiler errors name their line |
+| v0.2.0 | 2026-10-23 | 3 days | The rest of the starter kit: DHT22, keypad, stepper, IR, 74HC595, HC-SR04, an offline Servo |
+| v0.3.0 | 2026-11-11 | 19 days | Rewritten in Rust and egui — no webview — and a language system: English and Turkish |
+| v0.3.1 | 2026-11-13 04:56 | 2 days | Touching pins conduct, a resistor reads and draws its value, and the Tauri app is gone |
+
+v0.3.0 is the same circuit editor rewritten in Rust with egui — [the notes](docs/releases/v0.3.0.md) say what changed.
+
+## Docs
+
+- [`docs/features.md`](docs/features.md) — everything it does, at length
+- [`docs/dev-notes.md`](docs/dev-notes.md) — the stack, and the gotchas that cost time
+- [`AGENTS.md`](AGENTS.md) — how to work on this repo
 
 ## License
 
 **GNU Affero General Public License v3.0.** See [`LICENSE`](LICENSE), and [`NOTICE`](NOTICE) for what is bundled.
 
-## Docs
+<div align="center">
+<br>
 
-- [`docs/features.md`](docs/features.md) — everything it does, at length
-- [`docs/dev-notes.md`](docs/dev-notes.md) — gotchas and the stack
-- [`AGENTS.md`](AGENTS.md) — how to work on this repo
+<img src="croquis-icon.png" alt="" width="48">
+
+<sub>No server, no account, no telemetry, no network calls.</sub>
+
+</div>
