@@ -705,6 +705,80 @@ pub fn slide_pot_svg(svg: &str) -> String {
 /// and the canvas's starting point before a state is layered on. These patches
 /// are the ones that are not state — the joystick's invisible hit-areas, the
 /// knobs the elements draw themselves.
+/// The four bands of a resistor, as SVG fills.
+///
+/// The asset draws a fixed 220 Ω — red, red, brown, gold — so a resistor changed in
+/// the properties strip looked like every other resistor. Two significant figures
+/// and a multiplier is the standard four-band code, and it is the one the drawing
+/// already encodes.
+pub fn resistor_bands(ohms: f64) -> [&'static str; 4] {
+    const DIGITS: [&str; 10] = [
+        "#000000", // 0 black
+        "#8F4814", // 1 brown
+        "#FB0000", // 2 red
+        "#FF7F00", // 3 orange
+        "#F1D863", // 4 yellow
+        "#00A000", // 5 green
+        "#0000FF", // 6 blue
+        "#9400D3", // 7 violet
+        "#808080", // 8 grey
+        "#FFFFFF", // 9 white
+    ];
+    // The tolerance band the element ships with, and the one most resistors carry.
+    const TOLERANCE: &str = "#F1D863";
+
+    let ohms = if ohms.is_finite() && ohms > 0.0 {
+        ohms
+    } else {
+        220.0
+    };
+    // Two significant figures: 220 -> 22 x 10^1, 4700 -> 47 x 10^2.
+    let exponent = ohms.log10().floor() as i32;
+    let mantissa = (ohms / 10f64.powi(exponent - 1)).round() as i32;
+    // A mantissa that rounded up to 100 needs one more power of ten.
+    let (mantissa, power) = if mantissa >= 100 {
+        (mantissa / 10, exponent)
+    } else {
+        (mantissa, exponent - 1)
+    };
+    let first = (mantissa / 10).clamp(0, 9) as usize;
+    let second = (mantissa % 10).clamp(0, 9) as usize;
+    let multiplier = power.clamp(0, 9) as usize;
+    [DIGITS[first], DIGITS[second], DIGITS[multiplier], TOLERANCE]
+}
+
+/// The resistor with the given band colours painted into the element's own drawing.
+///
+/// The three bands are separate elements with distinctive opening tags, so the fill
+/// is replaced in place: whatever the asset's current colours are, the new ones land
+/// on the same shapes. The tolerance band is left alone — it is not a digit.
+pub fn resistor_svg(svg: &str, bands: [&'static str; 4]) -> String {
+    let mut out = svg.to_string();
+    for (target, colour) in [
+        (
+            "<rect x=\"4\" y=\"0\" width=\"1\" height=\"3\" clip-path=\"url(#g)\" fill=\"",
+            bands[0],
+        ),
+        (
+            "<path d=\"m6 0.29411v2.4117h0.96v-2.4117z\" fill=\"",
+            bands[1],
+        ),
+        (
+            "<path d=\"m7.8 0.29411v2.4117h0.96v-2.4117z\" fill=\"",
+            bands[2],
+        ),
+    ] {
+        let Some(start) = out.find(target) else {
+            continue;
+        };
+        let value_start = start + target.len();
+        if let Some(length) = out[value_start..].find('"') {
+            out.replace_range(value_start..value_start + length, colour);
+        }
+    }
+    out
+}
+
 pub fn resting_svg(part: &Part) -> String {
     match part.kind.as_str() {
         "potentiometer" => potentiometer_svg(&part.svg),
@@ -712,6 +786,15 @@ pub fn resting_svg(part: &Part) -> String {
         "analog-joystick" => joystick_svg(&part.svg),
         // A resting button, not the element's stale pressed cap.
         "pushbutton" => pushbutton_svg(&part.svg, false),
+        // The bands are the value: a resistor set to 10 kΩ has to look like one.
+        "resistor" => {
+            let ohms = part
+                .attrs
+                .get("value")
+                .and_then(|value| value.parse::<f64>().ok())
+                .unwrap_or(220.0);
+            resistor_svg(&part.svg, resistor_bands(ohms))
+        }
         _ => part.svg.clone(),
     }
 }

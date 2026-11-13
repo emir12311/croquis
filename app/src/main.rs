@@ -1793,6 +1793,18 @@ fn texture_key(
         let down = pressed.get(&part.id).copied().unwrap_or(false);
         return format!("button:{down}");
     }
+    if part.kind == "resistor" {
+        // The bands are the whole difference, and they only change when one of the
+        // three digits does — so keying by the colours collapses a drag across a
+        // decade into a handful of textures rather than one per pixel of drag.
+        let ohms = part
+            .attrs
+            .get("value")
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(220.0);
+        let bands = scene::resistor_bands(ohms);
+        return format!("resistor:{}{}{}", bands[0], bands[1], bands[2]);
+    }
     if part.kind == "uno" {
         return format!("uno:{pin13}");
     }
@@ -6056,6 +6068,44 @@ mod tests {
             "after half a turn the cut should be at {}, not {lowest}",
             cy - chord
         );
+    }
+
+    #[test]
+    fn a_resistors_bands_are_its_value() {
+        // Red, red, brown is what the element ships with, because it is a 220 Ω.
+        assert_eq!(
+            scene::resistor_bands(220.0)[..3],
+            ["#FB0000", "#FB0000", "#8F4814"]
+        );
+        // Yellow, violet, red is 4k7.
+        assert_eq!(
+            scene::resistor_bands(4_700.0)[..3],
+            ["#F1D863", "#9400D3", "#FB0000"]
+        );
+        // Brown, black, orange is 10k.
+        assert_eq!(
+            scene::resistor_bands(10_000.0)[..3],
+            ["#8F4814", "#000000", "#FF7F00"]
+        );
+    }
+
+    #[test]
+    fn a_resistors_art_is_repainted_from_its_value() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/wokwi/resistor.svg");
+        let svg = std::fs::read_to_string(&path).expect("the resistor's art");
+
+        // The asset is drawn as 220 Ω, so asking for 220 Ω has to leave it untouched.
+        // That is what proves the patch finds the right three shapes rather than
+        // recolouring whatever it meets first.
+        assert_eq!(
+            scene::resistor_svg(&svg, scene::resistor_bands(220.0)),
+            svg,
+            "220 Ω is the drawing as shipped"
+        );
+
+        let ten_k = scene::resistor_svg(&svg, scene::resistor_bands(10_000.0));
+        assert_ne!(ten_k, svg, "10 kΩ has to look different");
+        assert_eq!(ten_k.matches("#FF7F00").count(), 1, "one orange band");
     }
 
     #[test]
